@@ -14,10 +14,10 @@ import { isRedirectOrReject } from "./errors";
 const createClinicSchema = z.object({
   name: z.string().min(2, "Le nom doit contenir au moins 2 caractères"),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug invalide (lettres minuscules, chiffres, tirets)"),
-  email: z.string().email().optional().or(z.literal("")),
-  phone: z.string().optional().or(z.literal("")),
-  address: z.string().optional().or(z.literal("")),
-  wilayaCode: z.string().optional().or(z.literal("")),
+  email: z.string().email().or(z.literal("")).nullable().optional(),
+  phone: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  wilayaCode: z.string().nullable().optional(),
 });
 
 export async function createClinic(formData: FormData) {
