@@ -1,0 +1,885 @@
+"use server";
+
+import { db } from "@/lib/db/db";
+import {
+  treatmentPlans,
+  treatmentPlanItems,
+  consultationNotes,
+  radiographs,
+  medicalHistoryEntries,
+} from "@/lib/db/schema";
+import { getCurrentClinicId } from "@/lib/multi-tenant";
+import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { storage } from "@/lib/storage";
+import { eq, and, asc, desc, sql, isNull } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { logAction } from "@/lib/audit";
+import { isRedirectOrReject } from "./errors";
+
+type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function getTreatmentPlans(patientId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    return await db
+      .select()
+      .from(treatmentPlans)
+      .where(
+        and(
+          eq(treatmentPlans.patientId, patientId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .orderBy(desc(treatmentPlans.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+export async function getTreatmentPlan(planId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    const [plan] = await db
+      .select()
+      .from(treatmentPlans)
+      .where(
+        and(
+          eq(treatmentPlans.id, planId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!plan) return null;
+
+    const items = await db
+      .select()
+      .from(treatmentPlanItems)
+      .where(eq(treatmentPlanItems.planId, planId))
+      .orderBy(asc(treatmentPlanItems.orderIndex));
+
+    return { ...plan, items };
+  } catch {
+    return null;
+  }
+}
+
+export async function recalculatePlanTotal(
+  planId: string,
+  tx?: DbOrTx,
+): Promise<number> {
+  const client = tx ?? db;
+
+  const [row] = await client
+    .select({
+      total: sql<number>`COALESCE(SUM(${treatmentPlanItems.fee} * ${treatmentPlanItems.quantity} - COALESCE(${treatmentPlanItems.discount}, 0)), 0)::float8`,
+    })
+    .from(treatmentPlanItems)
+    .where(eq(treatmentPlanItems.planId, planId));
+
+  const total = Number(row?.total ?? 0);
+
+  await client
+    .update(treatmentPlans)
+    .set({ totalAmount: total })
+    .where(eq(treatmentPlans.id, planId));
+
+  return total;
+}
+
+const treatmentPlanSchema = z.object({
+  title: z.string().min(1, "Titre requis"),
+  description: z.string().optional().default("").catch(""),
+  discount: z.coerce.number().min(0).optional(),
+});
+
+export async function createTreatmentPlan(
+  patientId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    const validated = treatmentPlanSchema.safeParse(Object.fromEntries(formData));
+    if (!validated.success) {
+      return { error: validated.error.flatten().fieldErrors };
+    }
+
+    const data = validated.data;
+
+    const [created] = await db.insert(treatmentPlans).values({
+      clinicId,
+      patientId,
+      title: data.title,
+      description: data.description || null,
+      totalAmount: 0,
+      discount: data.discount != null && data.discount >= 0 ? data.discount : null,
+    }).returning({ id: treatmentPlans.id });
+
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "treatment_plan",
+      entityId: created.id,
+      after: {
+        patientId,
+        title: data.title,
+        description: data.description || null,
+        totalAmount: 0,
+        discount: data.discount != null && data.discount >= 0 ? data.discount : null,
+      },
+    });
+
+    revalidatePath(`/patients/${patientId}`);
+    redirect(`/patients/${patientId}/treatment-plan`);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    return { error: { general: ["Erreur lors de la création du plan de traitement"] } };
+  }
+}
+
+const treatmentPlanItemSchema = z.object({
+  toothNumber: z.coerce.number().int().optional(),
+  surface: z.string().optional().default("").catch(""),
+  procedureCode: z.string().optional().default("").catch(""),
+  description: z.string().min(1, "Description requise"),
+  fee: z.coerce.number().min(0),
+  quantity: z.coerce.number().int().positive().default(1),
+  discount: z.coerce.number().min(0).default(0),
+  taxRate: z.coerce.number().int().default(0),
+});
+
+export async function addTreatmentPlanItem(
+  planId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const validated = treatmentPlanItemSchema.safeParse(
+    Object.fromEntries(formData),
+  );
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+
+  try {
+    const [plan] = await db
+      .select({ id: treatmentPlans.id, patientId: treatmentPlans.patientId })
+      .from(treatmentPlans)
+      .where(
+        and(
+          eq(treatmentPlans.id, planId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!plan) {
+      return { error: { general: ["Plan de traitement introuvable"] } };
+    }
+
+    let createdId: string | undefined;
+
+    await db.transaction(async (tx) => {
+      const [created] = await tx.insert(treatmentPlanItems).values({
+        planId,
+        toothNumber: data.toothNumber ?? null,
+        surface: data.surface || null,
+        procedureCode: data.procedureCode || null,
+        description: data.description,
+        fee: data.fee,
+        quantity: data.quantity,
+        discount: data.discount,
+        taxRate: data.taxRate,
+      }).returning({ id: treatmentPlanItems.id });
+
+      createdId = created?.id;
+
+      await recalculatePlanTotal(planId, tx);
+    });
+
+    if (createdId) {
+      await logAction({
+        clinicId,
+        action: "create",
+        entityType: "treatment_plan_item",
+        entityId: createdId,
+        after: { ...data, planId },
+      });
+    }
+
+    revalidatePath(`/patients/${plan.patientId}/treatment-plan/${planId}`);
+    revalidatePath(`/patients/${plan.patientId}`);
+    return { success: true };
+  } catch {
+    return { error: { general: ["Erreur lors de l'ajout de l'acte"] } };
+  }
+}
+
+export async function updateTreatmentPlanItem(
+  itemId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const validated = treatmentPlanItemSchema.safeParse(
+    Object.fromEntries(formData),
+  );
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+
+  try {
+    const [item] = await db
+      .select({
+        id: treatmentPlanItems.id,
+        planId: treatmentPlanItems.planId,
+        patientId: treatmentPlans.patientId,
+        toothNumber: treatmentPlanItems.toothNumber,
+        surface: treatmentPlanItems.surface,
+        procedureCode: treatmentPlanItems.procedureCode,
+        description: treatmentPlanItems.description,
+        fee: treatmentPlanItems.fee,
+        quantity: treatmentPlanItems.quantity,
+        discount: treatmentPlanItems.discount,
+        taxRate: treatmentPlanItems.taxRate,
+      })
+      .from(treatmentPlanItems)
+      .innerJoin(treatmentPlans, eq(treatmentPlanItems.planId, treatmentPlans.id))
+      .where(
+        and(
+          eq(treatmentPlanItems.id, itemId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!item) {
+      return { error: { general: ["Élément introuvable"] } };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(treatmentPlanItems)
+        .set({
+          toothNumber: data.toothNumber ?? null,
+          surface: data.surface || null,
+          procedureCode: data.procedureCode || null,
+          description: data.description,
+          fee: data.fee,
+          quantity: data.quantity,
+          discount: data.discount,
+          taxRate: data.taxRate,
+        })
+        .where(eq(treatmentPlanItems.id, itemId));
+
+      await recalculatePlanTotal(item.planId, tx);
+    });
+
+    await logAction({
+      clinicId,
+      action: "update",
+      entityType: "treatment_plan_item",
+      entityId: itemId,
+      before: {
+        toothNumber: item.toothNumber ?? null,
+        surface: item.surface ?? null,
+        procedureCode: item.procedureCode ?? null,
+        description: item.description,
+        fee: item.fee,
+        quantity: item.quantity,
+        discount: item.discount,
+        taxRate: item.taxRate,
+      },
+      after: { ...data, planId: item.planId },
+    });
+
+    revalidatePath(`/patients/${item.patientId}/treatment-plan/${item.planId}`);
+    revalidatePath(`/patients/${item.patientId}`);
+    return { success: true };
+  } catch {
+    return { error: { general: ["Erreur lors de la mise à jour de l'acte"] } };
+  }
+}
+
+export async function updateTreatmentPlanStatus(
+  planId: string,
+  status: string,
+): Promise<{ error?: string } | { success?: boolean }> {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const validStatuses = ["draft", "active", "completed", "cancelled"] as const;
+  if (!validStatuses.includes(status as typeof validStatuses[number])) {
+    return { error: "Statut invalide" };
+  }
+
+  const allowedTransitions: Record<string, string[]> = {
+    draft: ["active", "cancelled"],
+    active: ["completed", "cancelled"],
+    completed: [],
+    cancelled: [],
+  };
+
+  try {
+    const [plan] = await db
+      .select({
+        patientId: treatmentPlans.patientId,
+        status: treatmentPlans.status,
+      })
+      .from(treatmentPlans)
+      .where(
+        and(
+          eq(treatmentPlans.id, planId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!plan) {
+      return { error: "Plan de traitement introuvable" };
+    }
+
+    const next = status as typeof validStatuses[number];
+
+    if (next === plan.status) {
+      revalidatePath(`/patients/${plan.patientId}`);
+      return { success: true };
+    }
+
+    if (!(allowedTransitions[plan.status] ?? []).includes(next)) {
+      return { error: "Transition de statut non autorisée" };
+    }
+
+    if (next === "completed") {
+      const [countRow] = await db
+        .select({
+          count: sql<number>`COUNT(*)::int`,
+        })
+        .from(treatmentPlanItems)
+        .where(eq(treatmentPlanItems.planId, planId));
+
+      if ((countRow?.count ?? 0) === 0) {
+        return { error: "Impossible de terminer un plan sans acte" };
+      }
+    }
+
+    await db
+      .update(treatmentPlans)
+      .set({ status: next })
+      .where(
+        and(
+          eq(treatmentPlans.id, planId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      );
+
+    await logAction({
+      clinicId,
+      action: "status_change",
+      entityType: "treatment_plan",
+      entityId: planId,
+      before: { status: plan.status },
+      after: { status: next },
+    });
+
+    revalidatePath(`/patients/${plan.patientId}`);
+    return { success: true };
+  } catch {
+    return { error: "Erreur lors de la mise à jour du statut" };
+  }
+}
+
+export async function deleteTreatmentPlanItem(
+  itemId: string,
+): Promise<{ error?: string } | { success?: boolean }> {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    const [item] = await db
+      .select({
+        id: treatmentPlanItems.id,
+        planId: treatmentPlanItems.planId,
+        patientId: treatmentPlans.patientId,
+        description: treatmentPlanItems.description,
+        fee: treatmentPlanItems.fee,
+        quantity: treatmentPlanItems.quantity,
+        procedureCode: treatmentPlanItems.procedureCode,
+      })
+      .from(treatmentPlanItems)
+      .innerJoin(treatmentPlans, eq(treatmentPlanItems.planId, treatmentPlans.id))
+      .where(
+        and(
+          eq(treatmentPlanItems.id, itemId),
+          eq(treatmentPlans.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!item) {
+      return { error: "Élément introuvable" };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(treatmentPlanItems)
+        .where(eq(treatmentPlanItems.id, itemId));
+
+      await recalculatePlanTotal(item.planId, tx);
+    });
+
+    await logAction({
+      clinicId,
+      action: "delete",
+      entityType: "treatment_plan_item",
+      entityId: itemId,
+      before: {
+        description: item.description,
+        fee: item.fee,
+        quantity: item.quantity,
+        procedureCode: item.procedureCode ?? null,
+      },
+    });
+
+    revalidatePath(`/patients/${item.patientId}/treatment-plan/${item.planId}`);
+    revalidatePath(`/patients/${item.patientId}`);
+    return { success: true };
+  } catch {
+    return { error: "Erreur lors de la suppression" };
+  }
+}
+
+export async function getConsultationNotes(patientId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    return await db
+      .select()
+      .from(consultationNotes)
+      .where(
+        and(
+          eq(consultationNotes.patientId, patientId),
+          eq(consultationNotes.clinicId, clinicId),
+        ),
+      )
+      .orderBy(desc(consultationNotes.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+const consultationNoteSchema = z.object({
+  notes: z.string().min(1, "Notes requises"),
+  diagnosis: z.string().optional().default("").catch(""),
+  appointmentId: z.string().optional().default("").catch(""),
+});
+
+export async function createConsultationNote(
+  patientId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const validated = consultationNoteSchema.safeParse(
+    Object.fromEntries(formData),
+  );
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+
+  const [created] = await db.insert(consultationNotes).values({
+    clinicId,
+    patientId,
+    appointmentId: data.appointmentId || null,
+    diagnosis: data.diagnosis || null,
+    notes: data.notes,
+  }).returning({ id: consultationNotes.id });
+
+  await logAction({
+    clinicId,
+    action: "create",
+    entityType: "consultation_note",
+    entityId: created.id,
+    after: {
+      patientId,
+      appointmentId: data.appointmentId || null,
+      diagnosis: data.diagnosis || null,
+      notes: data.notes,
+    },
+  });
+
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function getRadiographs(patientId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    return await db
+      .select()
+      .from(radiographs)
+      .where(
+        and(
+          eq(radiographs.patientId, patientId),
+          eq(radiographs.clinicId, clinicId),
+          isNull(radiographs.deletedAt),
+        ),
+      )
+      .orderBy(desc(radiographs.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+const radiographSchema = z.object({
+  fileType: z.string().optional().default("").catch(""),
+  toothNumber: z.coerce.number().int().optional(),
+  region: z.string().optional().default("").catch(""),
+  notes: z.string().optional().default("").catch(""),
+  takenAt: z.string().optional().default("").catch(""),
+});
+
+export async function createRadiograph(
+  patientId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const validated = radiographSchema.safeParse(Object.fromEntries(formData));
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+  const file = formData.get("file") as File | null;
+
+  if (!file || file.size === 0) {
+    return { error: { file: ["Fichier requis"] } };
+  }
+
+  const key = `${clinicId}/radiograph-${crypto.randomUUID()}`;
+  let fileKey: string;
+
+  try {
+    fileKey = await storage.upload(file, key);
+  } catch (err) {
+    return { error: { file: [(err as Error).message || "Erreur lors de l'upload"] } };
+  }
+
+  const [created] = await db.insert(radiographs).values({
+    clinicId,
+    patientId,
+    fileKey,
+    fileType: data.fileType || null,
+    toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
+    region: data.region || null,
+    notes: data.notes || null,
+    takenAt: data.takenAt ? new Date(data.takenAt) : null,
+  }).returning({ id: radiographs.id });
+
+  await logAction({
+    clinicId,
+    action: "create",
+    entityType: "radiograph",
+    entityId: created.id,
+    after: {
+      patientId,
+      fileKey,
+      fileType: data.fileType || null,
+      toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
+      region: data.region || null,
+    },
+  });
+
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function deleteRadiograph(
+  radiographId: string,
+): Promise<{ error?: string } | { success?: boolean }> {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    const [radiograph] = await db
+      .select({
+        id: radiographs.id,
+        fileKey: radiographs.fileKey,
+        patientId: radiographs.patientId,
+        fileType: radiographs.fileType,
+        region: radiographs.region,
+      })
+      .from(radiographs)
+      .where(
+        and(
+          eq(radiographs.id, radiographId),
+          eq(radiographs.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!radiograph) {
+      return { error: "Radiographie introuvable" };
+    }
+
+    await storage.delete(radiograph.fileKey);
+
+    await db
+      .update(radiographs)
+      .set({ deletedAt: new Date() })
+      .where(eq(radiographs.id, radiographId));
+
+    await logAction({
+      clinicId,
+      action: "delete",
+      entityType: "radiograph",
+      entityId: radiographId,
+      before: {
+        fileKey: radiograph.fileKey,
+        fileType: radiograph.fileType ?? null,
+        region: radiograph.region ?? null,
+      },
+      after: { deletedAt: new Date().toISOString() },
+    });
+
+    revalidatePath(`/patients/${radiograph.patientId}`);
+    revalidatePath(`/patients/${radiograph.patientId}/radiographs`);
+    return { success: true };
+  } catch {
+    return { error: "Erreur lors de la suppression de la radiographie" };
+  }
+}
+
+export async function getMedicalHistory(patientId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    return await db
+      .select()
+      .from(medicalHistoryEntries)
+      .where(
+        and(
+          eq(medicalHistoryEntries.patientId, patientId),
+          eq(medicalHistoryEntries.clinicId, clinicId),
+        ),
+      )
+      .orderBy(desc(medicalHistoryEntries.createdAt));
+  } catch {
+    return [];
+  }
+}
+
+const medicalHistorySchema = z.object({
+  condition: z.string().min(1, "Condition requise"),
+  diagnosisDate: z.string().optional().default("").catch(""),
+  notes: z.string().optional().default("").catch(""),
+  isActive: z.boolean().optional().default(true),
+});
+
+export async function createMedicalHistoryEntry(
+  patientId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const raw: Record<string, unknown> = Object.fromEntries(formData);
+  raw.isActive = formData.has("isActive");
+
+  const validated = medicalHistorySchema.safeParse(raw);
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+
+  const [created] = await db.insert(medicalHistoryEntries).values({
+    clinicId,
+    patientId,
+    condition: data.condition,
+    diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
+    notes: data.notes || null,
+    isActive: data.isActive,
+  }).returning({ id: medicalHistoryEntries.id });
+
+  await logAction({
+    clinicId,
+    action: "create",
+    entityType: "medical_history_entry",
+    entityId: created.id,
+    after: {
+      patientId,
+      condition: data.condition,
+      diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate).toISOString() : null,
+      isActive: data.isActive,
+    },
+  });
+
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function updateMedicalHistoryEntry(
+  entryId: string,
+  prevState: { error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const raw: Record<string, unknown> = Object.fromEntries(formData);
+  raw.isActive = formData.has("isActive");
+
+  const validated = medicalHistorySchema.safeParse(raw);
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors };
+  }
+
+  const data = validated.data;
+
+  try {
+    const [entry] = await db
+      .select({
+        patientId: medicalHistoryEntries.patientId,
+        condition: medicalHistoryEntries.condition,
+        diagnosisDate: medicalHistoryEntries.diagnosisDate,
+        notes: medicalHistoryEntries.notes,
+        isActive: medicalHistoryEntries.isActive,
+      })
+      .from(medicalHistoryEntries)
+      .where(
+        and(
+          eq(medicalHistoryEntries.id, entryId),
+          eq(medicalHistoryEntries.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!entry) {
+      return { error: { general: ["Entrée introuvable"] } };
+    }
+
+    await db
+      .update(medicalHistoryEntries)
+      .set({
+        condition: data.condition,
+        diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
+        notes: data.notes || null,
+        isActive: data.isActive,
+      })
+      .where(eq(medicalHistoryEntries.id, entryId));
+
+    await logAction({
+      clinicId,
+      action: "update",
+      entityType: "medical_history_entry",
+      entityId: entryId,
+      before: {
+        condition: entry.condition,
+        diagnosisDate: entry.diagnosisDate ? entry.diagnosisDate.toISOString() : null,
+        notes: entry.notes ?? null,
+        isActive: entry.isActive,
+      },
+      after: {
+        condition: data.condition,
+        diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate).toISOString() : null,
+        notes: data.notes || null,
+        isActive: data.isActive,
+      },
+    });
+
+    revalidatePath(`/patients/${entry.patientId}`);
+  } catch {
+    return { error: { general: ["Erreur lors de la mise à jour"] } };
+  }
+}
+
+export async function deleteMedicalHistoryEntry(
+  entryId: string,
+): Promise<{ error?: string } | { success?: boolean }> {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    const [entry] = await db
+      .select({
+        patientId: medicalHistoryEntries.patientId,
+        condition: medicalHistoryEntries.condition,
+        isActive: medicalHistoryEntries.isActive,
+      })
+      .from(medicalHistoryEntries)
+      .where(
+        and(
+          eq(medicalHistoryEntries.id, entryId),
+          eq(medicalHistoryEntries.clinicId, clinicId),
+        ),
+      )
+      .limit(1);
+
+    if (!entry) {
+      return { error: "Entrée introuvable" };
+    }
+
+    await db
+      .delete(medicalHistoryEntries)
+      .where(eq(medicalHistoryEntries.id, entryId));
+
+    await logAction({
+      clinicId,
+      action: "delete",
+      entityType: "medical_history_entry",
+      entityId: entryId,
+      before: {
+        condition: entry.condition,
+        isActive: entry.isActive,
+      },
+    });
+
+    revalidatePath(`/patients/${entry.patientId}`);
+    return { success: true };
+  } catch {
+    return { error: "Erreur lors de la suppression" };
+  }
+}

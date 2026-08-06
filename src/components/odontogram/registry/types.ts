@@ -1,0 +1,71 @@
+/** Registry type definitions for the clinical-axis engine (SP2). Types only. */
+
+export type AxisKind = "enum" | "boolean" | "set" | "surfaceSet" | "restoration" | "derived" | "global";
+
+/** Context for filtering curated UI option lists (`uiOptions` / `optionsFor`). */
+export interface UiOptCtx { isMilktooth?: boolean }
+
+/** A coded concept: local code always present; SNOMED/ICD optional and additive. */
+export interface ConceptRef {
+  local: string;                 // LOCAL_SYSTEM code — always present, round-trip key
+  display: string;               // language-neutral English display
+  snomed?: string;               // SNOMED CT id (unused in SP2)
+  icd?: { system: string; code: string }[]; // system-agnostic (unused in SP2)
+}
+
+/** One allowed value of an axis. svgLayer/ui are added in later stages. */
+export interface AxisValue {
+  id: string;                    // engine value id (e.g. "metal", "caries-occlusal")
+  coding: ConceptRef;            // additive codings for this value
+  labelKey?: string;             // i18n key (added in the UI stage)
+  svgLayer?: string | string[];   // SVG layer id(s) this value toggles (render metadata)
+}
+
+/** Precomputed render context for flag activation (mirrors the render's derived booleans). */
+export interface FlagCtx {
+  isImplant: boolean; isMilktooth: boolean; underGum: boolean;
+  extraction: boolean; isNone: boolean; toothPresent: boolean;
+  fissureAllowed: boolean; contactAllowed: boolean; bruxismAllowed: boolean; extractionPlanAllowed: boolean;
+}
+
+/** One chartable tooth axis. Resolver fields are optional here (filled per stage). */
+export interface ClinicalAxis {
+  id: string;                    // axis id (e.g. "crownMaterial")
+  field: string;                 // ToothRecord field name this axis reads/writes
+  kind: AxisKind;
+  finding: ConceptRef;           // Observation.code concept (finding type)
+  valueGroup?: string;           // LOCAL_VALUE_MAPS group for enum/set/restoration values
+  values?: AxisValue[];          // allowed values (enum/set/surfaceSet/restoration)
+  skipValue?: string;            // value that emits nothing (enum/restoration)
+  surfacesField?: string;        // restoration axis: the ToothRecord field holding the surface list
+  flag?: string;                 // feature-flag gate (e.g. "icdasEnabled")
+  svgLayer?: string;                                    // boolean axis: the layer it toggles
+  appliesWhen?: (ctx: FlagCtx, state: ToothState) => boolean;  // boolean axis: gating predicate
+  uiOptions?: { value: string; labelKey: string; when?: (ctx: UiOptCtx) => boolean }[]; // curated UI option list (added incrementally per axis)
+}
+
+/** Per-tooth rendering context (static tables; populated in later stages). */
+export interface ToothContext {
+  fdi: number;
+  template: 11 | 13 | 14 | 16;
+  view: "front" | "occlusal";
+  isAnterior: boolean;
+  isMolar: boolean;
+  mirror: boolean;
+  rot: 0 | 180;
+  fissureAllowed: boolean;
+  milktoothAllowed: boolean;
+}
+
+/** Per-tooth state container consumed by axis predicates (`appliesWhen`) and
+ *  flag activation (`registry/svgActivate.ts`). Only the fields the registry
+ *  actually reads are typed; the index signature keeps access to every other
+ *  ToothRecord field (`state[ax.field]`) valid. */
+export interface ToothState {
+  toothSelection: string;
+  extractionWound: boolean;
+  restorationType: string;
+  toothSubstrate: string;
+  mods?: Iterable<string>;
+  [key: string]: unknown;
+}

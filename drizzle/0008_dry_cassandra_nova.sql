@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uq_waiting_room_active_patient_clinic" ON "waiting_room_entry" USING btree ("patient_id","clinic_id") WHERE status IN ('waiting', 'called', 'in_treatment');
