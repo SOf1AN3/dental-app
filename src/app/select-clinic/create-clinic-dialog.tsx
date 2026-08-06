@@ -10,8 +10,12 @@ export function CreateClinicDialog() {
     undefined
   );
 
-  const fieldErrors = state && 'error' in state && state.error && !('general' in state.error)
-    ? state.error as Record<string, string[] | undefined>
+  const stateError = state && 'error' in state ? state.error : undefined;
+  const generalError = stateError && 'general' in stateError
+    ? stateError.general?.[0]
+    : undefined;
+  const fieldErrors = stateError && !('general' in stateError)
+    ? stateError as Record<string, string[] | undefined>
     : {} as Record<string, string[] | undefined>;
 
   return (
@@ -40,6 +44,12 @@ export function CreateClinicDialog() {
             </div>
 
             <form action={action} className="space-y-4">
+              {generalError && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                  {generalError}
+                </div>
+              )}
+
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-cool-700">
                   Nom de la clinique *

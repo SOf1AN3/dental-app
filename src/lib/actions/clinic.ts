@@ -90,6 +90,7 @@ export async function createClinic(formData: FormData) {
     redirect("/");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
+    console.error("[createClinic] Erreur inattendue:", e);
     return { error: { general: ["Erreur lors de la création de la clinique"] } };
   }
 }
