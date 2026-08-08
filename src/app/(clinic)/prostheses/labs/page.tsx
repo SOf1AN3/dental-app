@@ -25,7 +25,7 @@ export default async function LabsPage() {
       </div>
 
       {labs.length === 0 ? (
-        <div className="rounded-xl border border-cool-200 bg-white px-6 py-12 text-center text-cool-400">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 px-6 py-12 text-center text-cool-400">
           <p className="text-lg mb-1">Aucun laboratoire</p>
           <p className="text-sm">
             Ajoutez un{" "}
@@ -41,7 +41,7 @@ export default async function LabsPage() {
             <Link
               key={lab.id}
               href={`/prostheses/labs/${lab.id}`}
-              className="rounded-xl border border-cool-200 bg-white p-6 hover:border-cerulean hover:shadow-sm transition-all"
+              className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 hover:border-cerulean hover:shadow-sm transition-all"
             >
               <h3 className="text-lg font-semibold text-cool-900">{lab.name}</h3>
               {lab.contactPerson && (

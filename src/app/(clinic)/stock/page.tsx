@@ -27,11 +27,11 @@ export default async function StockPage() {
       </div>
 
       {lowStockItems.length > 0 && (
-        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-800">
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
             {lowStockItems.length} article{lowStockItems.length > 1 ? "s" : ""} en stock bas
           </p>
-          <ul className="mt-2 list-inside list-disc text-sm text-amber-700">
+          <ul className="mt-2 list-inside list-disc text-sm text-amber-700 dark:text-amber-400">
             {lowStockItems.map((item) => (
               <li key={item.id}>
                 <Link href={`/stock/${item.id}`} className="hover:underline">
@@ -46,7 +46,7 @@ export default async function StockPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-cool-200 bg-cool-50">
@@ -80,7 +80,7 @@ export default async function StockPage() {
                 <tr
                   key={item.id}
                   className={`border-b border-cool-100 hover:bg-cool-50 transition-colors ${
-                    isLow ? "bg-red-50/30" : ""
+                    isLow ? "bg-red-50/30 dark:bg-red-500/10" : ""
                   }`}
                 >
                   <td className="px-4 py-3">
@@ -94,7 +94,7 @@ export default async function StockPage() {
                   <td className="px-4 py-3 text-cool-600">
                     {item.category || "-"}
                   </td>
-                  <td className={`px-4 py-3 font-medium ${isLow ? "text-red-600" : "text-cool-900"}`}>
+                  <td className={`px-4 py-3 font-medium ${isLow ? "text-red-600 dark:text-red-400" : "text-cool-900"}`}>
                     {item.currentQty}
                   </td>
                   <td className="px-4 py-3 text-cool-500">{item.minQty}</td>

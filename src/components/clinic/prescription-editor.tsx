@@ -240,19 +240,19 @@ export function PrescriptionEditor({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <form action={handleSubmit} className="space-y-6">
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
           <h2 className="text-lg font-semibold text-cool-900">
             Informations de l&apos;ordonnance
           </h2>
 
           {generalError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
               {generalError}
             </div>
           )}
 
           {showSuccess && (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400">
               {successMessage}
             </div>
           )}
@@ -291,7 +291,7 @@ export function PrescriptionEditor({
                 <p className="mt-1 text-xs text-red-500">{fieldErrors.patientId[0]}</p>
               )}
               {open && results.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white dark:bg-cool-100 shadow-lg max-h-48 overflow-y-auto">
                   {results.map((p) => (
                     <li
                       key={p.id}

@@ -15,7 +15,7 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  draft: "bg-amber-50 text-amber-700",
+  draft: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
   active: "bg-cerulean/10 text-cerulean",
   completed: "bg-mint/10 text-mint",
   cancelled: "bg-cool-100 text-cool-500",

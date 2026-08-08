@@ -230,18 +230,18 @@ function SessionItemRow({
       </form>
 
       <div className="mt-2 flex items-center justify-between gap-3">
-        {generalError && <p className="text-xs text-red-600">{generalError}</p>}
+        {generalError && <p className="text-xs text-red-600 dark:text-red-400">{generalError}</p>}
         <form action={deleteAction} className="ml-auto">
           <button
             type="submit"
             disabled={deletePending}
-            className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50 transition-colors"
+            className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50 transition-colors dark:text-red-400"
           >
             {deletePending ? "Suppression..." : "Supprimer"}
           </button>
         </form>
       </div>
-      {deleteError && <p className="mt-1 text-xs text-red-600">{deleteError}</p>}
+      {deleteError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{deleteError}</p>}
     </div>
   );
 }
@@ -277,7 +277,7 @@ function AddSessionItemForm({
       <form action={formAction} className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium text-cool-700">Ajouter un acte</h3>
-          {generalError && <p className="text-xs text-red-600">{generalError}</p>}
+          {generalError && <p className="text-xs text-red-600 dark:text-red-400">{generalError}</p>}
         </div>
 
         <div className={rowGridClassName}>
@@ -423,7 +423,7 @@ function ReadOnlyItemsTable({
   total: number;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-cool-200 bg-cool-50">
@@ -483,7 +483,7 @@ function EditableItemsTable({
   const total = items.reduce((acc, item) => acc + itemTotal(item), 0);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 border-b border-cool-200 bg-cool-50 px-3 py-2 text-xs font-medium text-cool-500 uppercase tracking-wider sm:grid-cols-3 xl:grid-cols-10">
         <span>Dent</span>
         <span>Face</span>
@@ -519,7 +519,7 @@ export function SessionTreatments({
   return (
     <div className="space-y-4">
       {initialItems.length === 0 ? (
-        <div className="rounded-xl border border-cool-200 bg-white p-10 text-center">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-10 text-center">
           <p className="text-sm text-cool-400">Aucun acte ajouté à cette séance</p>
         </div>
       ) : disabled ? (

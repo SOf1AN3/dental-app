@@ -68,28 +68,28 @@ export default async function BillingPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="rounded-xl border border-cool-200 bg-white p-5">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
           <p className="text-sm text-cool-500">Total factures</p>
           <p className="text-2xl font-bold text-cool-900 mt-1">
             {summary.totalCount}
           </p>
         </div>
-        <div className="rounded-xl border border-cool-200 bg-white p-5">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
           <p className="text-sm text-cool-500">Montant total</p>
           <p className="text-2xl font-bold text-cool-900 mt-1">
             {formatCurrency(summary.totalAmount)}
           </p>
         </div>
-        <div className="rounded-xl border border-cool-200 bg-white p-5">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
           <p className="text-sm text-cool-500">En attente de paiement</p>
-          <p className="text-2xl font-bold text-amber-600 mt-1">
+          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
             {formatCurrency(summary.pendingAmount)}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="rounded-xl border border-cool-200 bg-white">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
           <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
             <h2 className="text-base font-semibold text-cool-900">
               Factures récentes
@@ -138,7 +138,7 @@ export default async function BillingPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
           <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
             <h2 className="text-base font-semibold text-cool-900">
               Devis récents

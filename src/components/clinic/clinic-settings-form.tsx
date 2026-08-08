@@ -137,7 +137,7 @@ export function ClinicSettingsForm({
       </div>
 
       {state?.success && (
-        <p className="text-sm text-green-600">
+        <p className="text-sm text-green-600 dark:text-green-400">
           Informations de la clinique mises à jour.
         </p>
       )}

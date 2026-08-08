@@ -91,15 +91,15 @@ export default async function PatientDossierPage(props: {
       </div>
 
       {patient.deletedAt && (
-        <div className="mb-6 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3">
-          <Archive className="h-5 w-5 shrink-0 text-amber-600" />
-          <p className="text-sm font-medium text-amber-800">Patient archivé</p>
+        <div className="mb-6 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400">
+          <Archive className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-400">Patient archivé</p>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Informations
             </h2>
@@ -139,7 +139,7 @@ export default async function PatientDossierPage(props: {
             </dl>
           </div>
 
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Assurance
             </h2>
@@ -160,7 +160,7 @@ export default async function PatientDossierPage(props: {
           </div>
 
           {patient.notes && (
-            <div className="rounded-xl border border-cool-200 bg-white p-6">
+            <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
                 Notes
               </h2>
@@ -172,7 +172,7 @@ export default async function PatientDossierPage(props: {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
-            <div className="rounded-xl border border-cool-200 bg-white p-6">
+            <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider">
                 Prochains rendez-vous
@@ -242,7 +242,7 @@ export default async function PatientDossierPage(props: {
             )}
           </div>
 
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Navigation rapide
             </h2>

@@ -101,7 +101,7 @@ export function NotificationBell({ clinicId }: { clinicId: string }) {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white shadow-lg">
+        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 shadow-lg">
           <div className="border-b border-cool-100 px-4 py-3 font-medium text-cool-900">Notifications</div>
           <div className="max-h-80 overflow-y-auto">
             {items.length === 0 ? (

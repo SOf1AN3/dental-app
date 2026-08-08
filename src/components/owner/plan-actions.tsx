@@ -46,7 +46,7 @@ export function PlanActions({ plan }: { plan: Plan }) {
           onClick={() => setShowToggleConfirm(true)}
           className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
             plan.isActive
-              ? "text-amber-600 hover:bg-amber-50"
+              ? "text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
               : "text-mint hover:bg-mint/10"
           }`}
         >
@@ -77,7 +77,7 @@ function ToggleConfirm({ planId, isActive, onCancel }: { planId: string; isActiv
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-xs font-medium text-amber-600">Confirmer ?</span>
+      <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Confirmer ?</span>
       <button
         type="button"
         onClick={handleConfirm}
@@ -115,7 +115,7 @@ function EditPlanDialog({ plan, onClose }: { plan: Plan; onClose: () => void }) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-xl bg-white dark:bg-cool-100 p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-cool-900">Modifier le plan</h3>
           <button onClick={onClose} className="rounded-lg p-1.5 text-cool-500 hover:bg-cool-100 transition-colors">
@@ -190,10 +190,10 @@ function DeletePlanDialog({ plan, onClose }: { plan: Plan; onClose: () => void }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-cool-100 p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">
-            <AlertTriangle className="h-5 w-5 text-red-600" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20">
+            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
           </div>
           <div>
             <h3 className="text-lg font-semibold text-cool-900">Supprimer le plan</h3>

@@ -27,13 +27,13 @@ export default async function PatientSessionsPage(props: {
       </div>
 
       {sessions.length === 0 ? (
-        <div className="rounded-xl border border-cool-200 bg-white p-12 text-center">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
           <p className="text-sm text-cool-400">
             Aucune séance pour ce patient
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+        <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-cool-200 bg-cool-50">

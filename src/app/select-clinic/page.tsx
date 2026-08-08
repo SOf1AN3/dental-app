@@ -83,7 +83,7 @@ export default async function SelectClinicPage() {
         )}
 
         {memberships.length === 0 && pendingInvites.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white p-12 text-center">
+          <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
             <p className="text-lg font-medium text-cool-600">
               Vous n&apos;avez aucune clinique
             </p>

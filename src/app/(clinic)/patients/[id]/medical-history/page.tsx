@@ -42,7 +42,7 @@ export default async function MedicalHistoryPage(props: {
         <MedicalHistoryForm patientId={id} />
 
         {entries.length === 0 ? (
-          <div className="rounded-xl border border-cool-200 bg-white p-12 text-center">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
             <p className="text-sm text-cool-400">
               Aucun antécédent médical
             </p>
@@ -52,7 +52,7 @@ export default async function MedicalHistoryPage(props: {
             {entries.map((entry) => (
               <div
                 key={entry.id}
-                className="rounded-xl border border-cool-200 bg-white p-5"
+                className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5"
               >
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="text-base font-semibold text-cool-900">
@@ -61,7 +61,7 @@ export default async function MedicalHistoryPage(props: {
                   <span
                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                       entry.isActive
-                        ? "bg-green-50 text-green-700 ring-1 ring-inset ring-green-600/20"
+                        ? "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400 ring-1 ring-inset ring-green-600/20"
                         : "bg-cool-50 text-cool-500 ring-1 ring-inset ring-cool-600/20"
                     }`}
                   >

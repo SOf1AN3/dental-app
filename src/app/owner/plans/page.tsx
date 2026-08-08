@@ -20,7 +20,7 @@ export default async function OwnerPlansPage() {
         </div>
       </div>
 
-      <div className="mb-8 rounded-xl border border-cool-200 bg-white p-6">
+      <div className="mb-8 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="text-lg font-semibold text-cool-900 mb-4">Nouveau plan</h2>
         <form action={createPlan} className="grid grid-cols-2 gap-4">
           <div>
@@ -62,7 +62,7 @@ export default async function OwnerPlansPage() {
         </form>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-cool-200 bg-cool-50">

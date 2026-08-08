@@ -81,7 +81,7 @@ export default async function InvoicesPage(props: {
         })}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-cool-200 bg-cool-50">

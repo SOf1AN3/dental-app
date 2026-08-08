@@ -33,7 +33,7 @@ export function SessionPrescription({
 }: SessionPrescriptionProps) {
   if (disabled) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white p-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
           Ordonnance
         </h2>

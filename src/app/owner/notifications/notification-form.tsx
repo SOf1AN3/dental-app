@@ -67,8 +67,8 @@ export function NotificationForm({ clinics }: { clinics: ClinicOption[] }) {
           className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors">
           {pending ? "Envoi..." : "Envoyer la notification"}
         </button>
-        {success && <p className="text-xs text-green-600">Notification envoyée</p>}
-        {generalError && <p className="text-xs text-red-500">{generalError}</p>}
+        {success && <p className="text-xs text-green-600 dark:text-green-400">Notification envoyée</p>}
+        {generalError && <p className="text-xs text-red-500 dark:text-red-400">{generalError}</p>}
       </div>
     </form>
   );

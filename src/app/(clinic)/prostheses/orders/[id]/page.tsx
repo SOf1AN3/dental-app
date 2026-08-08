@@ -53,7 +53,7 @@ export default async function OrderDetailPage(props: {
             <form action={updateOrderStatus.bind(null, id, "cancelled")}>
               <button
                 type="submit"
-                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
               >
                 Annuler
               </button>
@@ -64,7 +64,7 @@ export default async function OrderDetailPage(props: {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Détails de la commande
             </h2>
@@ -121,7 +121,7 @@ export default async function OrderDetailPage(props: {
           </div>
 
           {order.notes && (
-            <div className="rounded-xl border border-cool-200 bg-white p-6">
+            <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
                 Notes
               </h2>
@@ -131,7 +131,7 @@ export default async function OrderDetailPage(props: {
         </div>
 
         <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Patient
             </h2>
@@ -150,7 +150,7 @@ export default async function OrderDetailPage(props: {
           </div>
 
           {lab && (
-            <div className="rounded-xl border border-cool-200 bg-white p-6">
+            <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
                 Laboratoire
               </h2>
@@ -170,7 +170,7 @@ export default async function OrderDetailPage(props: {
             </div>
           )}
 
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Dernière mise à jour
             </h2>

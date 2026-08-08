@@ -62,7 +62,7 @@ export function ProfileForm({
       </div>
 
       {state?.success && (
-        <p className="text-sm text-green-600">Profil mis à jour.</p>
+        <p className="text-sm text-green-600 dark:text-green-400">Profil mis à jour.</p>
       )}
 
       <div className="flex items-center gap-3 pt-2">

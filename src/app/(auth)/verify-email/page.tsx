@@ -56,25 +56,25 @@ function VerifyEmailContent() {
       )}
 
       {verifyState?.success && (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400">
           Votre email a été vérifié avec succès
         </div>
       )}
 
       {verifyState?.error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
           {verifyState.error}
         </div>
       )}
 
       {resendState?.success && (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400">
           Un email de vérification a été envoyé
         </div>
       )}
 
       {resendState?.error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
           {resendState.error}
         </div>
       )}

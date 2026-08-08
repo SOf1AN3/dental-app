@@ -17,7 +17,7 @@ function ResetPasswordForm() {
         <div className="text-center">
           <h2 className="text-xl font-semibold text-cool-900">Réinitialiser le mot de passe</h2>
         </div>
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
           Lien invalide ou expiré
         </div>
         <p className="text-center text-sm text-cool-500">
@@ -39,7 +39,7 @@ function ResetPasswordForm() {
       </div>
 
       {state?.success ? (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400">
           Votre mot de passe a été réinitialisé avec succès
         </div>
       ) : (
@@ -92,13 +92,13 @@ function ResetPasswordForm() {
           </div>
 
           {matchError && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
               {matchError}
             </div>
           )}
 
           {state?.error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
               {state.error}
             </div>
           )}

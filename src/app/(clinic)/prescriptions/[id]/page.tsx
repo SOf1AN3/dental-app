@@ -33,7 +33,7 @@ export default async function PrescriptionDetailPage(props: {
         </Link>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6 mb-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 mb-6">
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -177,7 +177,7 @@ export default async function PrescriptionDetailPage(props: {
           <form action={updatePrescriptionStatus.bind(null, id, "cancelled")}>
             <button
               type="submit"
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
             >
               Annuler
             </button>

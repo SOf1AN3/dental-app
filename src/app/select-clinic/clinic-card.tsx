@@ -14,7 +14,7 @@ export function ClinicCard({ clinic, role }: ClinicCardProps) {
     >
       <button
         type="submit"
-        className="w-full rounded-xl border border-cool-200 bg-white p-6 text-left shadow-sm transition-all hover:border-cerulean hover:shadow-md"
+        className="w-full rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 text-left shadow-sm transition-all hover:border-cerulean hover:shadow-md"
       >
         <h3 className="text-lg font-semibold text-cool-900">{clinic.name}</h3>
         {clinic.wilayaCode && (

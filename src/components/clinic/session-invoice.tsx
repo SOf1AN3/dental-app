@@ -75,7 +75,7 @@ function CloseSessionForm({ sessionId }: { sessionId: string }) {
           {pending ? "Clôture en cours..." : "Clore la séance"}
         </button>
       </form>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }
@@ -116,7 +116,7 @@ function SessionStatusAction({
           {pending ? pendingLabel : label}
         </button>
       </form>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }
@@ -130,7 +130,7 @@ export function SessionInvoice({
 }: SessionInvoiceProps) {
   if (status === "in_progress" && !invoice) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider">
           Facture
         </h2>
@@ -144,7 +144,7 @@ export function SessionInvoice({
 
   if (!invoice) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white p-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
           Facture
         </h2>
@@ -160,7 +160,7 @@ export function SessionInvoice({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cool-200 bg-white p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-cool-900">
             Facture {invoice.number}
@@ -187,7 +187,7 @@ export function SessionInvoice({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="px-6 py-4 border-b border-cool-200">
           <h2 className="text-base font-semibold text-cool-900">Articles</h2>
         </div>
@@ -250,7 +250,7 @@ export function SessionInvoice({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <div className="max-w-xs ml-auto space-y-2">
           <div className="flex justify-between">
             <span className="text-sm text-cool-500">Sous-total</span>
@@ -265,7 +265,7 @@ export function SessionInvoice({
           {discountTotal > 0 && (
             <div className="flex justify-between">
               <span className="text-sm text-cool-500">Remise</span>
-              <span className="text-sm text-red-600">-{formatCurrency(discountTotal)}</span>
+              <span className="text-sm text-red-600 dark:text-red-400">-{formatCurrency(discountTotal)}</span>
             </div>
           )}
           <div className="flex justify-between border-t border-cool-200 pt-2">
@@ -277,7 +277,7 @@ export function SessionInvoice({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="px-6 py-4 border-b border-cool-200">
           <h2 className="text-base font-semibold text-cool-900">Paiements</h2>
         </div>

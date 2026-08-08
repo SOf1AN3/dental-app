@@ -37,7 +37,7 @@ export default async function ProsthesesPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="border-b border-cool-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-cool-900">Commandes</h2>
         </div>
@@ -126,7 +126,7 @@ export default async function ProsthesesPage() {
         )}
       </div>
 
-      <div className="mt-8 rounded-xl border border-cool-200 bg-white">
+      <div className="mt-8 rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="border-b border-cool-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-cool-900">Laboratoires</h2>
         </div>

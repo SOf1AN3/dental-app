@@ -4,9 +4,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
+@theme {
   --color-primary: #1e2a5a;
   --color-primary-light: #2a3f8a;
+  --color-sidebar: #1e2a5a;
   --color-cerulean: #0088cc;
   --color-mint: #10b981;
   --color-teal: #0d9488;

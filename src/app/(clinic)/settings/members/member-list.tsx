@@ -73,7 +73,7 @@ export function MemberList({ members }: { members: Member[] }) {
                 {member.role !== "owner" && (
                   <button
                     onClick={() => handleRemove(member.id)}
-                    className="text-xs text-red-600 hover:text-red-800 transition-colors"
+                    className="text-xs text-red-600 hover:text-red-800 transition-colors dark:text-red-400 dark:hover:text-red-300"
                   >
                     Supprimer
                   </button>

@@ -29,7 +29,7 @@ export function DataTable<TData>({ columns, data }: DataTableProps<TData>) {
   });
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
       <table className="w-full text-sm">
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (

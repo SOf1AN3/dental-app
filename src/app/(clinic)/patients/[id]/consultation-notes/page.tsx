@@ -42,7 +42,7 @@ export default async function ConsultationNotesPage(props: {
         <ConsultationNoteForm patientId={id} />
 
         {notes.length === 0 ? (
-          <div className="rounded-xl border border-cool-200 bg-white p-12 text-center">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
             <p className="text-sm text-cool-400">Aucune note de consultation</p>
           </div>
         ) : (
@@ -50,7 +50,7 @@ export default async function ConsultationNotesPage(props: {
             {notes.map((note) => (
               <div
                 key={note.id}
-                className="rounded-xl border border-cool-200 bg-white p-5"
+                className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5"
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="text-xs text-cool-400">

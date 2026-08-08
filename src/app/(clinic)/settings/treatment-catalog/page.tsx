@@ -14,7 +14,7 @@ export default async function TreatmentCatalogPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
+      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-lg font-semibold text-cool-900">
@@ -65,7 +65,7 @@ export default async function TreatmentCatalogPage() {
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           item.isActive
-                            ? "bg-green-50 text-green-700"
+                            ? "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400"
                             : "bg-cool-100 text-cool-500"
                         }`}
                       >

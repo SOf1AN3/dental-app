@@ -97,7 +97,7 @@ export function ScheduleDatePicker({
         <CalendarIcon className="h-4 w-4 text-cool-400" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white p-3 shadow-lg">
+        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"

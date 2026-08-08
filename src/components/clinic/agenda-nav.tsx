@@ -47,7 +47,7 @@ export function AgendaNav() {
       {/* Previous week */}
       <Link
         href={`/appointments/agenda?week=${localDateString(prevMonday)}`}
-        className="rounded-lg border border-cool-200 bg-white p-2 text-cool-600 hover:bg-cool-50 transition-colors"
+        className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 p-2 text-cool-600 hover:bg-cool-50 transition-colors"
         aria-label="Semaine précédente"
       >
         <ChevronLeft className="h-4 w-4" />
@@ -57,7 +57,7 @@ export function AgendaNav() {
       {!isCurrentWeek && (
         <Link
           href="/appointments/agenda"
-          className="rounded-lg border border-cool-200 bg-white px-3 py-2 text-xs font-medium text-cool-600 hover:bg-cool-50 transition-colors whitespace-nowrap"
+          className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 px-3 py-2 text-xs font-medium text-cool-600 hover:bg-cool-50 transition-colors whitespace-nowrap"
         >
           Cette semaine
         </Link>
@@ -66,7 +66,7 @@ export function AgendaNav() {
       {/* Next week */}
       <Link
         href={`/appointments/agenda?week=${localDateString(nextMonday)}`}
-        className="rounded-lg border border-cool-200 bg-white p-2 text-cool-600 hover:bg-cool-50 transition-colors"
+        className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 p-2 text-cool-600 hover:bg-cool-50 transition-colors"
         aria-label="Semaine suivante"
       >
         <ChevronRight className="h-4 w-4" />

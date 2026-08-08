@@ -16,7 +16,7 @@ export default function RegisterPage() {
       </div>
 
       {state?.error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
           {state.error}
         </div>
       )}

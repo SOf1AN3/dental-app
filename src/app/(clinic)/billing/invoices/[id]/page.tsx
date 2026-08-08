@@ -77,7 +77,7 @@ export default async function InvoiceDetailPage(props: {
       </div>
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-3">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-3">
           <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider">
             Informations
           </h2>
@@ -103,7 +103,7 @@ export default async function InvoiceDetailPage(props: {
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-3">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-3">
           <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider">
             Patient
           </h2>
@@ -131,7 +131,7 @@ export default async function InvoiceDetailPage(props: {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="px-6 py-4 border-b border-cool-200">
           <h2 className="text-base font-semibold text-cool-900">Articles</h2>
         </div>
@@ -201,7 +201,7 @@ export default async function InvoiceDetailPage(props: {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <div className="max-w-xs ml-auto space-y-2">
           <div className="flex justify-between">
             <span className="text-sm text-cool-500">Sous-total</span>
@@ -220,7 +220,7 @@ export default async function InvoiceDetailPage(props: {
           {discountTotal > 0 && (
             <div className="flex justify-between">
               <span className="text-sm text-cool-500">Remise</span>
-              <span className="text-sm text-red-600">
+              <span className="text-sm text-red-600 dark:text-red-400">
                 -{formatCurrency(discountTotal)}
               </span>
             </div>
@@ -234,7 +234,7 @@ export default async function InvoiceDetailPage(props: {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
           <h2 className="text-base font-semibold text-cool-900">Paiements</h2>
           <Link
@@ -296,7 +296,7 @@ export default async function InvoiceDetailPage(props: {
       </div>
 
       {invoice.notes && (
-        <div className="rounded-xl border border-cool-200 bg-white p-6">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
           <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider mb-2">
             Notes
           </h2>
@@ -339,7 +339,7 @@ export default async function InvoiceDetailPage(props: {
             <input type="hidden" name="status" value="cancelled" />
             <button
               type="submit"
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
             >
               Annuler
             </button>

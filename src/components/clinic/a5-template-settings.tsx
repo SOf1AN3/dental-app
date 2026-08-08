@@ -103,13 +103,13 @@ export function A5TemplateSettings({
         </label>
 
         {generalError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
             {generalError}
           </div>
         )}
 
         {state?.success && (
-          <p className="text-sm text-green-600">
+          <p className="text-sm text-green-600 dark:text-green-400">
             Modèle d&apos;ordonnance mis à jour.
           </p>
         )}

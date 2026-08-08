@@ -16,7 +16,7 @@ const statusLabels: Record<string, string> = {
 const statusColors: Record<string, string> = {
   active: "bg-mint/10 text-mint",
   completed: "bg-cool-100 text-cool-500",
-  cancelled: "bg-red-50 text-red-600",
+  cancelled: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
 };
 
 export function PrescriptionStatusBadge({ status, className }: PrescriptionStatusBadgeProps) {

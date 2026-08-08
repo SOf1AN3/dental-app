@@ -70,11 +70,11 @@ export function PatientArchiveActions({
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-2">
-      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+    <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-2 dark:bg-amber-500/10 dark:border-amber-500/20">
+      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
       <div className="flex-1">
-        <p className="text-xs font-medium text-amber-800">Archiver ce patient ?</p>
-        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+        <p className="text-xs font-medium text-amber-800 dark:text-amber-400">Archiver ce patient ?</p>
+        {error && <p className="text-xs text-red-500 mt-1 dark:text-red-400">{error}</p>}
       </div>
       <button
         type="button"

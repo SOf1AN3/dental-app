@@ -19,11 +19,11 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  scheduled: "text-blue-600 bg-blue-50",
-  confirmed: "text-emerald-600 bg-emerald-50",
-  in_progress: "text-amber-600 bg-amber-50",
+  scheduled: "text-blue-600 bg-blue-50 dark:bg-blue-500/10 dark:text-blue-400",
+  confirmed: "text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 dark:text-emerald-400",
+  in_progress: "text-amber-600 bg-amber-50 dark:bg-amber-500/10 dark:text-amber-400",
   completed: "text-cool-600 bg-cool-100",
-  cancelled: "text-red-600 bg-red-50",
+  cancelled: "text-red-600 bg-red-50 dark:bg-red-500/10 dark:text-red-400",
   no_show: "text-cool-400 bg-cool-50",
 }
 
@@ -133,7 +133,7 @@ export default async function ClinicDashboard() {
 
       <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+          <div key={stat.label} className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
             <div className={`inline-flex rounded-lg ${stat.color} p-3 text-white`}>
               <LayoutDashboard className="h-6 w-6" />
             </div>
@@ -144,7 +144,7 @@ export default async function ClinicDashboard() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+        <div className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
           <h2 className="text-lg font-semibold text-cool-900">Rendez-vous du jour</h2>
           {todayAppointments.length === 0 ? (
             <p className="mt-4 text-cool-400">Aucun rendez-vous aujourd&apos;hui.</p>
@@ -173,7 +173,7 @@ export default async function ClinicDashboard() {
           )}
         </div>
 
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+        <div className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
           <h2 className="text-lg font-semibold text-cool-900">Derniers rendez-vous</h2>
           {recentAppointments.length === 0 ? (
             <p className="mt-4 text-cool-400">Aucun rendez-vous récent.</p>
@@ -205,13 +205,13 @@ export default async function ClinicDashboard() {
 
       {/* Charts: Revenue + Trends */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+        <div className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
           <h2 className="text-lg font-semibold text-cool-900">Revenus (6 mois)</h2>
           <div className="mt-4">
             <RevenueChart data={revenueData.monthlyRevenue} />
           </div>
         </div>
-        <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+        <div className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
           <h2 className="text-lg font-semibold text-cool-900">Tendance (6 mois)</h2>
           <div className="mt-4">
             <TrendsChart data={monthlyTrends} />
@@ -220,7 +220,7 @@ export default async function ClinicDashboard() {
       </div>
 
       {/* Occupancy Rate */}
-      <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+      <div className="mt-6 rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
         <h2 className="text-lg font-semibold text-cool-900">Taux d&apos;occupation</h2>
         <div className="mt-4 flex flex-wrap items-center gap-6">
           <div className="flex flex-col items-center">

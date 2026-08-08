@@ -35,7 +35,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Informations personnelles
         </h2>
@@ -198,7 +198,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Contact d&apos;urgence
         </h2>
@@ -236,7 +236,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">Assurance</h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -272,7 +272,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">Notes</h2>
         <div>
           <textarea

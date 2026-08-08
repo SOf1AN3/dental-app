@@ -133,9 +133,9 @@ export function AppointmentForm({
 
   return (
     <form action={action} className="max-w-xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         {generalError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
             {generalError}
             {conflict && (
               <div className="mt-1">
@@ -203,7 +203,7 @@ export function AppointmentForm({
           <input type="hidden" name="date" value={effectiveDate} />
           {effectiveDate &&
             schedule[dayOfWeekIndexForClinicDate(effectiveDate, timezone)]?.isClosed && (
-              <p className="mt-1 text-xs text-amber-600">La clinique est fermée ce jour-là</p>
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">La clinique est fermée ce jour-là</p>
             )}
         </div>
 
@@ -222,7 +222,7 @@ export function AppointmentForm({
                     className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
                       slot === s
                         ? "border-cerulean bg-cerulean text-white"
-                        : "border-cool-200 bg-white text-cool-700 hover:bg-cool-50"
+                        : "border-cool-200 bg-white dark:bg-cool-100 text-cool-700 hover:bg-cool-50"
                     }`}
                   >
                     {formatSlotTime(s, timezone)}

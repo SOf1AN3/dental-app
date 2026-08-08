@@ -182,7 +182,7 @@ export default async function AgendaPage(props: {
       {/* ══════════════════════════════════════════════
           DESKTOP – Weekly grid (lg+)
           ══════════════════════════════════════════════ */}
-      <div className="hidden lg:block overflow-x-auto rounded-xl border border-cool-200 bg-white">
+      <div className="hidden lg:block overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="min-w-[900px]">
           {/* ── Day headers ── */}
           <div className="flex border-b border-cool-200 bg-cool-50">
@@ -338,7 +338,7 @@ export default async function AgendaPage(props: {
           return (
             <div
               key={dayIdx}
-              className="rounded-xl border border-cool-200 bg-white overflow-hidden"
+              className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 overflow-hidden"
             >
               <div className="flex items-center justify-between bg-cool-50 px-4 py-3 border-b border-cool-200">
                 <div>

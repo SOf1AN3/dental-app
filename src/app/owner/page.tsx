@@ -20,7 +20,7 @@ export default async function OwnerDashboard() {
 
       <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {statCards.map((stat) => (
-          <div key={stat.label} className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+          <div key={stat.label} className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
             <div className={`inline-flex rounded-lg ${stat.color} p-3 text-white`}>
               <LayoutDashboard className="h-6 w-6" />
             </div>

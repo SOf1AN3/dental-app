@@ -63,7 +63,7 @@ export function InvoiceForm({ catalog }: { catalog?: CatalogItem[] }) {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Nouvelle facture
         </h2>
@@ -95,7 +95,7 @@ export function InvoiceForm({ catalog }: { catalog?: CatalogItem[] }) {
           />
           <input id="patientId" name="patientId" type="hidden" />
           {open && results.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg">
+            <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white dark:bg-cool-100 shadow-lg">
               {results.map((patient) => (
                 <button
                   key={patient.id}

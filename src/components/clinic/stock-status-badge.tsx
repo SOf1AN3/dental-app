@@ -17,7 +17,7 @@ export function StockStatusBadge({
     return (
       <span
         className={cn(
-          "inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium bg-red-50 text-red-600",
+          "inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
           className,
         )}
       >
@@ -30,7 +30,7 @@ export function StockStatusBadge({
     return (
       <span
         className={cn(
-          "inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-700",
+          "inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
           className,
         )}
       >

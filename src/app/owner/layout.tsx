@@ -11,7 +11,7 @@ export default async function OwnerLayout({
 
   return (
     <div className="flex h-full min-h-screen">
-      <aside className="fixed left-0 top-0 z-30 flex h-full w-56 flex-col bg-cool-900 text-white">
+      <aside className="fixed left-0 top-0 z-30 flex h-full w-56 flex-col bg-sidebar text-white">
         <div className="flex h-16 items-center gap-2 px-6 border-b border-white/10">
           <span className="text-lg font-bold">DentalCare</span>
           <span className="rounded bg-cerulean px-2 py-0.5 text-xs font-medium">Admin</span>

@@ -58,7 +58,7 @@ export default async function RadiographsPage(props: {
         </div>
 
         {items.length === 0 ? (
-          <div className="rounded-xl border border-cool-200 bg-white p-12 text-center">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
             <p className="text-sm text-cool-400">Aucune radiographie</p>
           </div>
         ) : (
@@ -66,7 +66,7 @@ export default async function RadiographsPage(props: {
             {items.map((radio) => (
               <div
                 key={radio.id}
-                className="rounded-xl border border-cool-200 bg-white p-5"
+                className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5"
               >
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-lg">📷</span>

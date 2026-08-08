@@ -53,10 +53,10 @@ export function ClinicActions({
   if (confirmMode === "archive") {
     return (
       <form action={async () => { await archiveClinic(clinic.id); }}>
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400 p-3">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="flex-1">
-            <p className="text-xs font-medium text-amber-800">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-400">
               Archiver {clinic.name} ?
             </p>
           </div>
@@ -82,10 +82,10 @@ export function ClinicActions({
 
   if (confirmMode === "status") {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+      <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400 p-3">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
         <div className="flex-1">
-          <p className="text-xs font-medium text-amber-800">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-400">
             {isSuspending
               ? `Suspendre ${clinic.name} ?`
               : `Activer ${clinic.name} ?`}

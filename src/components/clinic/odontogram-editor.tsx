@@ -111,12 +111,12 @@ export default function OdontogramEditor({
   return (
     <div>
       {conflict && (
-        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between dark:bg-amber-500/10 dark:border-amber-500/20">
           <div>
-            <p className="text-sm font-medium text-amber-800">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
               L&apos;odontogramme a été modifié dans une autre session.
             </p>
-            <p className="mt-1 text-sm text-amber-700">
+            <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
               Vos modifications locales n&apos;ont pas été enregistrées.
             </p>
           </div>

@@ -18,7 +18,7 @@ function formatMonthKey(key: string): string {
 
 function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-200">
+    <div className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-200">
       <p className="text-sm text-cool-500">{label}</p>
       <p className="mt-2 text-3xl font-bold text-cool-900">{value}</p>
     </div>
@@ -27,7 +27,7 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-200">
+    <div className="mt-8 rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">{title}</h2>
       <div className="mt-4">{children}</div>
     </div>

@@ -27,7 +27,7 @@ export function PaymentForm({ patientId, invoiceId }: PaymentFormProps) {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Nouveau paiement
         </h2>

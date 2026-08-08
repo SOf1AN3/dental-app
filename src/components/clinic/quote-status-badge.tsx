@@ -16,10 +16,10 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  draft: "bg-amber-50 text-amber-700",
+  draft: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
   sent: "bg-cerulean/10 text-cerulean",
   accepted: "bg-mint/10 text-mint",
-  rejected: "bg-red-50 text-red-600",
+  rejected: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
   expired: "bg-cool-100 text-cool-500",
 };
 

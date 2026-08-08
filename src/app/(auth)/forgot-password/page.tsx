@@ -16,7 +16,7 @@ export default function ForgotPasswordPage() {
       </div>
 
       {state?.success ? (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+        <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400">
           {state.message}
         </div>
       ) : (
@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
           </div>
 
           {state?.error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
               {state.error}
             </div>
           )}

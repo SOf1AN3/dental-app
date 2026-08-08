@@ -49,7 +49,7 @@ export default async function QuoteDetailPage(props: {
         </Link>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white p-6 mb-6">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 mb-6">
         <div className="flex items-start justify-between mb-6">
           <div>
             <div className="flex items-center gap-3 mb-2">

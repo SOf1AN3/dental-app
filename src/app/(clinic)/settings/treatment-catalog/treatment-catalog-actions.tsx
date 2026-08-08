@@ -72,8 +72,8 @@ export function TreatmentCatalogActions({ item }: { item?: CatalogItem }) {
             onClick={handleToggleActive}
             className={`text-sm transition-colors ${
               item.isActive
-                ? "text-amber-600 hover:text-amber-700"
-                : "text-green-600 hover:text-green-700"
+                ? "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                : "text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
             }`}
           >
             {item.isActive ? "Désactiver" : "Activer"}
@@ -81,7 +81,7 @@ export function TreatmentCatalogActions({ item }: { item?: CatalogItem }) {
           <button
             type="button"
             onClick={handleDelete}
-            className="text-sm text-red-500 hover:text-red-600 transition-colors"
+            className="text-sm text-red-500 hover:text-red-600 transition-colors dark:text-red-400 dark:hover:text-red-300"
           >
             Supprimer
           </button>

@@ -37,7 +37,7 @@ export default async function TreatmentPlanListPage(props: {
       </div>
 
       {plans.length === 0 ? (
-        <div className="rounded-xl border border-cool-200 bg-white p-12 text-center">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
           <p className="text-sm text-cool-400">
             Aucun plan de traitement
           </p>
@@ -54,7 +54,7 @@ export default async function TreatmentPlanListPage(props: {
             <Link
               key={plan.id}
               href={`/patients/${id}/treatment-plan/${plan.id}`}
-              className="block rounded-xl border border-cool-200 bg-white p-5 hover:border-cerulean hover:shadow-sm transition-all"
+              className="block rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5 hover:border-cerulean hover:shadow-sm transition-all"
             >
               <div className="flex items-start justify-between">
                 <div className="space-y-1">

@@ -43,7 +43,7 @@ export default async function ClinicLayout({
 
   return (
     <div className="flex h-full min-h-screen">
-      <aside className="fixed left-0 top-0 z-30 flex h-full w-64 flex-col bg-primary text-white">
+      <aside className="fixed left-0 top-0 z-30 flex h-full w-64 flex-col bg-sidebar text-white">
         <div className="flex h-16 items-center gap-2 px-6 border-b border-white/10">
           <span className="text-xl font-bold">DentalCare</span>
         </div>
@@ -69,14 +69,19 @@ export default async function ClinicLayout({
             </div>
             <div className="text-sm">
               <p className="font-medium">{userName}</p>
-              <p className="text-white/60 text-xs">Changer de clinique</p>
+              <Link
+                href="/select-clinic"
+                className="text-white/60 text-xs hover:text-white transition-colors"
+              >
+                Changer de clinique
+              </Link>
             </div>
           </div>
         </div>
       </aside>
 
       <div className="ml-64 flex flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-cool-200 bg-white px-8">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-cool-200 bg-white px-8 dark:bg-cool-100">
           <div className="flex-1">
             <SearchInput />
           </div>

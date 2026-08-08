@@ -68,7 +68,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
       </div>
 
       {initialEntries.length === 0 && (
-        <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white p-12 text-center">
+        <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
           <p className="text-lg font-medium text-cool-500">Salle d&apos;attente vide</p>
           <p className="text-sm text-cool-400 mt-1">Aucun patient en attente</p>
         </div>
@@ -77,7 +77,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
       {initialEntries.map(({ entry, patient }) => (
         <div
           key={entry.id}
-          className="flex items-center justify-between rounded-xl border border-cool-200 bg-white p-4 shadow-sm"
+          className="flex items-center justify-between rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-4 shadow-sm"
         >
           <div className="flex items-center gap-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cerulean/10 text-cerulean font-semibold text-sm">

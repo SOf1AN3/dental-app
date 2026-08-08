@@ -20,7 +20,7 @@ export default async function OwnerClinicsPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-cool-200 bg-cool-50">
@@ -70,7 +70,7 @@ export default async function OwnerClinicsPage() {
             <Archive className="h-5 w-5 text-cool-400" />
             Cliniques archivées
           </h2>
-          <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-cool-200 bg-cool-50">

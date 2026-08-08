@@ -38,7 +38,7 @@ export default async function TreatmentPlanDetailPage(props: {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Détails
             </h2>
@@ -83,7 +83,7 @@ export default async function TreatmentPlanDetailPage(props: {
           </div>
 
           {plan.description && (
-            <div className="rounded-xl border border-cool-200 bg-white p-6">
+            <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-2">
                 Description
               </h2>
@@ -95,7 +95,7 @@ export default async function TreatmentPlanDetailPage(props: {
         </div>
 
         <div className="lg:col-span-2">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Actes prévus
             </h2>

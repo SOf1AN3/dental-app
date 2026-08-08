@@ -40,7 +40,7 @@ export default async function LabDetailPage(props: {
           <form action={deleteLab.bind(null, id)}>
             <button
               type="submit"
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
             >
               Supprimer
             </button>
@@ -50,7 +50,7 @@ export default async function LabDetailPage(props: {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
-          <div className="rounded-xl border border-cool-200 bg-white p-6">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
             <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
               Informations
             </h2>
@@ -83,7 +83,7 @@ export default async function LabDetailPage(props: {
           </div>
 
           {lab.notes && (
-            <div className="mt-4 rounded-xl border border-cool-200 bg-white p-6">
+            <div className="mt-4 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
               <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
                 Notes
               </h2>
@@ -93,7 +93,7 @@ export default async function LabDetailPage(props: {
         </div>
 
         <div className="lg:col-span-2">
-          <div className="rounded-xl border border-cool-200 bg-white">
+          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
             <div className="border-b border-cool-200 px-6 py-4">
               <h2 className="text-lg font-semibold text-cool-900">
                 Commandes ({orders.length})

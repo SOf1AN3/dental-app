@@ -23,7 +23,7 @@ export default async function OwnerHealthPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-cool-200 bg-white p-6">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
           <div className="flex items-center gap-3">
             <div className={`rounded-lg p-3 ${dbStatus === "OK" ? "bg-mint/10" : "bg-danger/10"}`}>
               <HeartPulse className={`h-6 w-6 ${dbStatus === "OK" ? "text-mint" : "text-danger"}`} />
@@ -37,7 +37,7 @@ export default async function OwnerHealthPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white p-6">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
           <h2 className="text-lg font-semibold text-cool-900">Version</h2>
           <p className="mt-2 text-sm text-cool-500">
             DentalCare v0.1.0 · Next.js 16 · PostgreSQL

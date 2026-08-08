@@ -59,7 +59,7 @@ export function OrderForm() {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Nouvelle commande de prothèse
         </h2>
@@ -102,7 +102,7 @@ export function OrderForm() {
           )}
           <input type="hidden" name="patientId" value={selectedPatient?.id || ""} />
           {open && results.length > 0 && !selectedPatient && (
-            <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+            <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white dark:bg-cool-100 shadow-lg max-h-48 overflow-y-auto">
               {results.map((p) => (
                 <li
                   key={p.id}

@@ -22,7 +22,7 @@ export function CreateClinicDialog() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 rounded-lg border-2 border-dashed border-cool-300 bg-white px-6 py-3 text-sm font-medium text-cool-600 transition-colors hover:border-cerulean hover:text-cerulean"
+        className="inline-flex items-center gap-2 rounded-lg border-2 border-dashed border-cool-300 bg-white dark:bg-cool-100 px-6 py-3 text-sm font-medium text-cool-600 transition-colors hover:border-cerulean hover:text-cerulean"
       >
         <span className="text-lg">+</span>
         Créer une clinique
@@ -30,7 +30,7 @@ export function CreateClinicDialog() {
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-lg rounded-xl bg-white p-8 shadow-xl">
+          <div className="w-full max-w-lg rounded-xl bg-white dark:bg-cool-100 p-8 shadow-xl">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-cool-900">
                 Nouvelle clinique
@@ -45,7 +45,7 @@ export function CreateClinicDialog() {
 
             <form action={action} className="space-y-4">
               {generalError && (
-                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
                   {generalError}
                 </div>
               )}

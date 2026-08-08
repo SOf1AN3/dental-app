@@ -20,7 +20,7 @@ export function RadiographForm({ patientId }: RadiographFormProps) {
 
   return (
     <form action={action} className="space-y-4">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
         <h2 className="text-lg font-semibold text-cool-900">
           Ajouter une radiographie
         </h2>
@@ -106,7 +106,7 @@ export function RadiographForm({ patientId }: RadiographFormProps) {
         </div>
 
         {otherErrors && (
-          <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
+          <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
             {Object.entries(otherErrors).map(([field, msgs]) => (
               <p key={field}>
                 {field}: {Array.isArray(msgs) ? msgs.join(", ") : msgs}

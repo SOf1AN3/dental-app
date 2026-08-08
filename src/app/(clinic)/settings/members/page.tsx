@@ -26,7 +26,7 @@ export default async function MembersSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
+      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
           Inviter un membre
         </h2>
@@ -36,7 +36,7 @@ export default async function MembersSettingsPage() {
         <InviteMemberForm />
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
+      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
           Membres ({members.length})
         </h2>

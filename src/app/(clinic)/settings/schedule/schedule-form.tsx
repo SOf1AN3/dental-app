@@ -61,8 +61,8 @@ function DentistGapForm({ dentist }: { dentist: Dentist }) {
       >
         {pending ? "Enregistrement..." : "Enregistrer"}
       </button>
-      {state?.success && <span className="text-xs text-green-600">Enregistré</span>}
-      {generalError && <p className="w-full text-xs text-red-600">{generalError}</p>}
+      {state?.success && <span className="text-xs text-green-600 dark:text-green-400">Enregistré</span>}
+      {generalError && <p className="w-full text-xs text-red-600 dark:text-red-400">{generalError}</p>}
     </form>
   );
 }
@@ -150,7 +150,7 @@ export function ScheduleForm({
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
+      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
           Horaires d&apos;ouverture de la clinique
         </h2>
@@ -164,9 +164,9 @@ export function ScheduleForm({
                 <DayRow key={day.dayOfWeek} day={day} />
               ))}
             </div>
-            {generalError && <p className="text-sm text-red-600">{generalError}</p>}
+            {generalError && <p className="text-sm text-red-600 dark:text-red-400">{generalError}</p>}
             {state?.success && (
-              <p className="text-sm text-green-600">Horaires mis à jour.</p>
+              <p className="text-sm text-green-600 dark:text-green-400">Horaires mis à jour.</p>
             )}
             <div className="pt-2">
               <button
@@ -196,14 +196,14 @@ export function ScheduleForm({
                 </span>
               </div>
             ))}
-            <p className="pt-2 text-xs text-amber-600">
+              <p className="pt-2 text-xs text-amber-600 dark:text-amber-400">
               Seul le propriétaire peut modifier les horaires.
             </p>
           </div>
         )}
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
+      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
           Délai minimal entre deux rendez-vous
         </h2>
@@ -232,7 +232,7 @@ export function ScheduleForm({
               ),
             )}
             {!canEdit && (
-              <p className="pt-2 text-xs text-amber-600">
+            <p className="pt-2 text-xs text-amber-600 dark:text-amber-400">
                 Seul le propriétaire peut modifier les délais.
               </p>
             )}

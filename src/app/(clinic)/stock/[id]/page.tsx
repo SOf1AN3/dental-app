@@ -15,8 +15,8 @@ const typeLabels: Record<string, string> = {
 
 const typeColors: Record<string, string> = {
   in: "bg-mint/10 text-mint",
-  out: "bg-red-50 text-red-600",
-  adjustment: "bg-amber-50 text-amber-700",
+  out: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
+  adjustment: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
 };
 
 export default async function StockItemDetailPage(props: {
@@ -58,15 +58,15 @@ export default async function StockItemDetailPage(props: {
       </div>
 
       {item.currentQty < item.minQty && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
             Stock bas — {item.currentQty}/{item.minQty} {item.unit || "unités"} restants
           </p>
         </div>
       )}
 
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
           <h2 className="text-lg font-semibold text-cool-900">
             Informations
           </h2>
@@ -113,7 +113,7 @@ export default async function StockItemDetailPage(props: {
           )}
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
           <h2 className="text-lg font-semibold text-cool-900">
             Nouveau mouvement
           </h2>
@@ -121,7 +121,7 @@ export default async function StockItemDetailPage(props: {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white">
+      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <div className="px-6 py-4 border-b border-cool-200">
           <h2 className="text-lg font-semibold text-cool-900">
             Historique des mouvements

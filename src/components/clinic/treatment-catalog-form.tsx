@@ -135,7 +135,7 @@ export function TreatmentCatalogForm({
       </div>
 
       {state?.success && (
-        <p className="text-sm text-green-600">
+        <p className="text-sm text-green-600 dark:text-green-400">
           {item
             ? "Traitement mis à jour avec succès."
             : "Traitement ajouté avec succès."}
@@ -180,7 +180,7 @@ export function TreatmentCatalogInlineForm({
   onClose?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-cool-200 bg-white p-6">
+    <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
       <h3 className="mb-4 text-base font-semibold text-cool-900">
         {item ? "Modifier le traitement" : "Ajouter un traitement"}
       </h3>
