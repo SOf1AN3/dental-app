@@ -1,23 +1,16 @@
+import type { CSSProperties } from "react";
 import { a5Styles } from "./a5-styles";
+import { resolveFooter, type A5Template } from "@/lib/document-branding";
+
+export type { A5Template };
 
 /**
- * Pure shared A5 prescription sheet.
+ * Pure shared A5 branded prescription sheet.
  *
  * NO "use client", NO hooks, NO browser globals: this component is safe to
  * render both in a server component (print page) and inside a client
  * component (live editor preview), and always produces the same markup.
  */
-
-export interface A5Template {
-  name: string;
-  address: string | null;
-  phone: string | null;
-  email: string | null;
-  legalInfo: string | null;
-  logoUrl: string | null;
-  headerUrl: string | null;
-  watermarkEnabled: boolean;
-}
 
 export interface A5Item {
   type: "medication" | "care";
@@ -34,6 +27,8 @@ export interface A5Data {
   rxNumber: string;
   patientName: string;
   patientBirthdate: string | null;
+  /** Optional computed age (from patient birthdate). */
+  patientAge: number | null;
   dentistName: string | null;
   date: string;
   notes: string | null;
@@ -45,11 +40,34 @@ interface A5PrescriptionProps {
   data: A5Data;
 }
 
+function footerLines(text: string): string[] {
+  return text.split("\n");
+}
+
+function posoLine(item: A5Item): string {
+  const parts: string[] = [];
+  if (item.dosage) parts.push(item.dosage);
+  if (item.form) parts.push(item.form);
+  if (item.frequency) parts.push(item.frequency);
+  if (item.duration) parts.push(item.duration);
+  if (item.quantity != null) parts.push(`Qté: ${item.quantity}`);
+  return parts.join(" · ");
+}
+
 export function A5Prescription({ template, data }: A5PrescriptionProps) {
+  const branding = template.branding;
+  const footer = resolveFooter(template);
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: a5Styles }} />
-      <div className="a5-page">
+      <div
+        className={`a5-page tpl-${branding.template}`}
+        style={{
+          "--primary": branding.primary,
+          "--secondary": branding.secondary,
+        } as CSSProperties}
+      >
         {template.watermarkEnabled && template.logoUrl && (
           <div className="a5-watermark" aria-hidden="true">
             {/* Plain <img>: logo URLs come from S3 and would break next/image. */}
@@ -58,120 +76,91 @@ export function A5Prescription({ template, data }: A5PrescriptionProps) {
           </div>
         )}
 
-        <div className="a5-content">
-          {template.headerUrl ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element -- user-uploaded S3/upload URL, print template */}
-              <img src={template.headerUrl} alt="" className="a5-header-banner" />
-              <div className="a5-header-meta">
-                <p className="a5-rx-number">N° {data.rxNumber}</p>
-                <p className="a5-rx-date">Date: {data.date}</p>
-              </div>
-            </>
-          ) : (
-            <div className="a5-header">
-              <div className="a5-header-left">
-                {template.logoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element -- user-uploaded S3/upload URL, print template
-                  <img src={template.logoUrl} alt="" className="a5-logo" />
+        {template.headerUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- user-uploaded S3/upload URL, print template */}
+            <img src={template.headerUrl} alt="" className="a5-header-banner" />
+            <div className="a5-header-meta">
+              {data.rxNumber && (
+                <span>
+                  <b>N° {data.rxNumber}</b>
+                </span>
+              )}
+              <span>
+                <b>Date :</b> {data.date}
+              </span>
+            </div>
+          </>
+        ) : (
+          <header className="doc-header">
+            <div className="doc-header-left">
+              {template.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- user-uploaded S3/upload URL, print template
+                <img src={template.logoUrl} alt="" className="logo" />
+              ) : (
+                <div className="logo-placeholder">Logo</div>
+              )}
+              <div>
+                <div className="clinic-name">
+                  {template.name || "Cabinet Dentaire"}
+                </div>
+                {branding.tagline && (
+                  <div className="clinic-tag">{branding.tagline}</div>
                 )}
-                <h1 className="a5-clinic-name">{template.name || "Cabinet Dentaire"}</h1>
-                {template.address && <p className="a5-clinic-detail">{template.address}</p>}
-                {template.phone && <p className="a5-clinic-detail">Tél: {template.phone}</p>}
-                {template.email && <p className="a5-clinic-detail">Email: {template.email}</p>}
-              </div>
-              <div className="a5-header-right">
-                <p className="a5-rx-number">N° {data.rxNumber}</p>
-                <p className="a5-rx-date">Date: {data.date}</p>
               </div>
             </div>
-          )}
-
-          <div className="a5-divider" />
-
-          <div className="a5-patient-info">
-            <div className="a5-patient-row">
-              <span className="a5-label">Patient:</span>
-              <span className="a5-value">{data.patientName}</span>
+            <div className="doc-header-meta">
+              {data.rxNumber && <p className="doc-number">N° {data.rxNumber}</p>}
+              <p className="doc-date">Date: {data.date}</p>
             </div>
+          </header>
+        )}
+
+        <div className="doc-body">
+          <div className="doc-title">ORDONNANCE</div>
+
+          <div className="meta">
+            <span>
+              <b>Patient :</b> {data.patientName}
+              {data.patientAge != null && ` — ${data.patientAge} ans`}
+            </span>
             {data.patientBirthdate && (
-              <div className="a5-patient-row">
-                <span className="a5-label">Date naiss.:</span>
-                <span className="a5-value">{data.patientBirthdate}</span>
-              </div>
+              <span>
+                <b>Naissance :</b> {data.patientBirthdate}
+              </span>
             )}
+            <span>
+              <b>Médecin :</b> {data.dentistName || "—"}
+            </span>
           </div>
 
-          <div className="a5-divider" />
+          <div className="rx-symbol">℞</div>
 
-          <div className="a5-prescriber-info">
-            <div className="a5-patient-row">
-              <span className="a5-label">Médecin:</span>
-              <span className="a5-value">{data.dentistName || "—"}</span>
+          {data.notes && <div className="doc-notes">{data.notes}</div>}
+
+          {data.items.map((item, i) => (
+            <div className="rx-item" key={i}>
+              <b>{item.name}</b>
+              {(() => {
+                const poso = posoLine(item);
+                return poso ? <div>{poso}</div> : null;
+              })()}
+              {item.instructions && (
+                <div className="rx-instruction">{item.instructions}</div>
+              )}
             </div>
-          </div>
+          ))}
 
-          <div className="a5-divider" />
-
-          {data.notes && (
-            <div className="a5-notes">
-              <p className="a5-notes-text">{data.notes}</p>
-            </div>
-          )}
-
-          {data.items.length > 0 && (
-            <table className="a5-rx-table">
-              <thead>
-                <tr>
-                  <th>Médicament/Soin</th>
-                  <th>Dosage</th>
-                  <th>Forme</th>
-                  <th>Fréquence</th>
-                  <th>Durée</th>
-                  <th>Qté</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item, i) => (
-                  <tr key={i}>
-                    <td className="a5-td-name">{item.name}</td>
-                    <td>{item.dosage || "—"}</td>
-                    <td>{item.form || "—"}</td>
-                    <td>{item.frequency || "—"}</td>
-                    <td>{item.duration || "—"}</td>
-                    <td className="a5-td-qty">{item.quantity != null ? item.quantity : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {data.items.length > 0 && data.items.some((item) => item.instructions) && (
-            <div className="a5-instructions">
-              <p className="a5-section-title">Instructions:</p>
-              {data.items
-                .filter((item) => item.instructions)
-                .map((item, i) => (
-                  <p key={i} className="a5-instruction-line">
-                    • {item.name}: {item.instructions}
-                  </p>
-                ))}
-            </div>
-          )}
-
-          <div className="a5-divider" />
-
-          <div className="a5-footer">
-            <div className="a5-signature-area">
-              <p className="a5-signature-label">Signature du médecin:</p>
-              <div className="a5-signature-line" />
-            </div>
-            {template.legalInfo && (
-              <p className="a5-legal-info">{template.legalInfo}</p>
-            )}
-            <p className="a5-footer-note">Document généré par DentalCare</p>
-          </div>
+          <div className="signature">Cachet et signature</div>
         </div>
+
+        <footer className="doc-footer">
+          {footerLines(footer).map((line, i) => (
+            <p key={i}>
+              {line || "\u00A0"}
+            </p>
+          ))}
+        </footer>
       </div>
     </>
   );

@@ -7,23 +7,13 @@ import { resolveStoredUrl } from "@/lib/storage";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { formatDate, cn } from "@/lib/utils";
-import type { A5Template, A5Item } from "@/components/clinic/a5-prescription";
+import { buildA5Template } from "@/lib/document-branding";
+import type { A5Item } from "@/components/clinic/a5-prescription";
 import { SessionStatusBadge } from "@/components/clinic/session-status-badge";
 import { SessionTreatments } from "@/components/clinic/session-treatments";
 import { SessionPrescription } from "@/components/clinic/session-prescription";
 import { SessionInvoice, type InvoiceData } from "@/components/clinic/session-invoice";
 import { DeleteSessionButton } from "@/components/clinic/delete-session-button";
-
-const FALLBACK_TEMPLATE: A5Template = {
-  name: "Cabinet Dentaire",
-  address: null,
-  phone: null,
-  email: null,
-  legalInfo: null,
-  logoUrl: null,
-  headerUrl: null,
-  watermarkEnabled: false,
-};
 
 const TABS = [
   { key: "traitements", label: "Traitements" },
@@ -61,18 +51,7 @@ export default async function SessionDetailPage(props: {
     resolveStoredUrl(clinic?.headerUrl ?? null),
   ]);
 
-  const clinicTemplate: A5Template = clinic
-    ? {
-        name: clinic.name,
-        address: clinic.address,
-        phone: clinic.phone,
-        email: clinic.email,
-        legalInfo: clinic.legalInfo,
-        logoUrl,
-        headerUrl,
-        watermarkEnabled: clinic.watermarkEnabled,
-      }
-    : FALLBACK_TEMPLATE;
+  const clinicTemplate = buildA5Template(clinic, { logoUrl, headerUrl });
 
   const dentistName = profile?.name ?? null;
   const activeTab: TabKey =

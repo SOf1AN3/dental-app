@@ -3,21 +3,11 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getPrescription } from "@/lib/actions/prescription";
 import { getCurrentClinic, getCurrentUserProfile } from "@/lib/actions/settings";
 import { PrescriptionEditor } from "@/components/clinic/prescription-editor";
-import type { A5Template, A5Item } from "@/components/clinic/a5-prescription";
+import type { A5Item } from "@/components/clinic/a5-prescription";
+import { buildA5Template } from "@/lib/document-branding";
 import { resolveStoredUrl } from "@/lib/storage";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-
-const FALLBACK_TEMPLATE: A5Template = {
-  name: "Cabinet Dentaire",
-  address: null,
-  phone: null,
-  email: null,
-  legalInfo: null,
-  logoUrl: null,
-  headerUrl: null,
-  watermarkEnabled: false,
-};
 
 export default async function EditPrescriptionPage(props: {
   params: Promise<{ id: string }>;
@@ -39,18 +29,7 @@ export default async function EditPrescriptionPage(props: {
     resolveStoredUrl(clinic?.headerUrl ?? null),
   ]);
 
-  const clinicTemplate: A5Template = clinic
-    ? {
-        name: clinic.name,
-        address: clinic.address,
-        phone: clinic.phone,
-        email: clinic.email,
-        legalInfo: clinic.legalInfo,
-        logoUrl,
-        headerUrl,
-        watermarkEnabled: clinic.watermarkEnabled,
-      }
-    : FALLBACK_TEMPLATE;
+  const clinicTemplate = buildA5Template(clinic, { logoUrl, headerUrl });
 
   const items: A5Item[] = rx.items.map((item) => ({
     type: item.type,

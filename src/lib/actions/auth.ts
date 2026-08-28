@@ -7,6 +7,7 @@ import { signOut } from "@/lib/auth";
 import { z } from "zod";
 import {
   hashPassword,
+  verifyPassword,
   requireAuth,
   createAccountToken,
   consumeAccountToken,
@@ -153,6 +154,68 @@ export async function resendVerificationEmail() {
 
   const token = await createAccountToken(user.id, "email_verification");
   await sendVerificationEmail(user.email ?? "", getVerifyLink(token));
+
+  return { success: true };
+}
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Mot de passe actuel requis"),
+  newPassword: z.string().min(6, "Le nouveau mot de passe doit faire au moins 6 caractères"),
+  confirmPassword: z.string().min(1, "Confirmation requise"),
+});
+
+export async function changePassword(
+  prevState: { success?: boolean; error?: string } | undefined,
+  formData: FormData,
+): Promise<{ success?: boolean; error?: string }> {
+  const validated = changePasswordSchema.safeParse({
+    currentPassword: formData.get("currentPassword"),
+    newPassword: formData.get("newPassword"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors.currentPassword?.[0]
+      ?? validated.error.flatten().fieldErrors.newPassword?.[0]
+      ?? validated.error.flatten().fieldErrors.confirmPassword?.[0]
+      ?? "Veuillez vérifier les champs du formulaire" };
+  }
+
+  const { currentPassword, newPassword, confirmPassword } = validated.data;
+
+  if (newPassword !== confirmPassword) {
+    return { error: "Les mots de passe ne correspondent pas" };
+  }
+
+  const user = await requireAuth();
+
+  const [dbUser] = await db
+    .select({ passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1);
+
+  if (!dbUser?.passwordHash) {
+    return { error: "Impossible de vérifier le mot de passe actuel" };
+  }
+
+  const valid = await verifyPassword(currentPassword, dbUser.passwordHash);
+  if (!valid) {
+    return { error: "Le mot de passe actuel est incorrect" };
+  }
+
+  await db
+    .update(users)
+    .set({ passwordHash: await hashPassword(newPassword) })
+    .where(eq(users.id, user.id));
+
+  await logAction({
+    clinicId: null,
+    action: "update",
+    entityType: "user",
+    entityId: user.id,
+    after: { passwordChanged: true },
+  });
 
   return { success: true };
 }

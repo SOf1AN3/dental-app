@@ -2,6 +2,7 @@ import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinic, getCurrentUserProfile } from "@/lib/actions/settings";
 import { ClinicSettingsForm } from "@/components/clinic/clinic-settings-form";
 import { ProfileForm } from "@/components/clinic/profile-form";
+import { PasswordChangeForm } from "@/components/clinic/password-change-form";
 
 export default async function GeneralSettingsPage() {
   await requireAuth();
@@ -44,6 +45,7 @@ export default async function GeneralSettingsPage() {
             address: clinic.address,
             wilayaCode: clinic.wilayaCode,
             timezone: clinic.timezone,
+            defaultTaxRate: clinic.defaultTaxRate,
           }}
         />
       </section>
@@ -61,6 +63,16 @@ export default async function GeneralSettingsPage() {
             email: profile.email ?? "",
           }}
         />
+      </section>
+
+      <section className="rounded-xl border border-cool-200 bg-white p-6">
+        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+          Changer le mot de passe
+        </h2>
+        <p className="mb-6 text-sm text-cool-500">
+          Vérifiez votre mot de passe actuel, puis entrez le nouveau.
+        </p>
+        <PasswordChangeForm />
       </section>
     </div>
   );

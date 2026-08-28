@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinic } from "@/lib/actions/settings";
 import { resolveStoredUrl } from "@/lib/storage";
+import { resolveBranding } from "@/lib/document-branding";
 import { DocumentBrandingForm } from "@/components/clinic/document-branding-form";
 import { A5TemplateSettings } from "@/components/clinic/a5-template-settings";
 
@@ -26,10 +27,11 @@ export default async function DocumentsSettingsPage() {
     <div className="space-y-8">
       <section className="rounded-xl border border-cool-200 bg-white p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
-          Apparence des documents
+          Logo et en-tête
         </h2>
         <p className="mb-6 text-sm text-cool-500">
-          Ces éléments apparaissent sur l&apos;ordonnance, la facture et le devis.
+          Logo, en-tête et mentions légales utilisés sur l&apos;ordonnance, la facture
+          et le devis.
         </p>
         <DocumentBrandingForm
           defaultValues={{
@@ -42,10 +44,11 @@ export default async function DocumentsSettingsPage() {
 
       <section className="rounded-xl border border-cool-200 bg-white p-6">
         <h2 className="mb-1 text-lg font-semibold text-cool-900">
-          Modèle d&apos;ordonnance A5
+          Modèle des documents A5
         </h2>
         <p className="mb-6 text-sm text-cool-500">
-          Logo, en-tête et filigrane utilisés sur les ordonnances A5.
+          Choisissez le modèle, les couleurs, le sous-titre et le pied de page appliqués
+          à l&apos;ordonnance, la facture et le devis.
         </p>
         <A5TemplateSettings
           defaultValues={{
@@ -57,6 +60,7 @@ export default async function DocumentsSettingsPage() {
             logoUrl,
             headerUrl,
             watermarkEnabled: clinic.watermarkEnabled,
+            branding: resolveBranding(clinic.documentBranding),
           }}
         />
       </section>

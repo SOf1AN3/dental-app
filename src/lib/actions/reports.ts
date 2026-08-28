@@ -1,10 +1,19 @@
 "use server"
 
 import { db } from "@/lib/db/db"
-import { patients, appointments, invoices, payments } from "@/lib/db/schema"
+import { patients, appointments, invoices, payments, clinicalSessions } from "@/lib/db/schema"
 import { getCurrentClinicId } from "@/lib/multi-tenant"
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils"
+import { requireAuth, requireClinicAccessOrThrow, getCurrentUser, hasAbility } from "@/lib/auth-utils"
 import { eq, and, gte, lt, desc, asc, count, sum } from "drizzle-orm"
+
+/**
+ * Report helpers accept an optional practitioner scope so role dashboards
+ * (DB-2/DB-3/DB-4) reuse the same aggregations:
+ * - dentistId on appointments → per-practitioner activity (DB-3);
+ * - payments.createdBy is the honest per-dentist cash attribution available
+ *   in the schema (invoices carry no practitioner column);
+ * - global revenue stays gated by the `revenue:view_global` ability (RAP-1).
+ */
 
 export async function getPatientStats() {
   await requireAuth()
@@ -38,18 +47,22 @@ export async function getPatientStats() {
   }
 }
 
-export async function getAppointmentStats() {
+export async function getAppointmentStats(opts?: { dentistId?: string }) {
   await requireAuth()
   const clinicId = await getCurrentClinicId()
   await requireClinicAccessOrThrow(clinicId)
 
   try {
+    const scope = opts?.dentistId
+      ? and(eq(appointments.clinicId, clinicId), eq(appointments.dentistId, opts.dentistId))
+      : eq(appointments.clinicId, clinicId)
+
     const [totalRow, completedRow, cancelledRow, noShowRow, typeRows] = await Promise.all([
-      db.select({ value: count() }).from(appointments).where(eq(appointments.clinicId, clinicId)),
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), eq(appointments.status, "completed"))),
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), eq(appointments.status, "cancelled"))),
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), eq(appointments.status, "no_show"))),
-      db.select({ type: appointments.type, value: count() }).from(appointments).where(eq(appointments.clinicId, clinicId)).groupBy(appointments.type),
+      db.select({ value: count() }).from(appointments).where(scope),
+      db.select({ value: count() }).from(appointments).where(and(scope, eq(appointments.status, "completed"))),
+      db.select({ value: count() }).from(appointments).where(and(scope, eq(appointments.status, "cancelled"))),
+      db.select({ value: count() }).from(appointments).where(and(scope, eq(appointments.status, "no_show"))),
+      db.select({ type: appointments.type, value: count() }).from(appointments).where(scope).groupBy(appointments.type),
     ])
 
     return {
@@ -70,16 +83,81 @@ export async function getAppointmentStats() {
   }
 }
 
-export async function getRevenueData() {
+/**
+ * Global clinic revenue. Owner-only figures: callers without the
+ * `revenue:view_global` ability get zeros (page-level gating is the primary
+ * guard; this is defense in depth).
+ */
+export async function getRevenueData(opts?: { dentistId?: string }) {
   await requireAuth()
   const clinicId = await getCurrentClinicId()
   await requireClinicAccessOrThrow(clinicId)
+
+  // A dentist scoped to themselves may read their own numbers; anything
+  // global requires revenue:view_global.
+  if (opts?.dentistId) {
+    const user = await getCurrentUser()
+    if (user?.id !== opts.dentistId && !(await hasAbility(clinicId, "revenue:view_global"))) {
+      return { totalRevenue: 0, monthlyRevenue: [], byMethod: [] }
+    }
+  } else if (!(await hasAbility(clinicId, "revenue:view_global"))) {
+    return { totalRevenue: 0, monthlyRevenue: [], byMethod: [] }
+  }
 
   try {
     const sixMonthsAgo = new Date()
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
     sixMonthsAgo.setDate(1)
     sixMonthsAgo.setHours(0, 0, 0, 0)
+
+    if (opts?.dentistId) {
+      // Per-practitioner view: sessions production + payments they recorded.
+      const [productionRow, monthlyPayments, methodRows] = await Promise.all([
+        db
+          .select({ value: sum(clinicalSessions.totalAmount) })
+          .from(clinicalSessions)
+          .where(
+            and(
+              eq(clinicalSessions.clinicId, clinicId),
+              eq(clinicalSessions.dentistId, opts.dentistId),
+              gte(clinicalSessions.createdAt, sixMonthsAgo),
+            ),
+          ),
+        db
+          .select({ date: payments.date, amount: payments.amount })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.clinicId, clinicId),
+              eq(payments.createdBy, opts.dentistId),
+              gte(payments.date, sixMonthsAgo),
+            ),
+          )
+          .orderBy(asc(payments.date)),
+        db
+          .select({ method: payments.method, value: sum(payments.amount) })
+          .from(payments)
+          .where(and(eq(payments.clinicId, clinicId), eq(payments.createdBy, opts.dentistId)))
+          .groupBy(payments.method),
+      ])
+
+      const monthlyMap = new Map<string, number>()
+      for (const pmt of monthlyPayments) {
+        if (pmt.date) {
+          const key = `${pmt.date.getFullYear()}-${String(pmt.date.getMonth() + 1).padStart(2, "0")}`
+          monthlyMap.set(key, (monthlyMap.get(key) ?? 0) + pmt.amount)
+        }
+      }
+      const monthlyRevenue = Array.from(monthlyMap.entries())
+        .map(([month, amount]) => ({ month, amount: Number(amount) }))
+        .sort((a, b) => a.month.localeCompare(b.month))
+
+      return {
+        totalRevenue: Number(productionRow[0]?.value ?? 0),
+        monthlyRevenue,
+        byMethod: methodRows.map((r) => ({ method: r.method, amount: Number(r.value) })),
+      }
+    }
 
     const [totalRow, monthlyInvoices, methodRows] = await Promise.all([
       db.select({ value: sum(invoices.total) }).from(invoices).where(and(eq(invoices.clinicId, clinicId), eq(invoices.status, "paid"))),
@@ -112,7 +190,7 @@ export async function getRevenueData() {
   }
 }
 
-export async function getMonthlyTrends() {
+export async function getMonthlyTrends(opts?: { dentistId?: string }) {
   await requireAuth()
   const clinicId = await getCurrentClinicId()
   await requireClinicAccessOrThrow(clinicId)
@@ -121,9 +199,17 @@ export async function getMonthlyTrends() {
     const now = new Date()
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1)
 
+    const apptScope = opts?.dentistId
+      ? and(eq(appointments.clinicId, clinicId), eq(appointments.dentistId, opts.dentistId), gte(appointments.startTime, sixMonthsAgo))
+      : and(eq(appointments.clinicId, clinicId), gte(appointments.startTime, sixMonthsAgo))
+
+    const paymentScope = opts?.dentistId
+      ? and(eq(payments.clinicId, clinicId), eq(payments.createdBy, opts.dentistId), gte(payments.date, sixMonthsAgo))
+      : and(eq(payments.clinicId, clinicId), gte(payments.date, sixMonthsAgo))
+
     const [appointmentsData, paymentsData] = await Promise.all([
-      db.select({ startTime: appointments.startTime, patientId: appointments.patientId }).from(appointments).where(and(eq(appointments.clinicId, clinicId), gte(appointments.startTime, sixMonthsAgo))),
-      db.select({ date: payments.date, amount: payments.amount }).from(payments).where(and(eq(payments.clinicId, clinicId), gte(payments.date, sixMonthsAgo))),
+      db.select({ startTime: appointments.startTime, patientId: appointments.patientId }).from(appointments).where(apptScope),
+      db.select({ date: payments.date, amount: payments.amount }).from(payments).where(paymentScope),
     ])
 
     const monthEntries: { month: string; patients: number; appointments: number; revenue: number }[] = []
@@ -169,7 +255,7 @@ export async function getMonthlyTrends() {
   }
 }
 
-export async function getOccupancyRate() {
+export async function getOccupancyRate(opts?: { dentistId?: string }) {
   await requireAuth()
   const clinicId = await getCurrentClinicId()
   await requireClinicAccessOrThrow(clinicId)
@@ -181,13 +267,17 @@ export async function getOccupancyRate() {
     const tomorrowStart = new Date(todayStart)
     tomorrowStart.setDate(tomorrowStart.getDate() + 1)
 
+    const base = opts?.dentistId
+      ? and(eq(appointments.clinicId, clinicId), eq(appointments.dentistId, opts.dentistId))
+      : eq(appointments.clinicId, clinicId)
+
     const [todayAppts, thisMonth, lastMonth] = await Promise.all([
       // Today's appointments count
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), gte(appointments.startTime, todayStart), lt(appointments.startTime, tomorrowStart))),
+      db.select({ value: count() }).from(appointments).where(and(base, gte(appointments.startTime, todayStart), lt(appointments.startTime, tomorrowStart))),
       // This month appointments count
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), gte(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth(), 1)))),
+      db.select({ value: count() }).from(appointments).where(and(base, gte(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth(), 1)))),
       // Last month appointments
-      db.select({ value: count() }).from(appointments).where(and(eq(appointments.clinicId, clinicId), gte(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth() - 1, 1)), lt(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth(), 1)))),
+      db.select({ value: count() }).from(appointments).where(and(base, gte(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth() - 1, 1)), lt(appointments.startTime, new Date(todayStart.getFullYear(), todayStart.getMonth(), 1)))),
     ])
 
     // Assume 8 slots per day (9h-12h, 14h-19h) x number of weekdays

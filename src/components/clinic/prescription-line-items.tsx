@@ -63,9 +63,6 @@ export function PrescriptionLineItems({ items, onChange }: PrescriptionLineItems
           <thead>
             <tr className="border-b border-cool-200 bg-cool-50">
               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Type
-              </th>
-              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
                 Nom*
               </th>
               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
@@ -92,17 +89,6 @@ export function PrescriptionLineItems({ items, onChange }: PrescriptionLineItems
           <tbody>
             {items.map((item, index) => (
               <tr key={item.id} className="border-b border-cool-100">
-                <td className="px-3 py-2">
-                  <select
-                    value={item.type}
-                    onChange={(e) => updateItem(item.id, "type", e.target.value)}
-                    aria-label={`Type de l'article ${index + 1}`}
-                    className={inputClassName}
-                  >
-                    <option value="medication">Médicament</option>
-                    <option value="care">Soin</option>
-                  </select>
-                </td>
                 <td className="px-3 py-2">
                   <input
                     type="text"

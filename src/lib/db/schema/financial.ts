@@ -73,6 +73,10 @@ export const quotes = pgTable("quote", {
   notes: text("notes"),
   generatedFromTreatmentPlanId: text("generated_from_treatment_plan_id")
     .references(() => treatmentPlans.id, { onDelete: "set null" }),
+  // FACT-1: set when this quote has been converted into an invoice.
+  convertedInvoiceId: text("converted_invoice_id").references(() => invoices.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("uq_quotes_clinic_number").on(table.clinicId, table.number),

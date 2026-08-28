@@ -7,6 +7,8 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { InvoiceStatusBadge } from "@/components/clinic/invoice-status-badge";
+import { ConfirmMarkPaidButton } from "@/components/clinic/confirm-mark-paid-button";
+import { BackButton } from "@/components/clinic/back-button";
 import type { invoiceItems as invoiceItemSchema, payments as paymentSchema } from "@/lib/db/schema";
 
 const methodLabels: Record<string, string> = {
@@ -63,17 +65,21 @@ export default async function InvoiceDetailPage(props: {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <Link
-            href="/billing/invoices"
-            className="text-sm text-cerulean hover:text-cerulean/80 mb-2 inline-block"
-          >
-            &larr; Retour aux factures
-          </Link>
+          <BackButton fallback="/billing/invoices" label="← Retour aux factures" />
           <h1 className="text-2xl font-bold text-cool-900">
             Facture {invoice.number}
           </h1>
         </div>
-        <InvoiceStatusBadge status={invoice.status} className="text-sm px-3 py-1" />
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/billing/invoices/${invoice.id}/print`}
+            target="_blank"
+            className="rounded-lg border border-cool-200 px-3 py-1.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          >
+            Imprimer
+          </Link>
+          <InvoiceStatusBadge status={invoice.status} className="text-sm px-3 py-1" />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
@@ -322,17 +328,13 @@ export default async function InvoiceDetailPage(props: {
           )}
           {(invoice.status === "sent" ||
             invoice.status === "partially_paid" ||
-            invoice.status === "overdue") && (
-            <form action={handlePayStatus}>
-              <input type="hidden" name="invoiceId" value={invoice.id} />
-              <input type="hidden" name="status" value="paid" />
-              <button
-                type="submit"
-                className="rounded-lg bg-mint px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-colors"
-              >
-                Marquer payée
-              </button>
-            </form>
+            invoice.status === "overdue" ||
+            invoice.status === "draft") && (
+            <ConfirmMarkPaidButton
+              action={handlePayStatus}
+              invoiceId={invoice.id}
+              isDraft={invoice.status === "draft"}
+            />
           )}
           <form action={handleCancelStatus}>
             <input type="hidden" name="invoiceId" value={invoice.id} />

@@ -2,14 +2,15 @@
 
 import { db } from "@/lib/db/db";
 import { clinics, users, clinicMemberships, clinicSchedule } from "@/lib/db/schema";
-import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { getCurrentClinicId } from "@/lib/multi-tenant";
+import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
 import { isPractitionerRole } from "@/lib/constants";
 import { storage } from "@/lib/storage";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
+import { documentBrandingSchema } from "@/lib/document-branding";
 
 export async function getCurrentClinic() {
   await requireAuth();
@@ -46,6 +47,7 @@ const clinicSchema = z.object({
   address: z.string().optional().or(z.literal("")),
   wilayaCode: z.string().optional().or(z.literal("")),
   timezone: z.string().optional().or(z.literal("")),
+  defaultTaxRate: z.coerce.number().min(0).max(100).optional().default(19),
 });
 
 export async function updateClinic(
@@ -55,6 +57,13 @@ export async function updateClinic(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
+    return {
+      success: false,
+      error: { general: ["Seul le propriétaire peut modifier les paramètres de la clinique"] },
+    };
+  }
 
   const validated = clinicSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
@@ -87,6 +96,7 @@ export async function updateClinic(
       address: data.address || null,
       wilayaCode: data.wilayaCode || null,
       timezone: data.timezone || "Africa/Algiers",
+      defaultTaxRate: data.defaultTaxRate ?? 19,
     };
 
     // Handle logo upload
@@ -133,7 +143,7 @@ export async function updateClinic(
   }
 }
 
-const documentBrandingSchema = z.object({
+const logoBrandingSchema = z.object({
   legalInfo: z.string().optional().or(z.literal("")),
 });
 
@@ -145,7 +155,14 @@ export async function updateDocumentBranding(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
-  const validated = documentBrandingSchema.safeParse(Object.fromEntries(formData));
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
+    return {
+      success: false,
+      error: { general: ["Seul le propriétaire peut modifier l'identité des documents"] },
+    };
+  }
+
+  const validated = logoBrandingSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
     return { success: false, error: validated.error.flatten().fieldErrors };
   }
@@ -216,6 +233,13 @@ export async function updateClinicTemplate(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
+    return {
+      success: false,
+      error: { general: ["Seul le propriétaire peut modifier les modèles de documents"] },
+    };
+  }
+
   const raw: Record<string, unknown> = Object.fromEntries(formData);
   raw.watermarkEnabled = formData.has("watermarkEnabled");
 
@@ -277,6 +301,71 @@ export async function updateClinicTemplate(
     return { success: true };
   } catch {
     return { success: false, error: { general: ["Erreur lors de la mise à jour du modèle d'ordonnance"] } };
+  }
+}
+
+export async function updateDocumentTemplates(
+  prevState: { success?: boolean; error?: Record<string, string[]> } | undefined,
+  formData: FormData,
+) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
+    return {
+      success: false,
+      error: { general: ["Seul le propriétaire peut modifier l'identité des documents"] },
+    };
+  }
+
+  const validated = documentBrandingSchema.safeParse(Object.fromEntries(formData));
+  if (!validated.success) {
+    return { success: false, error: validated.error.flatten().fieldErrors };
+  }
+
+  const d = validated.data;
+  const branding = {
+    template: d.template,
+    primary: d.primary,
+    secondary: d.secondary,
+    tagline: d.tagline ? d.tagline.trim() : null,
+    footer: d.footer ? d.footer.trim() : null,
+  };
+  const watermarkEnabled = formData.has("watermarkEnabled");
+
+  try {
+    const [current] = await db
+      .select({
+        documentBranding: clinics.documentBranding,
+        watermarkEnabled: clinics.watermarkEnabled,
+      })
+      .from(clinics)
+      .where(eq(clinics.id, clinicId))
+      .limit(1);
+
+    await db
+      .update(clinics)
+      .set({ documentBranding: branding, watermarkEnabled })
+      .where(eq(clinics.id, clinicId));
+
+    await logAction({
+      clinicId,
+      action: "update",
+      entityType: "clinic_settings",
+      entityId: clinicId,
+      before: {
+        documentBranding: current?.documentBranding ?? null,
+        watermarkEnabled: current?.watermarkEnabled ?? false,
+      },
+      after: { documentBranding: branding, watermarkEnabled },
+    });
+
+    revalidatePath("/settings/documents");
+    revalidatePath("/prescriptions");
+    return { success: true };
+  } catch {
+    return { success: false, error: { general: ["Erreur lors de la mise à jour de l'identité des documents"] } };
   }
 }
 
@@ -342,9 +431,8 @@ export async function updateClinicSchedule(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
-  const { membership } = await requireClinicAccess(clinicId);
 
-  if (membership.role !== "owner") {
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
     return { success: false, error: { general: ["Seul le propriétaire peut modifier les horaires"] } };
   }
 
@@ -443,9 +531,8 @@ export async function updateDentistMinGap(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
-  const { membership } = await requireClinicAccess(clinicId);
 
-  if (membership.role !== "owner") {
+  if (!(await hasAbility(clinicId, "settings:clinic_manage"))) {
     return { success: false, error: { general: ["Seul le propriétaire peut modifier les horaires"] } };
   }
 

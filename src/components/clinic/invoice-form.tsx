@@ -4,8 +4,13 @@ import { useActionState, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { createInvoice } from "@/lib/actions/financial";
 import { searchPatients } from "@/lib/actions/patient";
-import { InvoiceLineItems } from "@/components/clinic/invoice-line-items";
+import { InvoiceLineItems, type InvoiceLineItem } from "@/components/clinic/invoice-line-items";
 import type { CatalogItem } from "@/lib/treatment-catalog-utils";
+import { A5FinancialDocument, type FinancialDocData } from "@/components/clinic/a5-financial-document";
+import { A5_SHEET_WIDTH_PX, A5_SHEET_HEIGHT_PX } from "@/components/clinic/a5-styles";
+import { docTotals } from "@/lib/billing-math";
+import type { A5Template } from "@/lib/document-branding";
+import { formatDate } from "@/lib/utils";
 
 interface Patient {
   id: string;
@@ -13,7 +18,18 @@ interface Patient {
   lastName: string;
 }
 
-export function InvoiceForm({ catalog }: { catalog?: CatalogItem[] }) {
+const inputClassName =
+  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+
+export function InvoiceForm({
+  catalog,
+  defaultTaxRate = 19,
+  clinicTemplate,
+}: {
+  catalog?: CatalogItem[];
+  defaultTaxRate?: number;
+  clinicTemplate: A5Template;
+}) {
   const [state, action, pending] = useActionState(createInvoice, undefined);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Patient[]>([]);
@@ -22,9 +38,19 @@ export function InvoiceForm({ catalog }: { catalog?: CatalogItem[] }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fieldErrors = state && 'error' in state && state.error && !('general' in state.error)
+  const [items, setItems] = useState<InvoiceLineItem[]>([]);
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [dueDate, setDueDate] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const errors = state && 'error' in state && state.error
     ? state.error as Record<string, string[] | undefined>
     : {} as Record<string, string[] | undefined>;
+  const generalErrors = errors.general;
+  const itemErrors = errors.items;
 
   useEffect(() => {
     if (debounceRef.current) {
@@ -61,145 +87,223 @@ export function InvoiceForm({ catalog }: { catalog?: CatalogItem[] }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  return (
-    <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
-          Nouvelle facture
-        </h2>
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-        <div ref={containerRef} className="relative">
-          <label
-            htmlFor="patientSearch"
-            className="block text-sm font-medium text-cool-700"
-          >
-            Patient *
-          </label>
-          <input
-            id="patientSearch"
-            type="text"
-            placeholder="Rechercher un patient..."
-            value={selectedPatient ? `${selectedPatient.lastName} ${selectedPatient.firstName}` : query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSelectedPatient(null);
-              const input = document.getElementById(
-                "patientId",
-              ) as HTMLInputElement;
-              if (input) input.value = "";
-            }}
-            onFocus={() => {
-              if (results.length > 0) setOpen(true);
-            }}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
-          />
-          <input id="patientId" name="patientId" type="hidden" />
-          {open && results.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg">
-              {results.map((patient) => (
-                <button
-                  key={patient.id}
-                  type="button"
-                  className="block w-full px-4 py-2 text-left text-sm hover:bg-cool-50 transition-colors"
-                  onClick={() => {
-                    setSelectedPatient(patient);
-                    setQuery("");
-                    setResults([]);
-                    setOpen(false);
-                    const input = document.getElementById(
-                      "patientId",
-                    ) as HTMLInputElement;
-                    if (input) input.value = patient.id;
-                  }}
-                >
-                  {patient.lastName} {patient.firstName}
-                </button>
-              ))}
+  const scale = containerWidth > 0 ? Math.min(1, containerWidth / A5_SHEET_WIDTH_PX) : 1;
+
+  const previewItems = items.filter((item) => item.description.trim().length > 0);
+  const totals = docTotals(previewItems);
+
+  const previewData: FinancialDocData = {
+    docType: "invoice",
+    number: "",
+    date: date ? formatDate(date) : "—",
+    dueLabel: dueDate ? formatDate(dueDate) : null,
+    patientName: selectedPatient
+      ? `${selectedPatient.lastName} ${selectedPatient.firstName}`
+      : "—",
+    patientPhone: null,
+    notes: notes.trim() || null,
+    items: previewItems,
+    subtotal: totals.subtotal,
+    taxTotal: totals.taxTotal,
+    discountTotal: totals.discountTotal,
+    total: totals.total,
+    paidAmount: null,
+    statusLabel: null,
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <form action={action} className="space-y-6">
+        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+          {generalErrors && generalErrors.length > 0 && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              {generalErrors[0]}
             </div>
           )}
-          {fieldErrors?.patientId && (
-            <p className="mt-1 text-xs text-red-500">
-              {fieldErrors.patientId[0]}
-            </p>
-          )}
-        </div>
+          <h2 className="text-lg font-semibold text-cool-900">
+            Nouvelle facture
+          </h2>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
+          <div ref={containerRef} className="relative">
             <label
-              htmlFor="date"
+              htmlFor="patientSearch"
               className="block text-sm font-medium text-cool-700"
             >
-              Date de la facture *
+              Patient *
             </label>
             <input
-              id="date"
-              name="date"
-              type="date"
-              required
-              defaultValue={new Date().toISOString().split("T")[0]}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              id="patientSearch"
+              type="text"
+              placeholder="Rechercher un patient..."
+              value={selectedPatient ? `${selectedPatient.lastName} ${selectedPatient.firstName}` : query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelectedPatient(null);
+                const input = document.getElementById(
+                  "patientId",
+                ) as HTMLInputElement;
+                if (input) input.value = "";
+              }}
+              onFocus={() => {
+                if (results.length > 0) setOpen(true);
+              }}
+              className={inputClassName}
             />
-            {fieldErrors?.date && (
+            <input id="patientId" name="patientId" type="hidden" />
+            {open && results.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg">
+                {results.map((patient) => (
+                  <button
+                    key={patient.id}
+                    type="button"
+                    className="block w-full px-4 py-2 text-left text-sm hover:bg-cool-50 transition-colors"
+                    onClick={() => {
+                      setSelectedPatient(patient);
+                      setQuery("");
+                      setResults([]);
+                      setOpen(false);
+                      const input = document.getElementById(
+                        "patientId",
+                      ) as HTMLInputElement;
+                      if (input) input.value = patient.id;
+                    }}
+                  >
+                    {patient.lastName} {patient.firstName}
+                  </button>
+                ))}
+              </div>
+            )}
+            {errors?.patientId && (
               <p className="mt-1 text-xs text-red-500">
-                {fieldErrors.date[0]}
+                {errors.patientId[0]}
               </p>
             )}
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="date"
+                className="block text-sm font-medium text-cool-700"
+              >
+                Date de la facture *
+              </label>
+              <input
+                id="date"
+                name="date"
+                type="date"
+                required
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputClassName}
+              />
+              {errors?.date && (
+                <p className="mt-1 text-xs text-red-500">
+                  {errors.date[0]}
+                </p>
+              )}
+            </div>
+            <div>
+              <label
+                htmlFor="dueDate"
+                className="block text-sm font-medium text-cool-700"
+              >
+                Date d&apos;échéance
+              </label>
+              <input
+                id="dueDate"
+                name="dueDate"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className={inputClassName}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-cool-700 mb-2">
+              Lignes de facture
+            </label>
+            <InvoiceLineItems
+              catalog={catalog}
+              defaultTaxRate={defaultTaxRate}
+              onItemsChange={setItems}
+            />
+            {itemErrors && itemErrors.length > 0 && (
+              <p className="mt-1 text-xs text-red-500">{itemErrors[0]}</p>
+            )}
+          </div>
+
           <div>
             <label
-              htmlFor="dueDate"
+              htmlFor="notes"
               className="block text-sm font-medium text-cool-700"
             >
-              Date d&apos;échéance
+              Notes
             </label>
-            <input
-              id="dueDate"
-              name="dueDate"
-              type="date"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            <textarea
+              id="notes"
+              name="notes"
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={inputClassName + " resize-y"}
             />
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-cool-700 mb-2">
-            Lignes de facture
-          </label>
-          <InvoiceLineItems catalog={catalog} />
-        </div>
-
-        <div>
-          <label
-            htmlFor="notes"
-            className="block text-sm font-medium text-cool-700"
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
           >
-            Notes
-          </label>
-          <textarea
-            id="notes"
-            name="notes"
-            rows={3}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
-          />
+            {pending ? "Création en cours..." : "Créer la facture"}
+          </button>
+          <Link
+            href="/billing/invoices"
+            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          >
+            Annuler
+          </Link>
+        </div>
+      </form>
+
+      <div className="hidden lg:block lg:sticky lg:top-24 self-start">
+        <p className="mb-2 text-xs font-medium text-cool-500 uppercase tracking-wider">
+          Aperçu A5
+        </p>
+        <div ref={previewRef} className="w-full">
+          <div
+            className="overflow-hidden rounded-lg border border-cool-200 shadow-lg"
+            style={{ width: A5_SHEET_WIDTH_PX * scale, height: A5_SHEET_HEIGHT_PX * scale }}
+          >
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: "top left",
+                width: "148mm",
+                height: "210mm",
+              }}
+            >
+              <A5FinancialDocument template={clinicTemplate} data={previewData} />
+            </div>
+          </div>
         </div>
       </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
-        >
-          {pending ? "Création en cours..." : "Créer la facture"}
-        </button>
-        <Link
-          href="/billing/invoices"
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-        >
-          Annuler
-        </Link>
-      </div>
-    </form>
+    </div>
   );
 }

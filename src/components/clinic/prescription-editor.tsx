@@ -222,6 +222,7 @@ export function PrescriptionEditor({
     rxNumber: initialData?.rxNumber ?? "",
     patientName: selected ? `${selected.lastName} ${selected.firstName}` : "—",
     patientBirthdate: selected?.dateOfBirth ? formatDate(selected.dateOfBirth) : null,
+    patientAge: null,
     dentistName,
     date: formatDate(new Date()),
     notes: notes.trim() || null,

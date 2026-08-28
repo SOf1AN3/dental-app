@@ -6,6 +6,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
+import { can, isRole, type Ability, type Role } from "@/lib/permissions";
 
 export const getCurrentUser = cache(async () => {
   const session = await auth();
@@ -62,6 +63,37 @@ export async function requireClinicAccessOrThrow(clinicId: string): Promise<void
   });
   if (!membership) {
     throw new Error("Accès non autorisé à cette clinique");
+  }
+}
+
+export async function getCurrentRole(clinicId: string): Promise<Role | null> {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const membership = await db.query.clinicMemberships.findFirst({
+    where: and(
+      eq(clinicMemberships.userId, user.id),
+      eq(clinicMemberships.clinicId, clinicId)
+    ),
+  });
+  if (!membership || !isRole(membership.role)) return null;
+  return membership.role;
+}
+
+/**
+ * Non-throwing ability check for actions that surface errors as return values.
+ */
+export async function hasAbility(clinicId: string, ability: Ability): Promise<boolean> {
+  const role = await getCurrentRole(clinicId);
+  return role !== null && can(role, ability);
+}
+
+/**
+ * Throwing variant for pages / void actions. Renders the error boundary with
+ * an explicit message instead of silently proceeding.
+ */
+export async function requireAbility(clinicId: string, ability: Ability): Promise<void> {
+  if (!(await hasAbility(clinicId, ability))) {
+    throw new Error(`Accès refusé : capacité « ${ability} » requise`);
   }
 }
 

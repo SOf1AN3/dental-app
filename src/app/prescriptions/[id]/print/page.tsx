@@ -3,22 +3,12 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getPrescription } from "@/lib/actions/prescription";
 import { getCurrentClinic } from "@/lib/actions/settings";
 import { formatDate } from "@/lib/utils";
+import { buildA5Template, computeAge } from "@/lib/document-branding";
 import { A5Prescription } from "@/components/clinic/a5-prescription";
-import type { A5Template, A5Item } from "@/components/clinic/a5-prescription";
+import type { A5Item } from "@/components/clinic/a5-prescription";
 import { PrintToolbar } from "@/components/clinic/print-toolbar";
 import { resolveStoredUrl } from "@/lib/storage";
 import { notFound } from "next/navigation";
-
-const FALLBACK_TEMPLATE: A5Template = {
-  name: "Cabinet Dentaire",
-  address: null,
-  phone: null,
-  email: null,
-  legalInfo: null,
-  logoUrl: null,
-  headerUrl: null,
-  watermarkEnabled: false,
-};
 
 export default async function PrescriptionPrintPage(props: {
   params: Promise<{ id: string }>;
@@ -39,18 +29,7 @@ export default async function PrescriptionPrintPage(props: {
     resolveStoredUrl(clinic?.headerUrl ?? null),
   ]);
 
-  const clinicTemplate: A5Template = clinic
-    ? {
-        name: clinic.name,
-        address: clinic.address,
-        phone: clinic.phone,
-        email: clinic.email,
-        legalInfo: clinic.legalInfo,
-        logoUrl,
-        headerUrl,
-        watermarkEnabled: clinic.watermarkEnabled,
-      }
-    : FALLBACK_TEMPLATE;
+  const template = buildA5Template(clinic, { logoUrl, headerUrl });
 
   const items: A5Item[] = rx.items.map((item) => ({
     type: item.type,
@@ -67,7 +46,7 @@ export default async function PrescriptionPrintPage(props: {
     <>
       <PrintToolbar />
       <A5Prescription
-        template={clinicTemplate}
+        template={template}
         data={{
           rxNumber: rx.id.slice(0, 8),
           patientName: rx.patient
@@ -75,6 +54,9 @@ export default async function PrescriptionPrintPage(props: {
             : "—",
           patientBirthdate: rx.patient?.dateOfBirth
             ? formatDate(rx.patient.dateOfBirth)
+            : null,
+          patientAge: rx.patient?.dateOfBirth
+            ? computeAge(rx.patient.dateOfBirth)
             : null,
           dentistName: rx.dentistName,
           date: formatDate(rx.date),

@@ -99,6 +99,13 @@
       "when": 1785845894432,
       "tag": "0013_giant_nightcrawler",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787703656535,
+      "tag": "0014_deep_cyclops",
+      "breakpoints": true
     }
   ]
 }

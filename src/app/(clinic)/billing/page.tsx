@@ -59,12 +59,26 @@ export default async function BillingPage() {
             Gérez les factures, devis et paiements
           </p>
         </div>
-        <Link
-          href="/billing/invoices/new"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouvelle facture
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/billing/payments/new"
+            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          >
+            + Enregistrer un paiement
+          </Link>
+          <Link
+            href="/billing/quotes/new"
+            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          >
+            + Nouveau devis
+          </Link>
+          <Link
+            href="/billing/invoices/new"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+          >
+            + Nouvelle facture
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-8">

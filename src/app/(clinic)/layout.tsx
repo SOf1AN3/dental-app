@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { LayoutDashboard, Users, Calendar, Sofa, DollarSign, Pill, Stethoscope, Package, Bone, TrendingUp, Settings } from "lucide-react";
+import { LayoutDashboard, Users, Calendar, Sofa, DollarSign, Pill, Package, Bone, TrendingUp, Settings } from "lucide-react";
 import { ThemeToggle } from "@/components/clinic/theme-toggle";
 import { UserMenu } from "@/components/clinic/user-menu";
 import { auth } from "@/lib/auth";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
+import { getCurrentRole } from "@/lib/auth-utils";
+import { can, NAV_ABILITY, type Role } from "@/lib/permissions";
 import { SearchInput } from "@/components/clinic/search-input";
 import { NotificationBell } from "@/components/clinic/notification-bell";
 
@@ -14,7 +16,6 @@ const sidebarLinks: { label: string; href: string; icon: React.ElementType }[] =
   { label: "Salle d'attente", href: "/waiting-room", icon: Sofa },
   { label: "Facturation", href: "/billing", icon: DollarSign },
   { label: "Ordonnances", href: "/prescriptions", icon: Pill },
-  { label: "Traitements", href: "/treatments", icon: Stethoscope },
   { label: "Stock", href: "/stock", icon: Package },
   { label: "Prothèses", href: "/prostheses", icon: Bone },
   { label: "Rapports", href: "/reports", icon: TrendingUp },
@@ -41,6 +42,21 @@ export default async function ClinicLayout({
   const initials = getUserInitials(userName);
   const clinicId = await getCurrentClinicId();
 
+  // Nav filtering is UX only; every page/action re-checks server-side (PAR-1).
+  let role: Role | null = null;
+  try {
+    role = await getCurrentRole(clinicId);
+  } catch {
+    role = null;
+  }
+  const visibleLinks =
+    role === null
+      ? sidebarLinks
+      : sidebarLinks.filter((link) => {
+          const ability = NAV_ABILITY[link.href];
+          return ability ? can(role, ability) : true;
+        });
+
   return (
     <div className="flex h-full min-h-screen">
       <aside className="fixed left-0 top-0 z-30 flex h-full w-64 flex-col bg-primary text-white">
@@ -49,7 +65,7 @@ export default async function ClinicLayout({
         </div>
         <nav className="flex-1 overflow-y-auto py-4">
           <ul className="space-y-1 px-3">
-            {sidebarLinks.map((link) => (
+            {visibleLinks.map((link) => (
               <li key={link.href}>
                 <Link
                   href={link.href}

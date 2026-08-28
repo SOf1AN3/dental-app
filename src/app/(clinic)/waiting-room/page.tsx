@@ -4,6 +4,7 @@ import { eq, and, asc } from "drizzle-orm";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth } from "@/lib/auth-utils";
 import { WaitingRoomClient } from "@/components/clinic/waiting-room-client";
+import { UrgenceAdmission } from "@/components/clinic/urgence-admission";
 
 export default async function WaitingRoomPage() {
   await requireAuth();
@@ -28,6 +29,10 @@ export default async function WaitingRoomPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-cool-900">Salle d&apos;attente</h1>
+      </div>
+
+      <div className="mb-6">
+        <UrgenceAdmission />
       </div>
 
       <WaitingRoomClient initialEntries={entries} />

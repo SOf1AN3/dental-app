@@ -3,24 +3,16 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getQuote, updateQuoteStatus } from "@/lib/actions/financial";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { QuoteStatusBadge } from "@/components/clinic/quote-status-badge";
+import { ConvertQuoteButton } from "@/components/clinic/convert-quote-button";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { quoteItems } from "@/lib/db/schema";
+import { BackButton } from "@/components/clinic/back-button";
 
-function calculateSubtotal(items: Array<{ quantity: number; unitPrice: number }>) {
-  return items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-}
-
-function calculateTaxTotal(items: Array<{ quantity: number; unitPrice: number; taxRate: number | null }>) {
-  return items.reduce((sum, item) => {
-    const lineTotal = item.quantity * item.unitPrice;
-    return sum + Math.round(lineTotal * ((item.taxRate || 0) / 100));
-  }, 0);
-}
-
-function calculateDiscountTotal(items: Array<{ quantity: number; unitPrice: number; discount: number | null }>) {
-  return items.reduce((sum, item) => sum + (item.discount || 0), 0);
-}
+/**
+ * Totals are read from the stored document columns (authoritative, computed
+ * server-side by billing-math at creation). This mirrors the invoice detail
+ * page so screen and future print views always match the database.
+ */
 
 export default async function QuoteDetailPage(props: {
   params: Promise<{ id: string }>;
@@ -33,20 +25,15 @@ export default async function QuoteDetailPage(props: {
   if (!quote) notFound();
 
   const items = quote.items || [];
-  const subtotal = calculateSubtotal(items);
-  const taxTotal = calculateTaxTotal(items);
-  const discountTotal = calculateDiscountTotal(items);
-  const total = subtotal + taxTotal - discountTotal;
+  const subtotal = quote.subtotal;
+  const taxTotal = quote.taxTotal ?? 0;
+  const discountTotal = quote.discountTotal ?? 0;
+  const total = quote.total;
 
   return (
     <div>
       <div className="mb-6">
-        <Link
-          href="/billing/quotes"
-          className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
-        >
-          ← Retour aux devis
-        </Link>
+        <BackButton fallback="/billing/quotes" label="← Retour aux devis" />
       </div>
 
       <div className="rounded-xl border border-cool-200 bg-white p-6 mb-6">
@@ -57,6 +44,13 @@ export default async function QuoteDetailPage(props: {
                 Devis {quote.number}
               </h1>
               <QuoteStatusBadge status={quote.status} />
+              <Link
+                href={`/billing/quotes/${quote.id}/print`}
+                target="_blank"
+                className="rounded-lg border border-cool-200 px-3 py-1.5 text-xs font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+              >
+                Imprimer
+              </Link>
             </div>
             <p className="text-sm text-cool-500">
               Date: {formatDate(quote.date)}
@@ -120,11 +114,7 @@ export default async function QuoteDetailPage(props: {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item: typeof quoteItems.$inferSelect) => {
-                  const lineTotal = item.quantity * item.unitPrice;
-                  const lineTax = Math.round(lineTotal * ((item.taxRate || 0) / 100));
-                  const lineDiscount = item.discount || 0;
-                  const finalTotal = lineTotal + lineTax - lineDiscount;
+                {items.map((item) => {
                   return (
                     <tr
                       key={item.id}
@@ -140,13 +130,13 @@ export default async function QuoteDetailPage(props: {
                         {formatCurrency(item.unitPrice)}
                       </td>
                       <td className="px-4 py-3 text-right text-cool-600">
-                        {item.taxRate ? `${item.taxRate}%` : "-"}
+                        {(item.taxRate ?? 0) > 0 ? `${item.taxRate}%` : "-"}
                       </td>
                       <td className="px-4 py-3 text-right text-cool-600">
-                        {lineDiscount > 0 ? formatCurrency(lineDiscount) : "-"}
+                        {(item.discount ?? 0) > 0 ? formatCurrency(item.discount ?? 0) : "-"}
                       </td>
                       <td className="px-4 py-3 text-right font-medium text-cool-900">
-                        {formatCurrency(finalTotal)}
+                        {formatCurrency(item.total)}
                       </td>
                     </tr>
                   );
@@ -213,20 +203,21 @@ export default async function QuoteDetailPage(props: {
             </form>
           </>
         )}
-        {quote.status === "accepted" && (
+        {quote.status === "accepted" && !quote.convertedInvoiceId && (
+          <ConvertQuoteButton quoteId={quote.id} />
+        )}
+        {quote.convertedInvoiceId && (
           <Link
-            href="/billing/invoices/new"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+            href={`/billing/invoices/${quote.convertedInvoiceId}`}
+            className="rounded-lg border border-cerulean px-4 py-2 text-sm font-medium text-cerulean hover:bg-cerulean/5 transition-colors"
           >
-            Générer une facture
+            Voir la facture liée
           </Link>
         )}
-        <Link
-          href="/billing/quotes"
-          className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-        >
-          Retour à la liste
-        </Link>
+        <BackButton
+          fallback="/billing/quotes"
+          label="Retour à la liste"
+        />
       </div>
     </div>
   );
