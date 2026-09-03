@@ -11,4 +11,5 @@ export * from "./inventory";
 export * from "./prostheses";
 export * from "./subscriptions";
 export * from "./support";
+export * from "./drug-catalog";
 export * from "./relations";

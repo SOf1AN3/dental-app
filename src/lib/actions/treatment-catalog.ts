@@ -75,7 +75,7 @@ export async function createTreatmentCatalogItem(
       });
     }
 
-    revalidatePath("/settings/treatment-catalog");
+    revalidatePath("/settings/catalogues/treatment");
     return { success: true };
   } catch {
     return { success: false, error: { general: ["Erreur lors de la création du traitement"] } };
@@ -141,7 +141,7 @@ export async function updateTreatmentCatalogItem(
       },
     });
 
-    revalidatePath("/settings/treatment-catalog");
+    revalidatePath("/settings/catalogues/treatment");
     return { success: true };
   } catch {
     return { success: false, error: { general: ["Erreur lors de la mise à jour du traitement"] } };
@@ -179,7 +179,7 @@ export async function deleteTreatmentCatalogItem(id: string) {
       },
     });
 
-    revalidatePath("/settings/treatment-catalog");
+    revalidatePath("/settings/catalogues/treatment");
     return { success: true };
   } catch {
     return { success: false, error: "Erreur lors de la suppression du traitement" };
@@ -215,7 +215,7 @@ export async function toggleTreatmentCatalogItemActive(id: string, isActive: boo
       after: { isActive },
     });
 
-    revalidatePath("/settings/treatment-catalog");
+    revalidatePath("/settings/catalogues/treatment");
     return { success: true };
   } catch {
     return { success: false, error: "Erreur lors de la mise à jour du statut" };

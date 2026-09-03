@@ -20,6 +20,7 @@ export const clinicsRelations = relations(tables.clinics, ({ many }) => ({
   supportTickets: many(tables.supportTickets),
   clinicMemberships: many(tables.clinicMemberships),
   treatmentCatalog: many(tables.treatmentCatalog),
+  drugCatalog: many(tables.drugCatalog),
   clinicalSessions: many(tables.clinicalSessions),
   schedule: many(tables.clinicSchedule),
 }));
@@ -30,6 +31,10 @@ export const clinicScheduleRelations = relations(tables.clinicSchedule, ({ one }
 
 export const treatmentCatalogRelations = relations(tables.treatmentCatalog, ({ one }) => ({
   clinic: one(tables.clinics, { fields: [tables.treatmentCatalog.clinicId], references: [tables.clinics.id] }),
+}));
+
+export const drugCatalogRelations = relations(tables.drugCatalog, ({ one }) => ({
+  clinic: one(tables.clinics, { fields: [tables.drugCatalog.clinicId], references: [tables.clinics.id] }),
 }));
 
 export const patientsRelations = relations(tables.patients, ({ one, many }) => ({

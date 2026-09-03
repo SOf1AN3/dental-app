@@ -1,6 +1,7 @@
 "use client";
 
 import type { A5Item } from "@/components/clinic/a5-prescription";
+import { DrugAutocomplete, type DrugOption } from "@/components/clinic/drug-autocomplete";
 
 /**
  * Local line item used by the editor. `quantity` may be "" while the user is
@@ -55,6 +56,23 @@ export function PrescriptionLineItems({ items, onChange }: PrescriptionLineItems
     onChange(items.filter((item) => item.id !== id));
   }
 
+  function applyDrugToItem(id: string, drug: DrugOption) {
+    onChange(
+      items.map((item) => {
+        if (item.id !== id) return item;
+        return {
+          ...item,
+          name: drug.name,
+          // Auto-fill only if the field is currently empty (don't clobber user input)
+          dosage: item.dosage ? item.dosage : (drug.dosage ?? ""),
+          form: item.form ? item.form : (drug.form ?? ""),
+          frequency: item.frequency ? item.frequency : (drug.frequency ?? ""),
+          instructions: item.instructions ? item.instructions : (drug.instructions ?? ""),
+        };
+      })
+    );
+  }
+
   return (
     <div>
       <div className="overflow-x-auto">
@@ -90,12 +108,12 @@ export function PrescriptionLineItems({ items, onChange }: PrescriptionLineItems
             {items.map((item, index) => (
               <tr key={item.id} className="border-b border-cool-100">
                 <td className="px-3 py-2">
-                  <input
-                    type="text"
+                  <DrugAutocomplete
                     value={item.name}
-                    onChange={(e) => updateItem(item.id, "name", e.target.value)}
+                    onChange={(v) => updateItem(item.id, "name", v)}
+                    onSelectDrug={(drug) => applyDrugToItem(item.id, drug)}
                     placeholder="Nom"
-                    aria-label={`Nom de l'article ${index + 1}`}
+                    ariaLabel={`Nom de l'article ${index + 1}`}
                     className={inputClassName}
                   />
                 </td>

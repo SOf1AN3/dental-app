@@ -2,6 +2,7 @@ import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./src/lib/db/schema";
+import { hashPassword } from "./src/lib/auth-utils";
 import { eq, and, inArray } from "drizzle-orm";
 
 const client = postgres(process.env.DATABASE_URL!);
@@ -41,11 +42,28 @@ async function main() {
       id: userId,
       name: "Dr. Karim Mansouri",
       email: "karim@test.dental",
-      passwordHash: "$2b$12$2.mY2i90AjX/WPmtyCCv3.TbbZMkYjCV4.pllf8u9fldwLKEb7DFK",
+      passwordHash: await hashPassword("test123"),
     })
-    .onConflictDoNothing({ target: schema.users.id })
+    .onConflictDoUpdate({
+      target: schema.users.id,
+      set: {
+        name: "Dr. Karim Mansouri",
+        email: "karim@test.dental",
+        passwordHash: await hashPassword("test123"),
+      },
+    })
     .returning();
   console.log(`  User: ${user?.name ?? "already exists"} (${user?.email ?? "karim@test.dental"})`);
+
+  // Promote the seed user to platform owner so they can access /owner
+  await db
+    .insert(schema.platformOwners)
+    .values({
+      userId,
+      grantedBy: userId,
+    })
+    .onConflictDoNothing({ target: schema.platformOwners.userId });
+  console.log("  Platform owner: created (karim@test.dental)");
 
   const [clinic] = await db
     .insert(schema.clinics)
@@ -202,6 +220,7 @@ async function main() {
   console.log(`  Login email: karim@test.dental`);
   console.log(`  Password:   test123`);
   console.log(`  User:       Dr. Karim Mansouri`);
+  console.log(`  Platform:   Owner (dashboard /owner)`);
   console.log(`  Clinic:     Clinique Dentaire Mansouri`);
   console.log(`  Patients:   ${patients.length}`);
   console.log(`  Appointments: ${appointments.length}`);
