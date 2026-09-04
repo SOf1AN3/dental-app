@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/db";
-import { clinicMemberships, clinics } from "@/lib/db/schema";
+import { clinicMemberships, clinics, platformOwners } from "@/lib/db/schema";
 import { eq, and, or, isNull, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { CreateClinicDialog } from "./create-clinic-dialog";
@@ -10,6 +10,14 @@ import { PendingInvitations } from "./pending-invitations";
 export default async function SelectClinicPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+
+  // Platform owners go straight to the owner dashboard
+  const platformOwner = await db.query.platformOwners.findFirst({
+    where: eq(platformOwners.userId, session.user.id),
+  });
+  if (platformOwner) {
+    redirect("/owner");
+  }
 
   // Active memberships: directly added (invitedAt is null) or accepted an invitation (joinedAt is set)
   const memberships = await db

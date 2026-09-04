@@ -4,8 +4,13 @@ import { useActionState, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { createQuote } from "@/lib/actions/financial";
 import { searchPatients } from "@/lib/actions/patient";
-import { QuoteLineItems } from "@/components/clinic/quote-line-items";
+import { QuoteLineItems, type QuoteLineItem } from "@/components/clinic/quote-line-items";
 import type { CatalogItem } from "@/lib/treatment-catalog-utils";
+import { A5FinancialDocument, type FinancialDocData } from "@/components/clinic/a5-financial-document";
+import { A5_SHEET_WIDTH_PX, A5_SHEET_HEIGHT_PX } from "@/components/clinic/a5-styles";
+import { docTotals } from "@/lib/billing-math";
+import type { A5Template } from "@/lib/document-branding";
+import { formatDate } from "@/lib/utils";
 
 interface PatientResult {
   id: string;
@@ -13,7 +18,18 @@ interface PatientResult {
   lastName: string;
 }
 
-export function QuoteForm({ catalog }: { catalog?: CatalogItem[] }) {
+const inputClassName =
+  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+
+export function QuoteForm({
+  catalog,
+  defaultTaxRate = 19,
+  clinicTemplate,
+}: {
+  catalog?: CatalogItem[];
+  defaultTaxRate?: number;
+  clinicTemplate: A5Template;
+}) {
   const [state, action, pending] = useActionState(createQuote, undefined);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientResult[]>([]);
@@ -22,9 +38,20 @@ export function QuoteForm({ catalog }: { catalog?: CatalogItem[] }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const fieldErrors = state && 'error' in state && state.error && !('general' in state.error)
-    ? state.error as Record<string, string[] | undefined>
-    : {} as Record<string, string[] | undefined>;
+  const [items, setItems] = useState<QuoteLineItem[]>([]);
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [validUntil, setValidUntil] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const errors =
+    state && "error" in state && state.error
+      ? (state.error as Record<string, string[] | undefined>)
+      : ({} as Record<string, string[] | undefined>);
+  const generalErrors = errors.general;
+  const itemErrors = errors.items;
 
   useEffect(() => {
     if (!query || selected) {
@@ -55,6 +82,18 @@ export function QuoteForm({ catalog }: { catalog?: CatalogItem[] }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   function handleSelect(patient: PatientResult) {
     setSelected(patient);
     setQuery(`${patient.lastName} ${patient.firstName}`);
@@ -67,110 +106,174 @@ export function QuoteForm({ catalog }: { catalog?: CatalogItem[] }) {
     if (!value) setResults([]);
   }
 
+  const scale = containerWidth > 0 ? Math.min(1, containerWidth / A5_SHEET_WIDTH_PX) : 1;
+
+  const previewItems = items.filter((item) => item.description.trim().length > 0);
+  const totals = docTotals(previewItems);
+
+  const previewData: FinancialDocData = {
+    docType: "quote",
+    number: "",
+    date: date ? formatDate(date) : "—",
+    dueLabel: validUntil ? formatDate(validUntil) : null,
+    patientName: selected ? `${selected.lastName} ${selected.firstName}` : "—",
+    patientPhone: null,
+    notes: notes.trim() || null,
+    items: previewItems,
+    subtotal: totals.subtotal,
+    taxTotal: totals.taxTotal,
+    discountTotal: totals.discountTotal,
+    total: totals.total,
+    paidAmount: null,
+    statusLabel: null,
+  };
+
   return (
-    <form action={action} className="max-w-xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
-          Informations du devis
-        </h2>
-
-        <div ref={containerRef} className="relative">
-          <label htmlFor="patientSearch" className="block text-sm font-medium text-cool-700">
-            Patient *
-          </label>
-          <input
-            id="patientSearch"
-            type="text"
-            placeholder="Rechercher un patient..."
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            onFocus={() => { if (results.length > 0) setOpen(true); }}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
-          />
-          <input type="hidden" name="patientId" value={selected?.id || ""} />
-          {fieldErrors?.patientId && (
-            <p className="mt-1 text-xs text-red-500">{fieldErrors.patientId[0]}</p>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <form action={action} className="space-y-6">
+        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+          {generalErrors && generalErrors.length > 0 && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              {generalErrors[0]}
+            </div>
           )}
-          {open && results.length > 0 && (
-            <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white dark:bg-cool-100 shadow-lg max-h-48 overflow-y-auto">
-              {results.map((p) => (
-                <li
-                  key={p.id}
-                  onClick={() => handleSelect(p)}
-                  className="px-3 py-2 text-sm cursor-pointer hover:bg-cerulean/5 hover:text-cerulean transition-colors"
-                >
-                  {p.lastName} {p.firstName}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          <h2 className="text-lg font-semibold text-cool-900">
+            Informations du devis
+          </h2>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="date" className="block text-sm font-medium text-cool-700">
-              Date *
+          <div ref={containerRef} className="relative">
+            <label htmlFor="patientSearch" className="block text-sm font-medium text-cool-700">
+              Patient *
             </label>
             <input
-              id="date"
-              name="date"
-              type="date"
-              required
-              defaultValue={new Date().toISOString().split("T")[0]}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              id="patientSearch"
+              type="text"
+              placeholder="Rechercher un patient..."
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              onFocus={() => { if (results.length > 0) setOpen(true); }}
+              className={inputClassName}
             />
-            {fieldErrors?.date && (
-              <p className="mt-1 text-xs text-red-500">{fieldErrors.date[0]}</p>
+            <input type="hidden" name="patientId" value={selected?.id || ""} />
+            {errors?.patientId && (
+              <p className="mt-1 text-xs text-red-500">{errors.patientId[0]}</p>
+            )}
+            {open && results.length > 0 && (
+              <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+                {results.map((p) => (
+                  <li
+                    key={p.id}
+                    onClick={() => handleSelect(p)}
+                    className="px-3 py-2 text-sm cursor-pointer hover:bg-cerulean/5 hover:text-cerulean transition-colors"
+                  >
+                    {p.lastName} {p.firstName}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="date" className="block text-sm font-medium text-cool-700">
+                Date *
+              </label>
+              <input
+                id="date"
+                name="date"
+                type="date"
+                required
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputClassName}
+              />
+              {errors?.date && (
+                <p className="mt-1 text-xs text-red-500">{errors.date[0]}</p>
+              )}
+            </div>
+            <div>
+              <label htmlFor="validUntil" className="block text-sm font-medium text-cool-700">
+                Valide jusqu&apos;au
+              </label>
+              <input
+                id="validUntil"
+                name="validUntil"
+                type="date"
+                value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)}
+                className={inputClassName}
+              />
+            </div>
+          </div>
+
           <div>
-            <label htmlFor="validUntil" className="block text-sm font-medium text-cool-700">
-              Valide jusqu&apos;au
+            <label className="block text-sm font-medium text-cool-700 mb-2">
+              Lignes du devis
             </label>
-            <input
-              id="validUntil"
-              name="validUntil"
-              type="date"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            <QuoteLineItems
+              catalog={catalog}
+              defaultTaxRate={defaultTaxRate}
+              onItemsChange={setItems}
+            />
+            {itemErrors && itemErrors.length > 0 && (
+              <p className="mt-1 text-xs text-red-500">{itemErrors[0]}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="notes" className="block text-sm font-medium text-cool-700">
+              Notes
+            </label>
+            <textarea
+              id="notes"
+              name="notes"
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={inputClassName + " resize-y"}
             />
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-cool-700 mb-2">
-            Lignes du devis
-          </label>
-          <QuoteLineItems catalog={catalog} />
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          >
+            {pending ? "Création..." : "Créer le devis"}
+          </button>
+          <Link
+            href="/billing/quotes"
+            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          >
+            Annuler
+          </Link>
         </div>
+      </form>
 
-        <div>
-          <label htmlFor="notes" className="block text-sm font-medium text-cool-700">
-            Notes
-          </label>
-          <textarea
-            id="notes"
-            name="notes"
-            rows={3}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
-          />
+      <div className="hidden lg:block lg:sticky lg:top-24 self-start">
+        <p className="mb-2 text-xs font-medium text-cool-500 uppercase tracking-wider">
+          Aperçu A5
+        </p>
+        <div ref={previewRef} className="w-full">
+          <div
+            className="overflow-hidden rounded-lg border border-cool-200 shadow-lg"
+            style={{ width: A5_SHEET_WIDTH_PX * scale, height: A5_SHEET_HEIGHT_PX * scale }}
+          >
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: "top left",
+                width: "148mm",
+                height: "210mm",
+              }}
+            >
+              <A5FinancialDocument template={clinicTemplate} data={previewData} />
+            </div>
+          </div>
         </div>
       </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
-        >
-          {pending ? "Création..." : "Créer le devis"}
-        </button>
-        <Link
-          href="/billing/quotes"
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-        >
-          Annuler
-        </Link>
-      </div>
-    </form>
+    </div>
   );
 }

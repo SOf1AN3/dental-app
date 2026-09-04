@@ -1,5 +1,6 @@
-import { pgEnum, pgTable, text, timestamp, time, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, time, boolean, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { users } from "./auth";
+import type { DocumentBranding } from "@/lib/document-branding";
 
 export const membershipRoleEnum = pgEnum("membership_role", [
   "owner", "dentist", "assistant", "receptionist", "viewer"
@@ -23,6 +24,8 @@ export const clinics = pgTable("clinic", {
   headerUrl: text("header_url"),
   legalInfo: text("legal_info"),
   watermarkEnabled: boolean("watermark_enabled").default(false).notNull(),
+  documentBranding: jsonb("document_branding").$type<DocumentBranding>(),
+  defaultTaxRate: integer("default_tax_rate").default(19).notNull(),
   openingTime: time("opening_time").default("08:00").notNull(),
   closingTime: time("closing_time").default("19:00").notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),

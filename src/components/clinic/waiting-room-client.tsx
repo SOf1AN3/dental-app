@@ -95,7 +95,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <form action={async () => { await callPatientFromWaitingRoom(entry.id); }}>
+            <form action={callPatientFromWaitingRoom.bind(null, entry.id)}>
               <button
                 type="submit"
                 className="rounded-lg bg-cerulean px-3 py-1.5 text-sm font-medium text-white hover:bg-cerulean/90 transition-colors"

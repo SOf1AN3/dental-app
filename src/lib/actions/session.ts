@@ -15,7 +15,7 @@ import {
   appointments,
 } from "@/lib/db/schema";
 import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
 import { eq, and, asc, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -24,9 +24,8 @@ import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
 import {
   isSessionStatusTransitionAllowed,
-  sessionItemTotal,
-  sessionSubtotal,
 } from "@/lib/session-rules";
+import { docTotals, lineTotal } from "@/lib/billing-math";
 
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -508,6 +507,10 @@ export async function closeSession(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  if (!(await hasAbility(clinicId, "billing:session_close"))) {
+    return { error: "Vous n'êtes pas autorisé à clôturer une séance" };
+  }
+
   try {
     const [session] = await db
       .select({
@@ -542,7 +545,14 @@ export async function closeSession(
       return { error: "Ajoutez au moins un acte avant de clôturer la séance" };
     }
 
-    const subtotal = sessionSubtotal(items);
+    const totals = docTotals(
+      items.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.fee,
+        taxRate: item.taxRate ?? 0,
+        discount: item.discount ?? 0,
+      })),
+    );
 
     const now = new Date();
     const year = now.getFullYear();
@@ -587,10 +597,10 @@ export async function closeSession(
           number,
           date: new Date(),
           status: "draft",
-          subtotal,
-          taxTotal: 0,
-          discountTotal: 0,
-          total: subtotal,
+          subtotal: totals.subtotal,
+          taxTotal: totals.taxTotal,
+          discountTotal: totals.discountTotal,
+          total: totals.total,
           notes: null,
         })
         .returning({ id: invoices.id });
@@ -606,7 +616,12 @@ export async function closeSession(
             unitPrice: item.fee,
             taxRate: item.taxRate ?? 0,
             discount: item.discount ?? 0,
-            total: sessionItemTotal(item.fee, item.quantity, item.discount ?? undefined),
+            total: lineTotal({
+              quantity: item.quantity,
+              unitPrice: item.fee,
+              taxRate: item.taxRate ?? 0,
+              discount: item.discount ?? 0,
+            }),
           })),
         );
 
@@ -620,8 +635,9 @@ export async function closeSession(
             sessionId,
             number,
             status: "draft",
-            subtotal,
-            total: subtotal,
+            subtotal: totals.subtotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
             itemCount: items.length,
           },
         });

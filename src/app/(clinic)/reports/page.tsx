@@ -1,7 +1,9 @@
-import { requireAuth } from "@/lib/auth-utils"
+import { requireAuth, getCurrentRole } from "@/lib/auth-utils"
 import { getCurrentClinicId } from "@/lib/multi-tenant"
+import { can } from "@/lib/permissions"
 import { getPatientStats, getAppointmentStats, getRevenueData, getMonthlyTrends } from "@/lib/actions/reports"
 import { formatCurrency } from "@/lib/utils"
+import { redirect } from "next/navigation"
 
 const methodLabels: Record<string, string> = {
   cash: "Espèces",
@@ -36,7 +38,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default async function ReportsPage() {
   await requireAuth()
-  await getCurrentClinicId()
+  const clinicId = await getCurrentClinicId()
+
+  // RAP-1: global reports are owner-only. Direct URL access by any other
+  // role is refused (nav entry is already hidden).
+  const role = await getCurrentRole(clinicId)
+  if (!role || !can(role, "reports:view")) {
+    redirect("/?denied=reports")
+  }
 
   const [patientStats, appointmentStats, revenueData, monthlyTrends] = await Promise.all([
     getPatientStats(),

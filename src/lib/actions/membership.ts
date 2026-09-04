@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/db/db";
 import { clinicMemberships, users } from "@/lib/db/schema";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
 import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
 import { eq, and, count } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -20,9 +20,8 @@ export async function inviteMember(formData: FormData) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
-  const { membership } = await requireClinicAccess(clinicId);
 
-  if (membership.role !== "owner" && membership.role !== "dentist") {
+  if (!(await hasAbility(clinicId, "members:invite"))) {
     return { error: "Seuls les propriétaires et dentistes peuvent inviter des membres" };
   }
 
@@ -100,9 +99,9 @@ export async function inviteMember(formData: FormData) {
 export async function removeMember(membershipId: string) {
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
-  const { membership, user } = await requireClinicAccess(clinicId);
+  const { user } = await requireClinicAccess(clinicId);
 
-  if (membership.role !== "owner") {
+  if (!(await hasAbility(clinicId, "members:manage"))) {
     return { error: "Seul le propriétaire peut supprimer des membres" };
   }
 
@@ -208,9 +207,8 @@ export async function updateMemberRole(
 ): Promise<{ error?: string } | { success?: boolean }> {
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
-  const { membership } = await requireClinicAccess(clinicId);
 
-  if (membership.role !== "owner") {
+  if (!(await hasAbility(clinicId, "members:manage"))) {
     return { error: "Seul le propriétaire peut modifier les rôles" };
   }
 

@@ -12,7 +12,7 @@ import {
   clinicalSessions,
 } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow, getCurrentUser } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, getCurrentUser, hasAbility } from "@/lib/auth-utils";
 import {
   eq,
   and,
@@ -25,7 +25,42 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
+import { docTotals, lineTotal, recalcInvoiceStatus } from "@/lib/billing-math";
 import { isRedirectOrReject } from "./errors";
+
+/**
+ * Line items arrive as JSON from the browser; they are validated here and ALL
+ * monetary amounts are recomputed server-side via billing-math (FACT-5).
+ * The client's hidden total/subtotal inputs are never trusted.
+ */
+const lineItemSchema = z.object({
+  description: z.string().trim().min(1, "Description requise"),
+  quantity: z.coerce
+    .number()
+    .int("La quantité doit être un entier")
+    .positive("La quantité doit être positive"),
+  unitPrice: z.coerce.number().min(0, "Le prix unitaire doit être positif"),
+  taxRate: z.coerce.number().int().min(0).max(100).catch(0),
+  discount: z.coerce.number().min(0).catch(0),
+});
+
+const lineItemsSchema = z.array(lineItemSchema).min(1, "Ajoutez au moins une ligne");
+
+type LineItemInput = z.infer<typeof lineItemSchema>;
+
+function parseLineItems(
+  raw: FormDataEntryValue | null,
+): { ok: true; items: LineItemInput[] } | { ok: false } {
+  if (!raw || typeof raw !== "string") return { ok: false };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false };
+  }
+  const result = lineItemsSchema.safeParse(parsed);
+  return result.success ? { ok: true, items: result.data } : { ok: false };
+}
 
 export async function getInvoices(status?: string) {
   await requireAuth();
@@ -170,10 +205,14 @@ const quoteSchema = z.object({
 export async function createQuote(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
-) {
+): Promise<{ error?: Record<string, string[]> }> {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: { general: ["Seuls la réception et le propriétaire peuvent gérer les devis"] } };
+  }
 
   const validated = quoteSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
@@ -210,17 +249,13 @@ export async function createQuote(
   const nextNumber = seq?.lastNumber ?? 1;
   const number = `DEV-${year}-${String(nextNumber).padStart(4, "0")}`;
 
-  const itemsRaw = formData.get("items") as string;
-  let items: Array<{ description: string; quantity: number; unitPrice: number; taxRate: number; total: number }> = [];
-  if (itemsRaw) {
-    try {
-      items = JSON.parse(itemsRaw);
-    } catch {
-      // Invalid JSON, ignore
-    }
+  const itemsParsed = parseLineItems(formData.get("items"));
+  if (!itemsParsed.ok) {
+    return { error: { items: ["Lignes de devis invalides : vérifiez descriptions, quantités et prix"] } };
   }
+  const items = itemsParsed.items;
 
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+  const totals = docTotals(items);
 
   try {
     const [quote] = await db.insert(quotes).values({
@@ -230,10 +265,10 @@ export async function createQuote(
       date: new Date(data.date),
       validUntil: data.validUntil ? new Date(data.validUntil) : null,
       status: "draft",
-      subtotal,
-      taxTotal: 0,
-      discountTotal: 0,
-      total: subtotal,
+      subtotal: totals.subtotal,
+      taxTotal: totals.taxTotal,
+      discountTotal: totals.discountTotal,
+      total: totals.total,
       notes: data.notes || null,
     }).returning();
 
@@ -244,8 +279,9 @@ export async function createQuote(
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          taxRate: item.taxRate || 0,
-          total: item.total,
+          taxRate: item.taxRate,
+          discount: item.discount,
+          total: lineTotal(item),
         }))
       );
     }
@@ -259,8 +295,7 @@ export async function createQuote(
         patientId: data.patientId,
         number,
         status: "draft",
-        subtotal,
-        total: subtotal,
+        ...totals,
         notes: data.notes || null,
         itemCount: items.length,
       },
@@ -282,6 +317,10 @@ export async function updateQuoteStatus(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    throw new Error("Action non autorisée sur les devis");
+  }
 
   const [quote] = await db
     .select({ id: quotes.id, status: quotes.status })
@@ -309,6 +348,143 @@ export async function updateQuoteStatus(
   revalidatePath("/billing/quotes");
 }
 
+/**
+ * FACT-1 — Convert an ACCEPTED quote into a draft invoice, atomically:
+ * sequence increment, invoice + copied items and the quote↔invoice link all
+ * happen inside one transaction. The quote is never mutated twice thanks to
+ * the convertedInvoiceId guard re-checked inside the transaction.
+ */
+export async function convertQuoteToInvoice(
+  quoteId: string,
+  prevState: { error?: string; success?: boolean; invoiceId?: string } | undefined,
+  _formData: FormData,
+): Promise<{ error?: string } | { success?: boolean; invoiceId?: string }> {
+  void prevState;
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: "Seuls la réception et le propriétaire peuvent facturer un devis" };
+  }
+
+  const user = await getCurrentUser();
+
+  try {
+    const invoiceId = await db.transaction(async (tx) => {
+      const [quote] = await tx
+        .select()
+        .from(quotes)
+        .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)))
+        .limit(1);
+
+      if (!quote) throw new Error("Devis introuvable");
+      if (quote.convertedInvoiceId) throw new Error("Devis déjà facturé");
+      if (quote.status !== "accepted") {
+        throw new Error("Seul un devis accepté peut être facturé");
+      }
+
+      const items = await tx
+        .select()
+        .from(quoteItems)
+        .where(eq(quoteItems.quoteId, quoteId));
+
+      // Ensure sequence row exists, then atomically increment it.
+      await tx
+        .insert(documentSequences)
+        .values({ clinicId, type: "invoice", lastNumber: 0 })
+        .onConflictDoNothing();
+
+      const [seq] = await tx
+        .update(documentSequences)
+        .set({ lastNumber: sql`last_number + 1` })
+        .where(and(eq(documentSequences.clinicId, clinicId), eq(documentSequences.type, "invoice")))
+        .returning();
+
+      const nextNumber = seq?.lastNumber ?? 1;
+      const number = `FAC-${new Date().getFullYear()}-${String(nextNumber).padStart(5, "0")}`;
+
+      // Recompute totals from stored items (server-side authority).
+      const totals = docTotals(
+        items.map((item) => ({
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          taxRate: item.taxRate ?? 0,
+          discount: item.discount ?? 0,
+        })),
+      );
+
+      const [invoice] = await tx
+        .insert(invoices)
+        .values({
+          clinicId,
+          patientId: quote.patientId,
+          number,
+          date: new Date(),
+          status: "draft",
+          subtotal: totals.subtotal,
+          taxTotal: totals.taxTotal,
+          discountTotal: totals.discountTotal,
+          total: totals.total,
+          notes: quote.notes ? `${quote.notes}\n— Devis ${quote.number}` : `Devis ${quote.number}`,
+        })
+        .returning();
+
+      if (!invoice) throw new Error("Erreur lors de la création de la facture");
+
+      if (items.length > 0) {
+        await tx.insert(invoiceItems).values(
+          items.map((item) => ({
+            invoiceId: invoice.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            discount: item.discount,
+            total: lineTotal({
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              taxRate: item.taxRate ?? 0,
+              discount: item.discount ?? 0,
+            }),
+          })),
+        );
+      }
+
+      await tx
+        .update(quotes)
+        .set({ convertedInvoiceId: invoice.id })
+        .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)));
+
+      return invoice.id;
+    });
+
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "invoice",
+      entityId: invoiceId,
+      after: { fromQuoteId: quoteId, actorUserId: user?.id ?? null },
+    });
+    await logAction({
+      clinicId,
+      action: "update",
+      entityType: "quote",
+      entityId: quoteId,
+      after: { convertedInvoiceId: invoiceId },
+    });
+
+    revalidatePath(`/billing/quotes/${quoteId}`);
+    revalidatePath("/billing/quotes");
+    revalidatePath("/billing/invoices");
+
+    return { success: true, invoiceId } as { success: boolean; invoiceId: string };
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    return { error: e instanceof Error ? e.message : "Erreur lors de la conversion du devis" };
+  }
+}
+
 const invoiceSchema = z.object({
   patientId: z.string().min(1, "Patient requis"),
   date: z.string().min(1, "Date requise"),
@@ -319,10 +495,14 @@ const invoiceSchema = z.object({
 export async function createInvoice(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
-) {
+): Promise<{ error?: Record<string, string[]> }> {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: { general: ["Seuls la réception et le propriétaire peuvent gérer les factures"] } };
+  }
 
   const validated = invoiceSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
@@ -359,17 +539,13 @@ export async function createInvoice(
   const nextNumber = seq?.lastNumber ?? 1;
   const number = `FAC-${year}-${String(nextNumber).padStart(5, "0")}`;
 
-  const itemsRaw = formData.get("items") as string;
-  let items: Array<{ description: string; quantity: number; unitPrice: number; taxRate: number; total: number }> = [];
-  if (itemsRaw) {
-    try {
-      items = JSON.parse(itemsRaw);
-    } catch {
-      // Invalid JSON, ignore
-    }
+  const itemsParsed = parseLineItems(formData.get("items"));
+  if (!itemsParsed.ok) {
+    return { error: { items: ["Lignes de facture invalides : vérifiez descriptions, quantités et prix"] } };
   }
+  const items = itemsParsed.items;
 
-  const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+  const totals = docTotals(items);
 
   try {
     const [invoice] = await db.insert(invoices).values({
@@ -379,8 +555,10 @@ export async function createInvoice(
       date: new Date(data.date),
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       status: "draft",
-      subtotal,
-      total: subtotal,
+      subtotal: totals.subtotal,
+      taxTotal: totals.taxTotal,
+      discountTotal: totals.discountTotal,
+      total: totals.total,
       notes: data.notes || null,
     }).returning();
 
@@ -391,8 +569,9 @@ export async function createInvoice(
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          taxRate: item.taxRate || 0,
-          total: item.total,
+          taxRate: item.taxRate,
+          discount: item.discount,
+          total: lineTotal(item),
         }))
       );
     }
@@ -406,8 +585,7 @@ export async function createInvoice(
         patientId: data.patientId,
         number,
         status: "draft",
-        subtotal,
-        total: subtotal,
+        ...totals,
         notes: data.notes || null,
         itemCount: items.length,
       },
@@ -418,6 +596,40 @@ export async function createInvoice(
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
     return { error: { general: ["Erreur lors de la création de la facture"] } };
+  }
+}
+
+/**
+ * Open (payable) invoices of one patient, with the amount still due.
+ * Used by the payment page picker (/billing/payments/new).
+ */
+export async function getUnpaidInvoicesForPatient(patientId: string) {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  try {
+    return await db
+      .select({
+        id: invoices.id,
+        number: invoices.number,
+        date: invoices.date,
+        total: invoices.total,
+        status: invoices.status,
+        paidAmount:
+          sql<number>`COALESCE((SELECT SUM(p.amount) FROM payment p WHERE p.invoice_id = ${invoices.id}), 0)::float8`,
+      })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.clinicId, clinicId),
+          eq(invoices.patientId, patientId),
+          inArray(invoices.status, ["draft", "sent", "partially_paid", "overdue"]),
+        ),
+      )
+      .orderBy(desc(invoices.date));
+  } catch {
+    return [];
   }
 }
 
@@ -440,6 +652,10 @@ export async function updateInvoiceStatus(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: "Action non autorisée sur les factures" };
+  }
 
   const validated = updateStatusSchema.safeParse(
     Object.fromEntries(formData),
@@ -497,6 +713,10 @@ export async function recordPayment(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  if (!(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: { general: ["Seuls la réception et le propriétaire peuvent encaisser des paiements"] } };
+  }
+
   const validated = paymentSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
     return { error: validated.error.flatten().fieldErrors };
@@ -514,6 +734,21 @@ export async function recordPayment(
   let sessionRedirectPath: string | null = null;
 
   try {
+    if (invoiceId) {
+      const [existing] = await db
+        .select({ id: invoices.id, status: invoices.status })
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.clinicId, clinicId)))
+        .limit(1);
+
+      if (!existing) {
+        return { error: { general: ["Facture introuvable pour cette clinique"] } };
+      }
+      if (existing.status === "cancelled") {
+        return { error: { general: ["Impossible d'enregistrer un paiement sur une facture annulée"] } };
+      }
+    }
+
     const [payment] = await db.insert(payments).values({
       clinicId,
       patientId,
@@ -555,14 +790,11 @@ export async function recordPayment(
 
       if (invoice) {
         const paidAmount = invoicePayments[0]?.total || 0;
-        let newStatus: "paid" | "partially_paid" | "draft" | "sent" | "overdue" | "cancelled";
-        if (paidAmount >= invoice.total) {
-          newStatus = "paid";
-        } else if (paidAmount > 0) {
-          newStatus = "partially_paid";
-        } else {
-          newStatus = invoice.status;
-        }
+        const newStatus = recalcInvoiceStatus(
+          invoice.status,
+          invoice.total,
+          paidAmount,
+        );
 
         await db
           .update(invoices)

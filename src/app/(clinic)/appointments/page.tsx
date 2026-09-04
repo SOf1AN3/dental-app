@@ -4,18 +4,25 @@ import { eq, and, gte, lte, asc } from "drizzle-orm";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth } from "@/lib/auth-utils";
 import { getClinicScheduleDays } from "@/lib/clinic-schedule";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { AppointmentActions } from "@/components/clinic/appointment-actions";
 import { AppointmentDatePicker } from "@/components/clinic/appointment-date-picker";
+import { ViewToggle } from "@/components/clinic/view-toggle";
 
 export default async function AppointmentsPage(props: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; view?: string }>;
 }) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   const searchParams = await props.searchParams;
+
+  if (searchParams.view === "agenda") {
+    const weekParam = searchParams.date ? `?week=${searchParams.date}` : "";
+    redirect(`/appointments/agenda${weekParam}`);
+  }
 
   const clinic = await db.query.clinics.findFirst({
     where: eq(clinics.id, clinicId),
@@ -62,20 +69,12 @@ export default async function AppointmentsPage(props: {
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-4 border-b border-cool-200 pb-2">
-        <Link
-          href="/appointments"
-          className="text-sm font-medium text-cerulean border-b-2 border-cerulean pb-1"
-        >
-          Liste
-        </Link>
-        <Link
-          href="/appointments/agenda"
-          className="text-sm font-medium text-cool-500 hover:text-cool-900 transition-colors pb-1"
-        >
-          Agenda
-        </Link>
-      </div>
+      <ViewToggle
+        options={[
+          { label: "Liste", value: "list" },
+          { label: "Agenda", value: "agenda" },
+        ]}
+      />
 
       <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
         <table className="w-full text-sm">

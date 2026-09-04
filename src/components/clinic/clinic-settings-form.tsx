@@ -11,6 +11,7 @@ type DefaultValues = {
   address: string | null;
   wilayaCode: string | null;
   timezone: string | null;
+  defaultTaxRate: number | null;
 };
 
 export function ClinicSettingsForm({
@@ -134,6 +135,27 @@ export function ClinicSettingsForm({
           defaultValue={defaultValues.timezone ?? "Africa/Algiers"}
           className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
         />
+      </div>
+
+      <div>
+        <label
+          htmlFor="defaultTaxRate"
+          className="block text-sm font-medium text-cool-700"
+        >
+          TVA par défaut (%)
+        </label>
+        <input
+          id="defaultTaxRate"
+          name="defaultTaxRate"
+          type="number"
+          min={0}
+          max={100}
+          defaultValue={defaultValues.defaultTaxRate ?? 19}
+          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+        />
+        <p className="mt-1 text-xs text-cool-400">
+          Appliquée par défaut sur les nouvelles lignes de facture et devis.
+        </p>
       </div>
 
       {state?.success && (

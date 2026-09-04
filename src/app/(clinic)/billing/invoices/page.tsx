@@ -131,12 +131,22 @@ export default async function InvoicesPage(props: {
                     <InvoiceStatusBadge status={invoice.status} />
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/billing/invoices/${invoice.id}`}
-                      className="text-sm text-cerulean hover:text-cerulean/80"
-                    >
-                      Détails
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Link
+                        href={`/billing/invoices/${invoice.id}`}
+                        className="text-sm text-cerulean hover:text-cerulean/80"
+                      >
+                        Détails
+                      </Link>
+                      {invoice.status !== "paid" && invoice.status !== "cancelled" && (
+                        <Link
+                          href={`/billing/payments/new?invoiceId=${invoice.id}`}
+                          className="text-sm text-emerald-600 hover:text-emerald-500"
+                        >
+                          Paiement
+                        </Link>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

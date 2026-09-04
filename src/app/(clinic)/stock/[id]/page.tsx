@@ -21,16 +21,20 @@ const typeColors: Record<string, string> = {
 
 export default async function StockItemDetailPage(props: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tx?: string }>;
 }) {
   await requireAuth();
   await getCurrentClinicId();
   const { id } = await props.params;
+  const { tx } = await props.searchParams;
 
   const item = await getStockItem(id);
 
   if (!item) {
     notFound();
   }
+
+  const defaultType = tx === "in" || tx === "out" ? tx : undefined;
 
   return (
     <div className="space-y-6">
@@ -117,7 +121,7 @@ export default async function StockItemDetailPage(props: {
           <h2 className="text-lg font-semibold text-cool-900">
             Nouveau mouvement
           </h2>
-          <StockTransactionForm itemId={id} />
+          <StockTransactionForm itemId={id} defaultType={defaultType} />
         </div>
       </div>
 

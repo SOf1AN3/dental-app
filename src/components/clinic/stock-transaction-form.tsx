@@ -5,11 +5,13 @@ import { createStockTransaction } from "@/lib/actions/inventory";
 
 interface StockTransactionFormProps {
   itemId: string;
+  defaultType?: "in" | "out";
   onSuccess?: () => void;
 }
 
 export function StockTransactionForm({
   itemId,
+  defaultType,
   onSuccess,
 }: StockTransactionFormProps) {
   const [state, formAction, pending] = useActionState(
@@ -33,6 +35,7 @@ export function StockTransactionForm({
           id="type"
           name="type"
           required
+          defaultValue={defaultType}
           className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
         >
           <option value="in">Entrée</option>

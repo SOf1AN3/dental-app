@@ -80,6 +80,58 @@ export async function addToWaitingRoom(appointmentId: string, patientId: string)
   revalidatePath("/appointments");
 }
 
+/**
+ * SA-1: Add a walk-in patient directly to the waiting room without an
+ * appointment. `appointmentId` stays null.
+ */
+export async function addWalkInToWaitingRoom(
+  patientId: string,
+): Promise<{ error?: string; success?: boolean }> {
+  await requireAuth();
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccessOrThrow(clinicId);
+
+  const existing = await db.query.waitingRoomEntries.findFirst({
+    where: and(
+      eq(waitingRoomEntries.patientId, patientId),
+      eq(waitingRoomEntries.clinicId, clinicId),
+      inArray(waitingRoomEntries.status, ["waiting", "called", "in_treatment"]),
+    ),
+  });
+
+  if (existing) return { error: "Ce patient est déjà en salle d'attente" };
+
+  try {
+    const [created] = await db.insert(waitingRoomEntries).values({
+      clinicId,
+      appointmentId: null,
+      patientId,
+      status: "waiting",
+      arrivedAt: new Date(),
+    }).returning({ id: waitingRoomEntries.id });
+
+    if (created) {
+      await logAction({
+        clinicId,
+        action: "create",
+        entityType: "waiting_room_entry",
+        entityId: created.id,
+        after: { patientId, appointmentId: null, status: "waiting" },
+      });
+    }
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    const message = err instanceof Error ? err.message : "";
+    if (code === "23505" || message.includes("uq_waiting_room_active_patient_clinic")) {
+      return { error: "Ce patient est déjà en salle d'attente" };
+    }
+    return { error: "Une erreur est survenue lors de l'ajout à la salle d'attente" };
+  }
+
+  revalidatePath("/waiting-room");
+  return { success: true };
+}
+
 export async function updateWaitingStatus(entryId: string, status: string) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();

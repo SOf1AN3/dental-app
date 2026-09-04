@@ -108,12 +108,26 @@ export default async function StockPage() {
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/stock/${item.id}`}
-                      className="text-sm text-cerulean hover:text-cerulean/80"
-                    >
-                      Détails
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/stock/${item.id}?tx=in`}
+                        className="text-xs font-medium text-mint hover:text-mint/80"
+                      >
+                        Entrée
+                      </Link>
+                      <Link
+                        href={`/stock/${item.id}?tx=out`}
+                        className="text-xs font-medium text-red-600 hover:text-red-500"
+                      >
+                        Sortie
+                      </Link>
+                      <Link
+                        href={`/stock/${item.id}`}
+                        className="text-sm text-cerulean hover:text-cerulean/80"
+                      >
+                        Détails
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               );

@@ -8,7 +8,7 @@ const tabs = [
   { label: "Documents", href: "/settings/documents" },
   { label: "Horaires", href: "/settings/schedule" },
   { label: "Membres", href: "/settings/members" },
-  { label: "Catalogues de traitements", href: "/settings/treatment-catalog" },
+  { label: "Catalogues", href: "/settings/catalogues" },
   { label: "Abonnement", href: "/settings/subscription" },
 ];
 

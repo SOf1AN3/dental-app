@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DentalFlow — Branding Templates v2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+  .layout { display: flex; min-height: 100vh; }
+
+  /* ---------- Settings panel ---------- */
+  .panel {
+    width: 320px; flex-shrink: 0;
+    background: #fff; border-right: 1px solid #e2e8f0;
+    padding: 20px; overflow-y: auto;
+  }
+  .panel h2 { font-size: 15px; margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+  .field input[type="text"], .field textarea {
+    width: 100%; padding: 7px 9px; font-size: 13px;
+    border: 1px solid #cbd5e1; border-radius: 6px;
+  }
+  .field textarea { resize: vertical; min-height: 56px; }
+  .colors { display: flex; gap: 10px; }
+  .colors .field { flex: 1; }
+  .colors input[type="color"] { width: 100%; height: 34px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; }
+
+  .palettes { display: flex; gap: 6px; }
+  .palette {
+    flex: 1; height: 30px; border: 2px solid #e2e8f0; border-radius: 6px;
+    cursor: pointer; overflow: hidden; display: flex; padding: 0;
+  }
+  .palette span { display: block; height: 100%; }
+  .palette span:first-child { width: 65%; }
+  .palette span:last-child { width: 35%; }
+
+  .templates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .tpl-pick {
+    padding: 8px 2px; font-size: 11px; text-align: center; cursor: pointer;
+    border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc;
+  }
+  .tpl-pick.active { border-color: #0e7a5f; background: #ecfdf5; font-weight: 600; }
+
+  .doc-toggle { display: flex; gap: 8px; }
+  .doc-toggle button {
+    flex: 1; padding: 8px; font-size: 13px; cursor: pointer;
+    border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;
+  }
+  .doc-toggle button.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+  .btn-print {
+    width: 100%; margin-top: 18px; padding: 10px; font-size: 14px; font-weight: 600;
+    color: #fff; background: #0e7a5f; border: none; border-radius: 8px; cursor: pointer;
+  }
+  .hint { font-size: 11px; color: #94a3b8; margin-top: 10px; line-height: 1.5; }
+
+  /* ---------- Preview area ---------- */
+  .preview-area { flex: 1; padding: 32px; display: flex; justify-content: center; align-items: flex-start; }
+  .page-scale { transform: scale(.8); transform-origin: top center; }
+
+  /* ---------- A5 page base ---------- */
+  .page {
+    --primary: #0e7a5f;
+    --secondary: #7081e0;
+    width: 148mm; min-height: 210mm;
+    background: #fff; box-shadow: 0 4px 24px rgba(15,23,42,.15);
+    display: flex; flex-direction: column;
+    font-size: 10.5px; line-height: 1.45;
+  }
+
+  /* ---------- Shared document elements (fixed markup, styled per template) ---------- */
+  .logo { width: 40px; height: 40px; object-fit: contain; }
+  .logo-placeholder {
+    width: 40px; height: 40px; border: 1.5px dashed #94a3b8; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: #94a3b8; text-align: center;
+  }
+  .clinic-name { font-size: 15px; font-weight: 700; color: var(--primary); }
+  .clinic-tag { font-size: 9.5px; color: #64748b; }
+  .doc-title { font-size: 13px; font-weight: 700; letter-spacing: .06em; color: var(--primary); margin-bottom: 6px; }
+  .meta { font-size: 10px; margin-bottom: 10px; line-height: 1.6; }
+  .meta b { color: var(--primary); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th { background: var(--primary); color: #fff; text-align: left; padding: 5px 8px; font-size: 9.5px; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; font-size: 10px; }
+  td.num, th.num { text-align: right; }
+  .totals { margin-top: 8px; margin-left: auto; width: 58%; font-size: 10.5px; }
+  .totals .row { display: flex; justify-content: space-between; padding: 3px 8px; }
+  .totals .grand { font-weight: 700; color: #fff; background: var(--primary); border-radius: 4px; }
+  .rx-item { padding: 6px 0; border-bottom: 1px dashed #cbd5e1; }
+  .rx-item b { color: var(--primary); }
+  .rx-symbol { font-size: 18px; font-weight: 700; color: var(--primary); }
+  .signature { margin-top: 12mm; text-align: right; font-size: 9.5px; color: #64748b; }
+
+  /* ===== 1. Light (accent line, minimal) ===== */
+  .tpl-light .doc-header { padding: 10mm 12mm 6mm; border-bottom: 3px solid var(--primary); display: flex; align-items: center; gap: 10px; }
+  .tpl-light .doc-body { padding: 8mm 12mm; flex: 1; }
+  .tpl-light .doc-footer { padding: 5mm 12mm; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 9px; }
+
+  /* ===== 2. Boxed (colored header band) ===== */
+  .tpl-boxed .doc-header { padding: 8mm 12mm; background: var(--primary); color: #fff; display: flex; align-items: center; gap: 10px; }
+  .tpl-boxed .doc-header .clinic-name, .tpl-boxed .doc-header .clinic-tag { color: #fff; }
+  .tpl-boxed .doc-body { padding: 8mm 12mm; flex: 1; }
+  .tpl-boxed .doc-body .meta { background: #f1f5f9; border-left: 4px solid var(--secondary); padding: 8px 10px; }
+  .tpl-boxed .doc-footer { padding: 5mm 12mm; background: var(--primary); color: rgba(255,255,255,.85); font-size: 9px; }
+
+  /* ===== 3. Bold (colored sidebar) ===== */
+  .tpl-bold { flex-direction: row; }
+  .tpl-bold .doc-header {
+    width: 44mm; flex-shrink: 0; padding: 10mm 6mm;
+    background: linear-gradient(180deg, var(--primary), var(--secondary));
+    color: #fff; display: flex; flex-direction: column; gap: 8px;
+  }
+  .tpl-bold .doc-header .clinic-name, .tpl-bold .doc-header .clinic-tag { color: #fff; }
+  .tpl-bold .doc-header .logo, .tpl-bold .doc-header .logo-placeholder { background: #fff; border-radius: 8px; }
+  .tpl-bold .right-col { flex: 1; display: flex; flex-direction: column; }
+  .tpl-bold .doc-body { padding: 10mm 8mm; flex: 1; }
+  .tpl-bold .doc-footer { padding: 5mm 8mm; border-top: 2px solid var(--primary); color: #64748b; font-size: 9px; }
+
+  /* ===== 4. Corporate (navy letterhead, double rule, grid meta) ===== */
+  .tpl-corporate .doc-header {
+    padding: 9mm 12mm 5mm; display: flex; align-items: center; gap: 10px;
+    border-bottom: 3.5px solid var(--primary);
+  }
+  .tpl-corporate .doc-header::after { /* thin secondary rule under the thick one */
+    content: ""; position: absolute; left: 12mm; right: 12mm; margin-top: 24mm;
+    height: 1.5px; background: var(--secondary);
+  }
+  .tpl-corporate .doc-header { position: relative; }
+  .tpl-corporate .clinic-name { text-transform: uppercase; letter-spacing: .05em; }
+  .tpl-corporate .doc-body { padding: 9mm 12mm; flex: 1; }
+  .tpl-corporate .meta {
+    display: flex; justify-content: space-between; gap: 10px;
+    border: 1px solid #e2e8f0; border-top: 3px solid var(--primary);
+    padding: 8px 10px; background: #f8fafc;
+  }
+  .tpl-corporate th { background: #fff; color: var(--primary); border-bottom: 2px solid var(--primary); text-transform: uppercase; font-size: 8.5px; letter-spacing: .08em; }
+  .tpl-corporate .totals .grand { background: var(--primary); }
+  .tpl-corporate .doc-footer {
+    padding: 5mm 12mm; text-align: center; font-size: 8.5px; color: #64748b;
+    border-top: 1px solid #e2e8f0;
+  }
+  .tpl-corporate .rx-item b { text-transform: uppercase; letter-spacing: .03em; }
+
+  /* ===== 5. Classique (serif, centered letterhead — traditional ordonnance look) ===== */
+  .tpl-classic { font-family: Georgia, "Times New Roman", serif; }
+  .tpl-classic .doc-header {
+    padding: 10mm 14mm 5mm; display: flex; flex-direction: column; align-items: center;
+    text-align: center; gap: 6px;
+    border-bottom: 3px double var(--primary);
+  }
+  .tpl-classic .clinic-name { font-size: 17px; font-weight: 700; letter-spacing: .02em; }
+  .tpl-classic .clinic-tag { font-style: italic; color: #475569; }
+  .tpl-classic .doc-body { padding: 8mm 14mm; flex: 1; }
+  .tpl-classic .doc-title { text-align: center; font-size: 14px; text-transform: uppercase; letter-spacing: .18em; }
+  .tpl-classic .meta { text-align: center; font-size: 10.5px; }
+  .tpl-classic th {
+    background: none; color: var(--primary); border-bottom: 1.5px solid var(--primary);
+    font-family: inherit; font-style: italic; font-weight: 700; font-size: 10px;
+  }
+  .tpl-classic td { border-bottom: 1px solid #e2e8f0; }
+  .tpl-classic .totals .grand { background: none; color: var(--primary); border-top: 3px double var(--primary); border-radius: 0; }
+  .tpl-classic .rx-symbol { font-size: 24px; font-family: Georgia, serif; }
+  .tpl-classic .rx-item b { color: #0f172a; }
+  .tpl-classic .signature { font-style: italic; }
+  .tpl-classic .doc-footer {
+    padding: 5mm 14mm; text-align: center; font-size: 9px; font-style: italic;
+    color: #64748b; border-top: 1px solid var(--primary);
+  }
+
+  /* ===== 6. Minimal (Swiss — hairlines, whitespace, tiny caps) ===== */
+  .tpl-minimal .doc-header {
+    padding: 12mm 14mm 6mm; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
+  }
+  .tpl-minimal .doc-header > div { display: flex; align-items: center; gap: 10px; }
+  .tpl-minimal .clinic-name { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .12em; color: #0f172a; }
+  .tpl-minimal .clinic-tag { font-size: 8.5px; text-transform: uppercase; letter-spacing: .1em; color: #94a3b8; }
+  .tpl-minimal .doc-body { padding: 6mm 14mm; flex: 1; }
+  .tpl-minimal .doc-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .2em;
+    color: #0f172a; padding-bottom: 4px; border-bottom: 2.5px solid var(--primary); margin-bottom: 12px;
+  }
+  .tpl-minimal .meta { font-size: 9.5px; color: #475569; text-transform: uppercase; letter-spacing: .05em; }
+  .tpl-minimal .meta b { color: #0f172a; font-weight: 600; }
+  .tpl-minimal th {
+    background: none; color: #94a3b8; border-bottom: 1px solid #0f172a;
+    text-transform: uppercase; font-size: 8px; letter-spacing: .12em; padding: 4px 8px;
+  }
+  .tpl-minimal td { border-bottom: 1px solid #f1f5f9; padding: 6px 8px; }
+  .tpl-minimal .totals .grand {
+    background: none; color: var(--primary); border-top: 2.5px solid var(--primary);
+    border-radius: 0; font-size: 12px;
+  }
+  .tpl-minimal .rx-item { border-bottom: 1px solid #f1f5f9; }
+  .tpl-minimal .rx-item b { color: #0f172a; }
+  .tpl-minimal .doc-footer {
+    padding: 5mm 14mm; font-size: 8px; color: #94a3b8; text-transform: uppercase;
+    letter-spacing: .08em; border-top: 1px solid #e2e8f0;
+  }
+
+  /* ===== 7. Exécutif (dark band, badge title, dark footer) ===== */
+  .tpl-executif .doc-header {
+    padding: 9mm 12mm; background: #1e293b; color: #fff;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 4px solid var(--secondary);
+  }
+  .tpl-executif .doc-header .clinic-name { color: #fff; }
+  .tpl-executif .doc-header .clinic-tag { color: rgba(255,255,255,.65); }
+  .tpl-executif .doc-header .logo, .tpl-executif .doc-header .logo-placeholder { background: #fff; border-radius: 6px; }
+  .tpl-executif .doc-body { padding: 9mm 12mm; flex: 1; }
+  .tpl-executif .doc-title {
+    display: inline-block; background: var(--primary); color: #fff;
+    padding: 4px 12px; border-radius: 3px; font-size: 11px; letter-spacing: .12em;
+  }
+  .tpl-executif th { background: #1e293b; }
+  .tpl-executif .totals .grand { background: #1e293b; border-left: 4px solid var(--secondary); border-radius: 0 4px 4px 0; }
+  .tpl-executif .rx-symbol { color: #1e293b; }
+  .tpl-executif .rx-item b { color: #1e293b; }
+  .tpl-executif .doc-footer {
+    padding: 5mm 12mm; background: #1e293b; color: rgba(255,255,255,.75);
+    font-size: 8.5px; display: flex; justify-content: space-between;
+  }
+
+  /* ---------- Print ---------- */
+  @media print {
+    @page { size: A5 portrait; margin: 0; }
+    .panel { display: none; }
+    .preview-area { padding: 0; }
+    .page-scale { transform: none; }
+    .page { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ============ Settings panel ============ -->
+  <aside class="panel">
+    <h2>Personnalisation du document</h2>
+
+    <div class="field">
+      <label>Modèle</label>
+      <div class="templates">
+        <div class="tpl-pick active" data-tpl="light">Light</div>
+        <div class="tpl-pick" data-tpl="boxed">Boxed</div>
+        <div class="tpl-pick" data-tpl="bold">Bold</div>
+        <div class="tpl-pick" data-tpl="corporate">Corporate</div>
+        <div class="tpl-pick" data-tpl="classic">Classique</div>
+        <div class="tpl-pick" data-tpl="minimal">Minimal</div>
+        <div class="tpl-pick" data-tpl="executif">Exécutif</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Palette rapide</label>
+      <div class="palettes">
+        <button class="palette" data-p="#0e7a5f" data-s="#7081e0" title="Émeraude"><span style="background:#0e7a5f"></span><span style="background:#7081e0"></span></button>
+        <button class="palette" data-p="#1e3a5f" data-s="#b08d57" title="Marine &amp; or"><span style="background:#1e3a5f"></span><span style="background:#b08d57"></span></button>
+        <button class="palette" data-p="#1f2937" data-s="#9ca3af" title="Anthracite"><span style="background:#1f2937"></span><span style="background:#9ca3af"></span></button>
+        <button class="palette" data-p="#7c2d3e" data-s="#b98a44" title="Bordeaux"><span style="background:#7c2d3e"></span><span style="background:#b98a44"></span></button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Logo de la clinique</label>
+      <input type="file" id="logoInput" accept="image/*">
+    </div>
+
+    <div class="colors">
+      <div class="field">
+        <label>Couleur principale</label>
+        <input type="color" id="primaryColor" value="#0e7a5f">
+      </div>
+      <div class="field">
+        <label>Couleur secondaire</label>
+        <input type="color" id="secondaryColor" value="#7081e0">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Nom de la clinique (en-tête)</label>
+      <input type="text" id="clinicName" value="Cabinet Dentaire Benali">
+    </div>
+    <div class="field">
+      <label>Sous-titre</label>
+      <input type="text" id="clinicTag" value="Dr Benali S. — Chirurgien-Dentiste">
+    </div>
+    <div class="field">
+      <label>Pied de page</label>
+      <textarea id="footerText">Cité 1200 logts, Djelfa — Tél: 0550 12 34 56
+RC: 17B-0123456 — NIF: 000017012345678</textarea>
+    </div>
+
+    <div class="field">
+      <label>Document</label>
+      <div class="doc-toggle">
+        <button id="btnInvoice" class="active">Facture</button>
+        <button id="btnPrescription">Ordonnance</button>
+      </div>
+    </div>
+
+    <button class="btn-print" onclick="window.print()">Imprimer (A5)</button>
+    <p class="hint">Chaque modèle n'est qu'une feuille de style — le contenu HTML est identique. En production, l'objet <code>branding</code> est sauvegardé en JSON par clinique (tenant).</p>
+  </aside>
+
+  <!-- ============ Live preview ============ -->
+  <main class="preview-area">
+    <div class="page-scale">
+      <div id="page" class="page tpl-light"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+  // ---- Branding state = the per-clinic JSON you'd store in your DB ----
+  const branding = {
+    template: "light",
+    logo: null,
+    primary: "#0e7a5f",
+    secondary: "#7081e0",
+    clinicName: "Cabinet Dentaire Benali",
+    clinicTag: "Dr Benali S. — Chirurgien-Dentiste",
+    footer: "Cité 1200 logts, Djelfa — Tél: 0550 12 34 56\nRC: 17B-0123456 — NIF: 000017012345678"
+  };
+  let docType = "invoice";
+
+  // ---- Sample session data (would come from your API) ----
+  const invoice = {
+    number: "FAC-2026-0142",
+    date: "27/08/2026",
+    patient: "Amine Kaci",
+    items: [
+      { label: "Consultation", price: 2000 },
+      { label: "Détartrage complet", price: 3500 },
+      { label: "Composite 1 face (dent 16)", price: 6000 }
+    ],
+    paid: 8000
+  };
+  const prescription = {
+    date: "27/08/2026",
+    patient: "Amine Kaci", age: 34,
+    items: [
+      { name: "Amoxicilline 500 mg", poso: "1 cp × 3 / jour — 7 jours" },
+      { name: "Ibuprofène 400 mg", poso: "1 cp × 2 / jour — 5 jours (au repas)" },
+      { name: "Bain de bouche Chlorhexidine 0,12 %", poso: "2 × / jour — 7 jours" }
+    ]
+  };
+
+  const fmt = n => n.toLocaleString("fr-DZ") + " DA";
+  const esc = s => s.replace(/\n/g, "<br>");
+
+  function headerHTML() {
+    const logo = branding.logo
+      ? `<img class="logo" src="${branding.logo}">`
+      : `<div class="logo-placeholder">Logo</div>`;
+    return `<header class="doc-header"><div style="display:flex;align-items:center;gap:10px">${logo}
+      <div><div class="clinic-name">${branding.clinicName}</div>
+      <div class="clinic-tag">${branding.clinicTag}</div></div></div></header>`;
+  }
+
+  function invoiceBody() {
+    const total = invoice.items.reduce((s, i) => s + i.price, 0);
+    const rows = invoice.items.map(i =>
+      `<tr><td>${i.label}</td><td class="num">${fmt(i.price)}</td></tr>`).join("");
+    return `<div class="doc-body">
+      <div class="doc-title">FACTURE ${invoice.number}</div>
+      <div class="meta"><span><b>Patient :</b> ${invoice.patient}</span><span><b>Date :</b> ${invoice.date}</span></div>
+      <table><tr><th>Acte</th><th class="num">Montant</th></tr>${rows}</table>
+      <div class="totals">
+        <div class="row"><span>Total</span><span>${fmt(total)}</span></div>
+        <div class="row"><span>Versé</span><span>${fmt(invoice.paid)}</span></div>
+        <div class="row grand"><span>Reste</span><span>${fmt(total - invoice.paid)}</span></div>
+      </div>
+      <div class="signature">Cachet et signature</div>
+    </div>`;
+  }
+
+  function prescriptionBody() {
+    const rows = prescription.items.map(m =>
+      `<div class="rx-item"><b>${m.name}</b><br>${m.poso}</div>`).join("");
+    return `<div class="doc-body">
+      <div class="doc-title">ORDONNANCE</div>
+      <div class="meta"><span><b>Patient :</b> ${prescription.patient} — ${prescription.age} ans</span>
+      <span><b>Date :</b> ${prescription.date}</span></div>
+      <div class="rx-symbol">℞</div>
+      ${rows}
+      <div class="signature">Cachet et signature</div>
+    </div>`;
+  }
+
+  function footerHTML() {
+    return `<footer class="doc-footer">${esc(branding.footer)}</footer>`;
+  }
+
+  function render() {
+    const page = document.getElementById("page");
+    page.className = "page tpl-" + branding.template;
+    page.style.setProperty("--primary", branding.primary);
+    page.style.setProperty("--secondary", branding.secondary);
+    const body = docType === "invoice" ? invoiceBody() : prescriptionBody();
+    // Bold template wraps body+footer in a right column next to its sidebar
+    page.innerHTML = branding.template === "bold"
+      ? headerHTML() + `<div class="right-col">` + body + footerHTML() + `</div>`
+      : headerHTML() + body + footerHTML();
+  }
+
+  // ---- Bindings ----
+  document.querySelectorAll(".tpl-pick").forEach(el =>
+    el.addEventListener("click", () => {
+      document.querySelectorAll(".tpl-pick").forEach(x => x.classList.remove("active"));
+      el.classList.add("active");
+      branding.template = el.dataset.tpl;
+      render();
+    }));
+
+  document.querySelectorAll(".palette").forEach(el =>
+    el.addEventListener("click", () => {
+      branding.primary = el.dataset.p;
+      branding.secondary = el.dataset.s;
+      document.getElementById("primaryColor").value = el.dataset.p;
+      document.getElementById("secondaryColor").value = el.dataset.s;
+      render();
+    }));
+
+  document.getElementById("logoInput").addEventListener("change", e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { branding.logo = r.result; render(); };
+    r.readAsDataURL(f);
+  });
+
+  document.getElementById("primaryColor").addEventListener("input", e => { branding.primary = e.target.value; render(); });
+  document.getElementById("secondaryColor").addEventListener("input", e => { branding.secondary = e.target.value; render(); });
+  document.getElementById("clinicName").addEventListener("input", e => { branding.clinicName = e.target.value; render(); });
+  document.getElementById("clinicTag").addEventListener("input", e => { branding.clinicTag = e.target.value; render(); });
+  document.getElementById("footerText").addEventListener("input", e => { branding.footer = e.target.value; render(); });
+
+  const bI = document.getElementById("btnInvoice"), bP = document.getElementById("btnPrescription");
+  bI.addEventListener("click", () => { docType = "invoice"; bI.classList.add("active"); bP.classList.remove("active"); render(); });
+  bP.addEventListener("click", () => { docType = "prescription"; bP.classList.add("active"); bI.classList.remove("active"); render(); });
+
+  render();
+</script>
+</body>
+</html>

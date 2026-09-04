@@ -2,20 +2,9 @@ import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getCurrentClinic, getCurrentUserProfile } from "@/lib/actions/settings";
 import { PrescriptionEditor } from "@/components/clinic/prescription-editor";
-import type { A5Template } from "@/components/clinic/a5-prescription";
+import { buildA5Template } from "@/lib/document-branding";
 import { resolveStoredUrl } from "@/lib/storage";
 import Link from "next/link";
-
-const FALLBACK_TEMPLATE: A5Template = {
-  name: "Cabinet Dentaire",
-  address: null,
-  phone: null,
-  email: null,
-  legalInfo: null,
-  logoUrl: null,
-  headerUrl: null,
-  watermarkEnabled: false,
-};
 
 export default async function NewPrescriptionPage() {
   await requireAuth();
@@ -31,18 +20,7 @@ export default async function NewPrescriptionPage() {
     resolveStoredUrl(clinic?.headerUrl ?? null),
   ]);
 
-  const clinicTemplate: A5Template = clinic
-    ? {
-        name: clinic.name,
-        address: clinic.address,
-        phone: clinic.phone,
-        email: clinic.email,
-        legalInfo: clinic.legalInfo,
-        logoUrl,
-        headerUrl,
-        watermarkEnabled: clinic.watermarkEnabled,
-      }
-    : FALLBACK_TEMPLATE;
+  const clinicTemplate = buildA5Template(clinic, { logoUrl, headerUrl });
 
   return (
     <div>

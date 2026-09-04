@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requirePlatformOwner } from "@/lib/auth-utils";
-import { LayoutDashboard, Building2, ClipboardList, DollarSign, Ticket, HeartPulse, Bell } from "lucide-react";
+import { LayoutDashboard, Building2, ClipboardList, DollarSign, Ticket, HeartPulse, Bell, Download } from "lucide-react";
 
 export default async function OwnerLayout({
   children,
@@ -26,6 +26,7 @@ export default async function OwnerLayout({
               { label: "Support", href: "/owner/support", icon: Ticket },
               { label: "Santé", href: "/owner/health", icon: HeartPulse },
               { label: "Notifications", href: "/owner/notifications", icon: Bell },
+              { label: "Exportation", href: "/owner/export", icon: Download },
             ] as { label: string; href: string; icon: React.ElementType }[]).map((link) => (
               <li key={link.href}>
                 <Link
