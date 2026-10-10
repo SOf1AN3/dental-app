@@ -27,6 +27,7 @@ import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import { docTotals, lineTotal, recalcInvoiceStatus } from "@/lib/billing-math";
 import { isRedirectOrReject } from "./errors";
+import { requireOwnedPatient, requirePatientOwnership } from "@/lib/guards";
 
 /**
  * Line items arrive as JSON from the browser; they are validated here and ALL
@@ -234,6 +235,23 @@ export async function createQuote(
   }
 
   const data = validated.data;
+
+  // Garde d'appartenance : `patientId` provient du formulaire. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé. Placé APRÈS l'authentification
+  // et AVANT toute écriture (incrémentation de séquence + INSERT du devis).
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
+    // remontée telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
+    return { error: { general: ["Erreur lors de la création du devis"] } };
+  }
+
   const now = new Date();
   const year = now.getFullYear();
 
@@ -385,6 +403,21 @@ export async function convertQuoteToInvoice(
   const user = await getCurrentUser();
 
   try {
+    // Garde d'appartenance DEFENSIVE : `patientId` n'est pas un argument client
+    // (il provient de la ligne devis, déjà filtrée par `clinicId`, et aucune action
+    // ne modifie `quotes.patientId`). Mais les devis créés AVANT la validation de
+    // `createQuote` peuvent porter un `patientId` étranger : sans ce garde, la
+    // conversion recopierait cette anomalie dans la nouvelle facture. Placé APRÈS
+    // l'authentification et AVANT la transaction / toute écriture.
+    const [quoteCheck] = await db
+      .select({ patientId: quotes.patientId })
+      .from(quotes)
+      .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)))
+      .limit(1);
+
+    if (!quoteCheck) throw new Error("Devis introuvable");
+    await requireOwnedPatient(clinicId, quoteCheck.patientId);
+
     const invoiceId = await db.transaction(async (tx) => {
       const [quote] = await tx
         .select()
@@ -524,6 +557,23 @@ export async function createInvoice(
   }
 
   const data = validated.data;
+
+  // Garde d'appartenance : `patientId` provient du formulaire. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé. Placé APRÈS l'authentification
+  // et AVANT toute écriture (incrémentation de séquence + INSERT de la facture).
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
+    // remontée telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
+    return { error: { general: ["Erreur lors de la création de la facture"] } };
+  }
+
   const now = new Date();
   const year = now.getFullYear();
 
@@ -729,6 +779,35 @@ export async function recordPayment(
 
   if (!(await hasAbility(clinicId, "billing:manage"))) {
     return { error: { general: ["Seuls la réception et le propriétaire peuvent encaisser des paiements"] } };
+  }
+
+  // Garde d'appartenance : `patientId` est un ARGUMENT de la Server Action, donc
+  // directement contrôlable par le client. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé. Placé APRÈS l'authentification
+  // et AVANT toute écriture (INSERT du paiement).
+  //
+  // ⚠️ Clé `amount` et NON `general` : `payment-form.tsx` ne rend que les clés
+  // `amount` / `method` / `date` (et ignore explicitement `general`) — un message
+  // sous `general` y serait invisible. À réaligner sur `general` dès que le
+  // formulaire affichera une erreur générale.
+  try {
+    // ⚠️ `requirePatientOwnership` et NON `requireOwnedPatient` : encaisser est la
+    // liquidation d'une dette EXISTANTE, pas une nouvelle activité. Le débiteur
+    // archivé reste débiteur — un statut d'affichage ne doit jamais geler un fait
+    // comptable (scénario fréquent : patient archivé qui solde son reste).
+    // L'invariant de sécurité est la PROPRIÉTÉ (clinicId), pas l'archivage.
+    // Le `invoiceId` est par ailleurs déjà clinic-scopé plus bas.
+    await requirePatientOwnership(clinicId, patientId);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique ou inexistant) : remontée
+    // telle quelle, distincte de l'erreur technique générique. Le message est
+    // identique dans les deux cas — pas d'oracle d'énumération.
+    if (e instanceof Error && e.message === "Patient introuvable") {
+      return { error: { amount: ["Patient introuvable"] } };
+    }
+    return { error: { amount: ["Erreur lors de l'enregistrement du paiement"] } };
   }
 
   const validated = paymentSchema.safeParse(Object.fromEntries(formData));

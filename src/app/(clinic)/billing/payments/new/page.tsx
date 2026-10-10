@@ -1,7 +1,7 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getInvoice, getUnpaidInvoicesForPatient } from "@/lib/actions/financial";
-import { requireOwnedPatient } from "@/lib/guards";
+import { requirePatientOwnership } from "@/lib/guards";
 import { PaymentLauncher } from "@/components/clinic/payment-launcher";
 import { BackButton } from "@/components/clinic/back-button";
 
@@ -48,7 +48,11 @@ export default async function NewPaymentPage(props: {
     }
   } else if (patientId) {
     try {
-      const patient = await requireOwnedPatient(clinicId, patientId);
+      // `requirePatientOwnership` (sans filtre d'archivage) et non
+      // `requireOwnedPatient` : encaisser la dette d'un patient archivé reste
+      // légitime. Cohérent avec `recordPayment`, qui applique la même règle —
+      // sans quoi la page refuserait l'accès au formulaire que l'action accepte.
+      const patient = await requirePatientOwnership(clinicId, patientId);
       presetPatient = {
         id: patient.id,
         firstName: patient.firstName,
