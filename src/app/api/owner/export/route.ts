@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/db";
 import { requirePlatformOwner } from "@/lib/auth-utils";
 import * as tableDefs from "@/lib/db/schema";
+import { getTableColumns } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
 type TableModule = typeof tableDefs;
@@ -104,6 +105,50 @@ const ALL_TABLES: ReadonlyArray<TableName> = [
   ...CHILD_TABLES.map((c) => c.table),
 ];
 
+/**
+ * Tables jamais exportées, quelle que soit la portée ("full" ou "clinic") :
+ * - "accountTokens" : tokens de réinitialisation de mot de passe encore valides, en clair.
+ * - "loginAttempts" : emails tentés + adresses IP.
+ * Exporter ces tables revient à publier du matériel d'authentification.
+ */
+const NEVER_EXPORTED_TABLES: ReadonlyArray<TableName> = [
+  "accountTokens",
+  "loginAttempts",
+];
+
+function isNeverExported(name: TableName): boolean {
+  return NEVER_EXPORTED_TABLES.includes(name);
+}
+
+/**
+ * Retourne la colonne qui rattache les lignes de `name` à une clinique,
+ * ou `null` si la table n'est pas scopée à une clinique.
+ * La détection se fait sur le schéma (jamais sur le contenu des lignes) :
+ * une table sans colonne `clinicId` n'est jamais exportée en portée "clinic".
+ * Cas particulier : la table `clinics` est scopée par sa propre clé primaire.
+ */
+function getClinicScopeColumn(name: TableName): string | null {
+  if (name === "clinics") {
+    return "id";
+  }
+  const columnNames = Object.keys(getTableColumns(tableDefs[name]));
+  return (
+    columnNames.find((k) => k === "clinicId" || k.endsWith("ClinicId")) ?? null
+  );
+}
+
+/** Supprime le hash de mot de passe d'une ligne `users` avant export. */
+function withoutPasswordHash(row: unknown): Record<string, unknown> {
+  if (typeof row !== "object" || row === null) {
+    return {};
+  }
+  const sanitized: Record<string, unknown> = {
+    ...(row as Record<string, unknown>),
+  };
+  delete sanitized.passwordHash;
+  return sanitized;
+}
+
 function snakeCase(name: string): string {
   return name.replace(/([A-Z])/g, "_$1").toLowerCase().replace(/^_/, "");
 }
@@ -167,6 +212,7 @@ export async function GET(request: NextRequest) {
 async function exportAll(): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
   for (const name of ALL_TABLES) {
+    if (isNeverExported(name)) continue;
     const table = tableDefs[name];
     let rows: unknown[] = [];
     try {
@@ -174,7 +220,8 @@ async function exportAll(): Promise<Record<string, unknown[]>> {
     } catch {
       rows = [];
     }
-    result[snakeCase(name as string)] = rows;
+    result[snakeCase(name as string)] =
+      name === "users" ? rows.map(withoutPasswordHash) : rows;
   }
   return result;
 }
@@ -184,20 +231,23 @@ async function exportClinic(
 ): Promise<Record<string, unknown[]>> {
   const result: Record<string, unknown[]> = {};
 
-  for (const name of GLOBAL_TABLES) {
-    const table = tableDefs[name];
-    let rows: unknown[] = [];
-    try {
-      rows = await db.select().from(table);
-    } catch {
-      rows = [];
-    }
-    result[snakeCase(name as string)] = rows;
-  }
-
   const parentIdsByTable: Partial<Record<TableName, string[]>> = {};
 
-  for (const name of CLINIC_TABLES) {
+  const scopedTables: ReadonlyArray<TableName> = [
+    ...GLOBAL_TABLES,
+    ...CLINIC_TABLES,
+  ];
+
+  for (const name of scopedTables) {
+    if (isNeverExported(name)) continue;
+
+    const scopeColumn = getClinicScopeColumn(name);
+    if (!scopeColumn) {
+      // Table non scopée à une clinique : refuser de l'exporter plutôt que
+      // d'exporter l'intégralité des lignes de la plateforme.
+      continue;
+    }
+
     const table = tableDefs[name];
     let rows: Record<string, unknown>[] = [];
     try {
@@ -206,13 +256,7 @@ async function exportClinic(
       rows = [];
     }
 
-    const clinicCol = Object.keys(rows[0] ?? {}).find(
-      (k) => k === "clinicId" || k.endsWith("ClinicId")
-    );
-
-    const filtered = clinicCol
-      ? rows.filter((r) => String(r[clinicCol]) === clinicId)
-      : rows;
+    const filtered = rows.filter((r) => String(r[scopeColumn]) === clinicId);
 
     result[snakeCase(name as string)] = filtered;
     parentIdsByTable[name] = filtered.map((r) => String(r.id));

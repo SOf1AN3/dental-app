@@ -32,8 +32,15 @@ export async function getCurrentUserProfile() {
   await requireClinicAccessOrThrow(clinicId);
 
   try {
+    // `columns` explicite : ne jamais renvoyer `passwordHash` au client.
     return await db.query.users.findFirst({
       where: eq(users.id, user.id),
+      columns: {
+        id: true,
+        name: true,
+        email: true,
+        emailVerified: true,
+      },
     });
   } catch {
     return null;
@@ -393,6 +400,7 @@ export async function updateUserProfile(
     // Check email uniqueness
     const existing = await db.query.users.findFirst({
       where: (users, { eq, ne }) => and(eq(users.email, data.email), ne(users.id, user.id)),
+      columns: { id: true },
     });
 
     if (existing) {
