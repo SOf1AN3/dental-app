@@ -4,6 +4,7 @@ import { db } from "@/lib/db/db";
 import { prescriptions, prescriptionItems, patients, users, clinicalSessions } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireOwnedPatient } from "@/lib/guards";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -31,7 +32,9 @@ export async function getPrescriptions(patientId?: string) {
       .from(prescriptions)
       .innerJoin(patients, eq(prescriptions.patientId, patients.id))
       .leftJoin(users, eq(prescriptions.dentistId, users.id))
-      .where(and(...conditions))
+      // Filtre multi-tenant sur la table jointe : sans `eq(patients.clinicId, …)`,
+      // la jointure exposerait la ligne patient complète d'une autre clinique.
+      .where(and(...conditions, eq(patients.clinicId, clinicId)))
       .orderBy(desc(prescriptions.date));
 
     return rows.map((r) => ({
@@ -59,7 +62,15 @@ export async function getPrescription(id: string) {
       .from(prescriptions)
       .innerJoin(patients, eq(prescriptions.patientId, patients.id))
       .leftJoin(users, eq(prescriptions.dentistId, users.id))
-      .where(and(eq(prescriptions.id, id), eq(prescriptions.clinicId, clinicId)))
+      // Filtre multi-tenant sur la table jointe : sans `eq(patients.clinicId, …)`,
+      // la jointure exposerait la ligne patient complète d'une autre clinique.
+      .where(
+        and(
+          eq(prescriptions.id, id),
+          eq(prescriptions.clinicId, clinicId),
+          eq(patients.clinicId, clinicId),
+        ),
+      )
       .limit(1);
 
     if (!row) return null;
@@ -148,6 +159,11 @@ export async function createPrescription(
   const sessionId = formData.get("sessionId") as string | null;
 
   try {
+    // Garde d'appartenance : `patientId` provient du client. Lève
+    // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+    // appartient à une autre clinique ou est archivé. Placé AVANT toute écriture.
+    await requireOwnedPatient(clinicId, data.patientId);
+
     if (sessionId) {
       const session = await db.query.clinicalSessions.findFirst({
         where: and(
@@ -211,6 +227,11 @@ export async function createPrescription(
     }
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
+    // remontée telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
     return { error: { general: ["Erreur lors de la création de l'ordonnance"] } };
   }
 }
