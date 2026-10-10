@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db/db";
 import { clinicMemberships } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth-utils";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -37,7 +37,8 @@ export async function requireClinicAccess(clinicId: string) {
   const membership = await db.query.clinicMemberships.findFirst({
     where: and(
       eq(clinicMemberships.userId, user.id),
-      eq(clinicMemberships.clinicId, clinicId)
+      eq(clinicMemberships.clinicId, clinicId),
+      isNotNull(clinicMemberships.joinedAt)
     ),
   });
 

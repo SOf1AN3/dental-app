@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/db";
 import { platformOwners, clinicMemberships, clinics, accountTokens } from "@/lib/db/schema";
-import { eq, and, gt, isNull } from "drizzle-orm";
+import { eq, and, gt, isNull, isNotNull } from "drizzle-orm";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
@@ -28,7 +28,11 @@ export async function getUserMemberships(userId: string) {
     })
     .from(clinicMemberships)
     .innerJoin(clinics, eq(clinicMemberships.clinicId, clinics.id))
-    .where(and(eq(clinicMemberships.userId, userId), isNull(clinics.deletedAt)));
+    .where(and(
+      eq(clinicMemberships.userId, userId),
+      isNotNull(clinicMemberships.joinedAt),
+      isNull(clinics.deletedAt)
+    ));
 }
 
 export const requirePlatformOwner = cache(async () => {
@@ -58,7 +62,8 @@ export async function requireClinicAccessOrThrow(clinicId: string): Promise<void
   const membership = await db.query.clinicMemberships.findFirst({
     where: and(
       eq(clinicMemberships.userId, user.id),
-      eq(clinicMemberships.clinicId, clinicId)
+      eq(clinicMemberships.clinicId, clinicId),
+      isNotNull(clinicMemberships.joinedAt)
     ),
   });
   if (!membership) {
@@ -72,7 +77,8 @@ export async function getCurrentRole(clinicId: string): Promise<Role | null> {
   const membership = await db.query.clinicMemberships.findFirst({
     where: and(
       eq(clinicMemberships.userId, user.id),
-      eq(clinicMemberships.clinicId, clinicId)
+      eq(clinicMemberships.clinicId, clinicId),
+      isNotNull(clinicMemberships.joinedAt)
     ),
   });
   if (!membership || !isRole(membership.role)) return null;

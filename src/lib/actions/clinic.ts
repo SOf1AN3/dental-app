@@ -3,7 +3,7 @@
 import { db } from "@/lib/db/db";
 import { clinics, clinicMemberships } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth-utils";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -102,9 +102,10 @@ export async function switchClinic(
 
   try {
     const membership = await db.query.clinicMemberships.findFirst({
-      where: (memberships, { and, eq }) => and(
-        eq(memberships.userId, user.id),
-        eq(memberships.clinicId, clinicId)
+      where: and(
+        eq(clinicMemberships.userId, user.id),
+        eq(clinicMemberships.clinicId, clinicId),
+        isNotNull(clinicMemberships.joinedAt)
       ),
     });
 
