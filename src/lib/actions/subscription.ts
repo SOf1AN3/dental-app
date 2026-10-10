@@ -3,7 +3,7 @@
 import { db } from "@/lib/db/db";
 import { clinicSubscriptions, subscriptionPlans, clinics } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, requireAbility } from "@/lib/auth-utils";
 import { eq, and, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -77,6 +77,9 @@ export async function subscribeToPlan(formData: FormData) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  // Clinic-wide billing commitment → owner only (thrown BEFORE the try so the
+  // refusal is not swallowed by the catch below).
+  await requireAbility(clinicId, "settings:clinic_manage");
 
   const planId = formData.get("planId");
   if (!planId || typeof planId !== "string") {
@@ -147,6 +150,9 @@ export async function cancelSubscription() {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  // Clinic-wide billing commitment → owner only (thrown BEFORE the try so the
+  // refusal is not swallowed by the catch below).
+  await requireAbility(clinicId, "settings:clinic_manage");
 
   try {
     const existingSub = await db.query.clinicSubscriptions.findFirst({

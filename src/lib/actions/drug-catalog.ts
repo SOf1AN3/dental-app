@@ -3,12 +3,29 @@
 import { db } from "@/lib/db/db";
 import { drugCatalog } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
 import { eq, and, ilike, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import * as XLSX from "xlsx";
+
+/**
+ * Ability guarding every mutation of the drug catalog (create / update /
+ * delete / toggle / Excel import). There is no dedicated `catalog:manage`
+ * ability yet (permissions.ts is read-only for this task): `prescriptions:manage`
+ * is the closest match — the catalog is the prescribing vocabulary (dosage,
+ * form, frequency, instructions) and is granted to owner / dentist, never to
+ * `viewer` or `receptionist`.
+ *
+ * ⚠️ Comportement modifié : l'`assistant` ne détiens QUE `prescriptions:view`
+ * (permissions.ts), il perd donc l'accès en ÉCRITURE au catalogue qu'il avait
+ * jusqu'ici (aucune ability n'était vérifiée). À arbitrer : une ability
+ * `catalogs:manage` dédiée permettrait de décider explicitement si l'assistant
+ * doit pouvoir maintenir ce référentiel.
+ */
+const CATALOG_MANAGE_ABILITY = "prescriptions:manage";
+const ACCESS_DENIED_MESSAGE = `Accès refusé : capacité « ${CATALOG_MANAGE_ABILITY} » requise`;
 
 export async function searchDrugs(query: string) {
   await requireAuth();
@@ -75,6 +92,9 @@ export async function createDrug(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  if (!(await hasAbility(clinicId, CATALOG_MANAGE_ABILITY))) {
+    return { success: false, error: { general: [ACCESS_DENIED_MESSAGE] } };
+  }
 
   const validated = drugItemSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
@@ -123,6 +143,9 @@ export async function updateDrug(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  if (!(await hasAbility(clinicId, CATALOG_MANAGE_ABILITY))) {
+    return { success: false, error: { general: [ACCESS_DENIED_MESSAGE] } };
+  }
 
   const existing = await db.query.drugCatalog.findFirst({
     where: and(eq(drugCatalog.id, id), eq(drugCatalog.clinicId, clinicId)),
@@ -173,6 +196,9 @@ export async function deleteDrug(id: string) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  if (!(await hasAbility(clinicId, CATALOG_MANAGE_ABILITY))) {
+    return { success: false, error: ACCESS_DENIED_MESSAGE };
+  }
 
   const existing = await db.query.drugCatalog.findFirst({
     where: and(eq(drugCatalog.id, id), eq(drugCatalog.clinicId, clinicId)),
@@ -204,6 +230,9 @@ export async function toggleDrugActive(id: string, isActive: boolean) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  if (!(await hasAbility(clinicId, CATALOG_MANAGE_ABILITY))) {
+    return { success: false, error: ACCESS_DENIED_MESSAGE };
+  }
 
   const existing = await db.query.drugCatalog.findFirst({
     where: and(eq(drugCatalog.id, id), eq(drugCatalog.clinicId, clinicId)),
@@ -239,6 +268,9 @@ export async function uploadDrugCatalogExcel(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+  if (!(await hasAbility(clinicId, CATALOG_MANAGE_ABILITY))) {
+    return { success: false, errors: [ACCESS_DENIED_MESSAGE] };
+  }
 
   const file = formData.get("file") as File | null;
   if (!file || file.size === 0) {
