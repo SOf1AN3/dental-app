@@ -40,6 +40,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# artefacts de compilation — NE JAMAIS les committer
+# Un .js a cote de son .ts S'INTERCALE entre le code source et son execution :
+# Node/le resolveur preferent le .js, donc TOUTE modification du .ts est
+# silencieusement ignoree au runtime. 15 de ces fichiers etaient committes et
+# s'executaient (constate via la trace d'erreur d'un test).
+/src/**/*.js
+/src/**/*.jsx
+
 # local database data
 /pgdata
 
