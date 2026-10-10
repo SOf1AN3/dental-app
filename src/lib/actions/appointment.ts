@@ -5,6 +5,7 @@ import { appointments, patients, users, clinicMemberships, clinics } from "@/lib
 import { eq, and, or, lt, gt, notInArray, ne, gte, lte, asc, inArray } from "drizzle-orm";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireOwnedPatient } from "@/lib/guards";
 import { PRACTITIONER_ROLES } from "@/lib/constants";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -100,6 +101,23 @@ export async function createAppointment(
   }
 
   const data = validated.data;
+
+  // Garde d'appartenance : `patientId` provient du client. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé. Placé APRÈS l'authentification
+  // et AVANT la détection de conflit (qui joint `patients` et renvoie un nom de
+  // patient dans le payload d'erreur) et avant toute écriture.
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
+    // remontée telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
+    return { error: { general: ["Erreur lors de la création du rendez-vous"] } };
+  }
 
   const startTimeValue = new Date(data.startTime);
   const endTimeValue = data.endTime && data.endTime !== ""

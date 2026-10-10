@@ -6,6 +6,7 @@ import { patients } from "@/lib/db/schema";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireOwnedPatient } from "@/lib/guards";
 import { revalidatePath } from "next/cache";
 import { logAction } from "@/lib/audit";
 import { isSameClinicDate } from "@/lib/appointment-rules";
@@ -25,6 +26,26 @@ export async function addToWaitingRoom(appointmentId: string, patientId: string)
 
   if (!appointment) {
     return { error: "Rendez-vous introuvable pour cette clinique" };
+  }
+
+  // 1) `patientId` est un argument client : le patient doit exister, appartenir
+  //    à la clinique courante et ne pas être archivé.
+  try {
+    await requireOwnedPatient(clinicId, patientId);
+  } catch (e) {
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: "Patient introuvable ou archivé" };
+    }
+    return { error: "Une erreur est survenue lors de l'ajout à la salle d'attente" };
+  }
+
+  // 2) `patientId` doit correspondre au patient du rendez-vous. Sans cette
+  //    comparaison, on pourrait rattacher le RDV du patient A au dossier
+  //    d'attente du patient B — les deux étant membres de la clinique, la
+  //    vérification 1 seule ne suffit pas. Placée AVANT la vérification
+  //    d'unicité et l'insert, qui utilisent toutes deux ce `patientId`.
+  if (appointment.patientId !== patientId) {
+    return { error: "Le patient ne correspond pas à ce rendez-vous" };
   }
 
   const clinic = await db.query.clinics.findFirst({
@@ -90,6 +111,18 @@ export async function addWalkInToWaitingRoom(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  // `patientId` est un argument client : le patient doit exister, appartenir à
+  // la clinique courante et ne pas être archivé — AVANT la vérification
+  // d'unicité et l'insert.
+  try {
+    await requireOwnedPatient(clinicId, patientId);
+  } catch (e) {
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: "Patient introuvable ou archivé" };
+    }
+    return { error: "Une erreur est survenue lors de l'ajout à la salle d'attente" };
+  }
 
   const existing = await db.query.waitingRoomEntries.findFirst({
     where: and(
