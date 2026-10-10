@@ -17,6 +17,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
+import { requireOwnedPatient } from "@/lib/guards";
 
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -72,7 +73,15 @@ export async function getTreatmentPlan(planId: string) {
   }
 }
 
-export async function recalculatePlanTotal(
+/**
+ * Recalcule le total d'un plan de traitement à partir de ses actes.
+ *
+ * NON exporté volontairement : ce module porte `"use server"`, une exportation
+ * serait donc invoquable via HTTP sans authentification ni contrôle de clinique
+ * (réécriture du montant d'un plan d'un autre cabinet). N'est appelé qu'ici,
+ * à l'intérieur d'actions déjà authentifiées et filtrées par `clinicId`.
+ */
+async function recalculatePlanTotal(
   planId: string,
   tx?: DbOrTx,
 ): Promise<number> {
@@ -111,6 +120,11 @@ export async function createTreatmentPlan(
   await requireClinicAccessOrThrow(clinicId);
 
   try {
+    // Garde d'appartenance : `patientId` provient du client. Lève
+    // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+    // appartient à une autre clinique ou est archivé.
+    await requireOwnedPatient(clinicId, patientId);
+
     const validated = treatmentPlanSchema.safeParse(Object.fromEntries(formData));
     if (!validated.success) {
       return { error: validated.error.flatten().fieldErrors };
@@ -145,6 +159,11 @@ export async function createTreatmentPlan(
     redirect(`/patients/${patientId}/treatment-plan`);
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
+    // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
+    // remontée telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { title: [e.message] } };
+    }
     return { error: { general: ["Erreur lors de la création du plan de traitement"] } };
   }
 }
@@ -509,6 +528,20 @@ export async function createConsultationNote(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  // Garde d'appartenance : `patientId` provient du client. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé.
+  try {
+    await requireOwnedPatient(clinicId, patientId);
+  } catch (e) {
+    // Erreur d'accès : remontée telle quelle, sous une clé déjà affichée par
+    // le formulaire (les formulaires de notes n'affichent pas `general`).
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { notes: [e.message] } };
+    }
+    throw e;
+  }
+
   const validated = consultationNoteSchema.safeParse(
     Object.fromEntries(formData),
   );
@@ -580,6 +613,20 @@ export async function createRadiograph(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  // Garde d'appartenance : `patientId` provient du client. Placé AVANT l'upload
+  // (inchangé ci-dessous) pour ne pas téléverser un fichier rattaché à un
+  // patient d'une autre clinique, inexistant ou archivé.
+  try {
+    await requireOwnedPatient(clinicId, patientId);
+  } catch (e) {
+    // Erreur d'accès : remontée telle quelle, sous la clé `file` que le
+    // formulaire affiche déjà (branche de retour préexistante).
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { file: [e.message] } };
+    }
+    throw e;
+  }
 
   const validated = radiographSchema.safeParse(Object.fromEntries(formData));
   if (!validated.success) {
@@ -723,6 +770,20 @@ export async function createMedicalHistoryEntry(
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
+
+  // Garde d'appartenance : `patientId` provient du client. Lève
+  // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
+  // appartient à une autre clinique ou est archivé.
+  try {
+    await requireOwnedPatient(clinicId, patientId);
+  } catch (e) {
+    // Erreur d'accès : remontée telle quelle, sous une clé déjà affichée par
+    // le formulaire (les formulaires d'antécédents n'affichent pas `general`).
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { condition: [e.message] } };
+    }
+    throw e;
+  }
 
   const raw: Record<string, unknown> = Object.fromEntries(formData);
   raw.isActive = formData.has("isActive");
