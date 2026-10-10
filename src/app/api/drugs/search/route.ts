@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/db";
 import { drugCatalog } from "@/lib/db/schema";
 import { eq, and, ilike } from "drizzle-orm";
-import { getCurrentClinicId } from "@/lib/multi-tenant";
+import { requireCurrentClinic } from "@/lib/multi-tenant";
 import { requireAuth } from "@/lib/auth-utils";
 
 export async function GET(request: NextRequest) {
   try {
     await requireAuth();
-    const clinicId = await getCurrentClinicId();
+    const clinicId = await requireCurrentClinic();
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") ?? "";

@@ -2,15 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db/db";
 import { drugCatalog } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
-import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireCurrentClinic } from "@/lib/multi-tenant";
+import { requireAuth } from "@/lib/auth-utils";
 import * as XLSX from "xlsx";
 
 export async function GET(_request: NextRequest) {
   try {
     await requireAuth();
-    const clinicId = await getCurrentClinicId();
-    await requireClinicAccessOrThrow(clinicId);
+    const clinicId = await requireCurrentClinic();
 
     const drugs = await db
       .select()

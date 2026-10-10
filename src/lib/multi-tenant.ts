@@ -15,6 +15,22 @@ export async function getCurrentClinicId(): Promise<string> {
   return clinicId;
 }
 
+/**
+ * Résout la clinique active depuis le cookie `active_clinic_id` ET vérifie
+ * que l'utilisateur connecté en est bien membre, en une seule opération.
+ *
+ * - Cookie absent → redirection vers `/select-clinic` (via `getCurrentClinicId`).
+ * - Utilisateur non membre de la clinique → `requireClinicAccess` lève une erreur.
+ *
+ * À utiliser de préférence à `getCurrentClinicId()` seule : ce helper ne fait
+ * que LIRE le cookie, qui est forgeable côté client.
+ */
+export async function requireCurrentClinic(): Promise<string> {
+  const clinicId = await getCurrentClinicId();
+  await requireClinicAccess(clinicId);
+  return clinicId;
+}
+
 export async function requireClinicAccess(clinicId: string) {
   const user = await requireAuth();
 
