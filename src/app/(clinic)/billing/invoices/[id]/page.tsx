@@ -1,8 +1,9 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getInvoice, updateInvoiceStatus } from "@/lib/actions/financial";
+import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { db } from "@/lib/db/db";
 import { patients } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -45,8 +46,11 @@ export default async function InvoiceDetailPage(props: {
     notFound();
   }
 
+  // getInvoice() vérifie déjà l'appartenance de la facture à la clinique ; on
+  // refiltre ici le patient au cas où il aurait changé de clinique (fuite de données).
+  const clinicId = await getCurrentClinicId();
   const patient = await db.query.patients.findFirst({
-    where: eq(patients.id, invoice.patientId),
+    where: and(eq(patients.id, invoice.patientId), eq(patients.clinicId, clinicId)),
   });
 
   const invoiceWithRelations = invoice as unknown as {

@@ -92,13 +92,27 @@ export async function getInvoice(id: string) {
     const invoice = await db.query.invoices.findFirst({
       where: and(eq(invoices.id, id), eq(invoices.clinicId, clinicId)),
       with: {
-        patient: true,
         items: true,
-        payments: true,
+        // Filtre multi-tenant sur la table jointe : sans `eq(payments.clinicId, …)`,
+        // la jointure retournerait les paiements d'une autre clinique.
+        payments: {
+          where: eq(payments.clinicId, clinicId),
+        },
       },
     });
+    if (!invoice) return null;
 
-    return invoice;
+    // La relation `patient` ne peut pas porter `where` (Drizzle n'accepte que
+    // columns/with/extras sur une relation `one`) : on la relit avec le filtre
+    // multi-tenant. Patient d'une autre clinique → facture illisible (null → 404).
+    const [patient] = await db
+      .select()
+      .from(patients)
+      .where(and(eq(patients.id, invoice.patientId), eq(patients.clinicId, clinicId)))
+      .limit(1);
+    if (!patient) return null;
+
+    return { ...invoice, patient };
   } catch {
     return null;
   }
@@ -148,7 +162,7 @@ export async function getQuotes(status?: string) {
       ? await db
           .select({ id: patients.id, firstName: patients.firstName, lastName: patients.lastName })
           .from(patients)
-          .where(inArray(patients.id, patientIds))
+          .where(and(inArray(patients.id, patientIds), eq(patients.clinicId, clinicId)))
       : [];
 
     const patientMap = Object.fromEntries(
@@ -186,7 +200,7 @@ export async function getQuote(id: string) {
     const [patient] = await db
       .select()
       .from(patients)
-      .where(eq(patients.id, quote.patientId))
+      .where(and(eq(patients.id, quote.patientId), eq(patients.clinicId, clinicId)))
       .limit(1);
 
     return { ...quote, items, patient: patient || null };
