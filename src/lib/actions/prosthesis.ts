@@ -4,6 +4,7 @@ import { db } from "@/lib/db/db";
 import { prosthesisLabs, prosthesisOrders, patients, documentSequences } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
+import { requireOwnedPatient } from "@/lib/guards";
 import { and, eq, asc, desc, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -42,6 +43,44 @@ const orderSchema = z.object({
 });
 
 const validStatuses = ["ordered", "in_progress", "delivered", "cancelled"] as const;
+
+/**
+ * Message UNIQUE pour « laboratoire inexistant » ET « laboratoire appartenant à
+ * une autre clinique » : un attaquant ne peut pas distinguer un ID valide d'un
+ * autre cabinet d'un ID inexistant (pas d'oracle d'énumération), exactement comme
+ * `requireOwnedPatient` de `src/lib/guards.ts`.
+ */
+const LAB_NOT_FOUND_MESSAGE = "Laboratoire introuvable";
+
+/**
+ * Vérifie qu'un laboratoire existe et qu'il appartient à `clinicId`, puis
+ * remonte silencieusement (la ligne n'est pas nécessaire à l'appelant).
+ *
+ * `clinicId` doit provenir du serveur (session / contexte multi-tenant), jamais du
+ * client. Ce helper ne fait QUE la validation de la ressource : aucune vérification
+ * d'authentification ni de rôle ici (déjà faite par l'action appelante).
+ *
+ * ⚠️ Fonction NON exportée, et elle doit le rester : ce module porte `"use server"`,
+ * donc TOUT export en deviendrait une Server Action — un endpoint HTTP public
+ * invoquable avec un `clinicId` arbitraire. Placée dans `prosthesis.ts` (et non dans
+ * `src/lib/guards.ts`, non modifiable pour cette tâche) car il n'existe aucun guard
+ * laboratoire réutilisable.
+ *
+ * @param clinicId Clinique propriétaire attendue (fournie par le serveur).
+ * @param labId Identifiant du laboratoire, potentiellement fourni par le client.
+ * @throws `Error("Laboratoire introuvable")` si le laboratoire n'existe pas ou
+ * appartient à une autre clinique — le **même message** dans les deux cas.
+ */
+async function requireOwnedLab(clinicId: string, labId: string): Promise<void> {
+  const lab = await db.query.prosthesisLabs.findFirst({
+    where: and(eq(prosthesisLabs.id, labId), eq(prosthesisLabs.clinicId, clinicId)),
+    columns: { id: true },
+  });
+
+  if (!lab) {
+    throw new Error(LAB_NOT_FOUND_MESSAGE);
+  }
+}
 
 export async function getLabs() {
   await requireAuth();
@@ -254,8 +293,20 @@ export async function getOrders(patientId?: string, labId?: string) {
         lab: prosthesisLabs,
       })
       .from(prosthesisOrders)
-      .innerJoin(patients, eq(prosthesisOrders.patientId, patients.id))
-      .leftJoin(prosthesisLabs, eq(prosthesisOrders.labId, prosthesisLabs.id))
+      // Filtres multi-tenant sur les tables jointes : sans `eq(patients.clinicId, …)`
+      // et `eq(prosthesisLabs.clinicId, …)`, la jointure exposerait la ligne patient
+      // complète (naissance, téléphone, email, mutuelle…) et/ou le laboratoire
+      // complet d'un autre cabinet. Placés dans la condition de jointure (et non dans
+      // le `where`) pour la LEFT JOIN des laboratoires : filtrer `prosthesisLabs`
+      // côté `where` ferait disparaître les commandes sans laboratoire.
+      .innerJoin(
+        patients,
+        and(eq(prosthesisOrders.patientId, patients.id), eq(patients.clinicId, clinicId)),
+      )
+      .leftJoin(
+        prosthesisLabs,
+        and(eq(prosthesisOrders.labId, prosthesisLabs.id), eq(prosthesisLabs.clinicId, clinicId)),
+      )
       .where(and(...conditions))
       .orderBy(desc(prosthesisOrders.createdAt));
 
@@ -278,8 +329,17 @@ export async function getOrder(id: string) {
         lab: prosthesisLabs,
       })
       .from(prosthesisOrders)
-      .innerJoin(patients, eq(prosthesisOrders.patientId, patients.id))
-      .leftJoin(prosthesisLabs, eq(prosthesisOrders.labId, prosthesisLabs.id))
+      // Filtres multi-tenant sur les tables jointes (même justification que
+      // `getOrders`) : la jointure ne doit jamais exposer patient/laboratoire
+      // d'un autre cabinet. Conserver ET ajouter les conditions existantes du `where`.
+      .innerJoin(
+        patients,
+        and(eq(prosthesisOrders.patientId, patients.id), eq(patients.clinicId, clinicId)),
+      )
+      .leftJoin(
+        prosthesisLabs,
+        and(eq(prosthesisOrders.labId, prosthesisLabs.id), eq(prosthesisLabs.clinicId, clinicId)),
+      )
       .where(
         and(
           eq(prosthesisOrders.id, id),
@@ -305,7 +365,12 @@ export async function getLabOrders(labId: string) {
         patient: patients,
       })
       .from(prosthesisOrders)
-      .innerJoin(patients, eq(prosthesisOrders.patientId, patients.id))
+      // Filtre multi-tenant sur la table jointe : sans `eq(patients.clinicId, …)`,
+      // la jointure exposerait la ligne patient complète d'une autre clinique.
+      .innerJoin(
+        patients,
+        and(eq(prosthesisOrders.patientId, patients.id), eq(patients.clinicId, clinicId)),
+      )
       .where(
         and(
           eq(prosthesisOrders.clinicId, clinicId),
@@ -334,6 +399,26 @@ export async function createOrder(
   }
 
   const data = validated.data;
+
+  // Garde d'appartenance : `patientId` et `labId` proviennent du client. Placé
+  // APRÈS l'authentification et AVANT toute écriture (séquence + INSERT), pour
+  // empêcher de rattachier une commande au patient ET au laboratoire d'un autre
+  // cabinet. Messages propres remontés via la clé du champ concerné.
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+    if (data.labId) {
+      await requireOwnedLab(clinicId, data.labId);
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { patientId: ["Patient introuvable ou archivé"] } };
+    }
+    if (e instanceof Error && e.message === LAB_NOT_FOUND_MESSAGE) {
+      return { error: { labId: [LAB_NOT_FOUND_MESSAGE] } };
+    }
+    return { error: { general: ["Erreur lors de la création de la commande"] } };
+  }
+
   const now = new Date();
   const year = now.getFullYear();
 
@@ -460,6 +545,24 @@ export async function updateOrder(
   }
 
   const data = validated.data;
+
+  // Garde d'appartenance : `patientId` et `labId` proviennent du client. Placé
+  // APRÈS l'authentification et AVANT toute écriture (UPDATE), pour empêcher de
+  // rattacher une commande au patient ET au laboratoire d'un autre cabinet.
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+    if (data.labId) {
+      await requireOwnedLab(clinicId, data.labId);
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { patientId: ["Patient introuvable ou archivé"] } };
+    }
+    if (e instanceof Error && e.message === LAB_NOT_FOUND_MESSAGE) {
+      return { error: { labId: [LAB_NOT_FOUND_MESSAGE] } };
+    }
+    return { error: { general: ["Erreur lors de la mise à jour de la commande"] } };
+  }
 
   try {
     const [current] = await db
