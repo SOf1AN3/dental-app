@@ -1,7 +1,7 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getInvoice, getUnpaidInvoicesForPatient } from "@/lib/actions/financial";
-import { requireActivePatient } from "@/lib/actions/patient";
+import { requireOwnedPatient } from "@/lib/guards";
 import { PaymentLauncher } from "@/components/clinic/payment-launcher";
 import { BackButton } from "@/components/clinic/back-button";
 
@@ -48,7 +48,7 @@ export default async function NewPaymentPage(props: {
     }
   } else if (patientId) {
     try {
-      const patient = await requireActivePatient(clinicId, patientId);
+      const patient = await requireOwnedPatient(clinicId, patientId);
       presetPatient = {
         id: patient.id,
         firstName: patient.firstName,

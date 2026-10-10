@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getActivePlanLimits } from "./subscription";
 import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
+import { requireOwnedPatient, requirePatientOwnership } from "@/lib/guards";
 
 /** Escape special characters for SQL LIKE patterns to prevent injection. */
 function escapeLike(input: string): string {
@@ -100,22 +101,6 @@ export async function createPatient(
   }
 }
 
-export async function requireActivePatient(clinicId: string, patientId: string) {
-  const patient = await db.query.patients.findFirst({
-    where: and(
-      eq(patients.id, patientId),
-      eq(patients.clinicId, clinicId),
-      isNull(patients.deletedAt),
-    ),
-  });
-
-  if (!patient) {
-    throw new Error("Patient introuvable ou archivé");
-  }
-
-  return patient;
-}
-
 export async function deletePatient(
   patientId: string,
 ): Promise<{ success: boolean } | { error: string }> {
@@ -124,6 +109,11 @@ export async function deletePatient(
   await requireClinicAccessOrThrow(clinicId);
 
   try {
+    // Garde d'appartenance (sans filtre archivage : archiver un patient déjà
+    // archivé reste légitime). Lève `Error("Patient introuvable")` si le patient
+    // n'existe pas ou appartient à une autre clinique.
+    await requirePatientOwnership(clinicId, patientId);
+
     const [patient] = await db
       .select({
         firstName: patients.firstName,
@@ -159,7 +149,12 @@ export async function deletePatient(
     revalidatePath("/patients");
     revalidatePath(`/patients/${patientId}`);
     return { success: true };
-  } catch {
+  } catch (e) {
+    // Erreur d'accès (patient d'une autre clinique ou inexistant) : remontée
+    // telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable") {
+      return { error: e.message };
+    }
     return { error: "Erreur lors de l'archivage du patient" };
   }
 }
@@ -172,6 +167,11 @@ export async function restorePatient(
   await requireClinicAccessOrThrow(clinicId);
 
   try {
+    // Garde d'appartenance (sans filtre archivage : restaurer un patient archivé
+    // est le cas d'usage légitime de cette action). Lève `Error("Patient introuvable")`
+    // si le patient n'existe pas ou appartient à une autre clinique.
+    await requirePatientOwnership(clinicId, patientId);
+
     const [patient] = await db
       .select({ deletedAt: patients.deletedAt })
       .from(patients)
@@ -195,7 +195,12 @@ export async function restorePatient(
     revalidatePath("/patients");
     revalidatePath(`/patients/${patientId}`);
     return { success: true };
-  } catch {
+  } catch (e) {
+    // Erreur d'accès (patient d'une autre clinique ou inexistant) : remontée
+    // telle quelle, distincte de l'erreur technique générique.
+    if (e instanceof Error && e.message === "Patient introuvable") {
+      return { error: e.message };
+    }
     return { error: "Erreur lors de la restauration du patient" };
   }
 }
@@ -217,7 +222,7 @@ export async function updatePatient(
   const data = validated.data;
 
   try {
-    const patient = await requireActivePatient(clinicId, patientId);
+    const patient = await requireOwnedPatient(clinicId, patientId);
 
     await db
       .update(patients)
