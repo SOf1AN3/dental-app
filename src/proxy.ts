@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/db";
 import { clinicMemberships } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -15,7 +15,8 @@ async function isValidActiveClinic(
   const membership = await db.query.clinicMemberships.findFirst({
     where: and(
       eq(clinicMemberships.userId, sessionUserId),
-      eq(clinicMemberships.clinicId, clinicId)
+      eq(clinicMemberships.clinicId, clinicId),
+      isNotNull(clinicMemberships.joinedAt)
     ),
     with: { clinic: true },
   });

@@ -84,6 +84,7 @@ async function main() {
     userId,
     clinicId,
     role: "owner",
+    joinedAt: new Date(),
   });
   console.log("  Membership: created (owner)");
 
