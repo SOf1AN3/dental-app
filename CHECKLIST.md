@@ -9,7 +9,7 @@
 - [x] Z-3 `joinedAt` exigé (invitation non acceptée)
 - [x] Z-4 test anti-réintroduction
 - [x] Z-5 jointures `financial.ts`
-- [ ] **Z-5B** appliquer `requireCurrentClinic()` aux pages `(clinic)` *(~24 fichiers, centralisable dans le layout)*
+- [x] Z-5B garde d'accès au layout `(clinic)`
 
 ## Lot 2 — Sécurité de profondeur
 - [x] Z-6 export owner (tokens de reset + `passwordHash`)
@@ -66,17 +66,17 @@
 - [x] Z-52 `revalidatePath` sur routes imbriquées
 
 ## Lot 5 — Agenda, salle d'attente, stock
-- [ ] Z-53 dates de RDV normalisées côté serveur
-- [ ] Z-54 changement de patient dans `updateAppointment`
-- [ ] Z-55 transaction sur le check-in
-- [ ] Z-56 incohérence visible/actif de la file
-- [ ] Z-57 `updateWaitingStatus` sans contrôle d'accès
-- [ ] Z-58 garde d'état sur le RDV au check-in
-- [ ] Z-59 `deleteSession` liée à son entrée de file
-- [ ] Z-60 `CHECK (current_qty >= 0)` + ajustement
-- [ ] Z-61 stock remis à 0 si champ omis
-- [ ] Z-62 alertes de stock jamais résolues
-- [ ] Z-63 contrainte d'exclusion sur les plages de RDV
+- [x] Z-53 dates de RDV normalisées côté serveur
+- [x] Z-54 changement de patient dans `updateAppointment`
+- [x] Z-55 transaction sur le check-in
+- [x] Z-56 incohérence visible/actif de la file
+- [x] Z-57 `updateWaitingStatus` sans contrôle d'accès
+- [x] Z-58 garde d'état sur le RDV au check-in
+- [x] Z-59 `deleteSession` liée à son entrée de file
+- [x] Z-60 `CHECK (current_qty >= 0)` + ajustement
+- [x] Z-61 stock remis à 0 si champ omis
+- [x] Z-62 alertes de stock jamais résolues
+- [ ] **Z-63** contrainte d'exclusion sur les plages de RDV *(reportée — nécessite `btree_gist` ou index unique partiel)*
 
 ## Lot 6 — Rapports & notifications
 - [ ] Z-64 `getMonthlyTrends` sans permission
@@ -117,7 +117,7 @@
 ---
 
 ## ⬜ En cours
-**Lot 5** — Z-53 à Z-63 (agenda, salle d'attente, stock).
+**Lot 6** — Z-64 à Z-70 (rapports & notifications).
 
 ## ⚠️ À trancher par le client (bloquent certains lots)
 - **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
@@ -138,4 +138,9 @@
   3. `npm run db:migrate`
   4. **Redéploiement obligatoire** — la sonde de Z-45 est mémoïsée par process
 - [ ] **Nettoyage lié aux numéros de dent** : `UPDATE treatment_plan_item SET tooth_number = NULL WHERE tooth_number = 0;`
+- [ ] **Contraintes stock (Z-60/Z-62)** — `CHECK (current_qty >= 0)` + index unique partiel alertes, actuellement **au schéma TS seulement** :
+  `npm run db:generate` puis, **avant** `db:migrate` :
+  `SELECT id, current_qty FROM stock_item WHERE current_qty < 0;`
+  `SELECT item_id, COUNT(*) FROM stock_alert WHERE status='active' GROUP BY item_id HAVING COUNT(*) > 1;`
+  → si lignes, nettoyer d'abord (sinon la migration **échoue**)
 - [ ] **Fumée-test** après déploiement : créer une commande prothèse → vérifier `PRO-2026-0000n` (SQL Z-49 jamais exécuté en conditions réelles)
