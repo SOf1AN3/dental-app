@@ -5,6 +5,21 @@ import { eq, and, ilike } from "drizzle-orm";
 import { requireCurrentClinic } from "@/lib/multi-tenant";
 import { requireAuth } from "@/lib/auth-utils";
 
+/**
+ * Échappe les métacaractères d'un pattern LIKE/ILIKE (`%`, `_`, et le
+ * caractère d'échappement lui-même) pour que la saisie utilisateur soit
+ * recherchée littéralement (`q=%` ne doit pas balayer tout le catalogue).
+ *
+ * PostgreSQL utilise `\` comme caractère d'échappement par défaut de LIKE,
+ * aucune clause `ESCAPE` n'est donc nécessaire (même convention que le helper
+ * `escapeLike` de `src/lib/actions/patient.ts`, qui n'est pas exporté —
+ * copie locale assumée pour ne pas dupliquer un export depuis un fichier
+ * `use server`).
+ */
+function escapeLike(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 export async function GET(request: NextRequest) {
   try {
     await requireAuth();
@@ -32,7 +47,7 @@ export async function GET(request: NextRequest) {
         and(
           eq(drugCatalog.clinicId, clinicId),
           eq(drugCatalog.isActive, true),
-          ilike(drugCatalog.name, `%${query.trim()}%`),
+          ilike(drugCatalog.name, `%${escapeLike(query.trim())}%`),
         )
       )
       .limit(20);

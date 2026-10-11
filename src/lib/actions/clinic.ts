@@ -20,6 +20,30 @@ const createClinicSchema = z.object({
   wilayaCode: z.string().nullable().optional(),
 });
 
+/**
+ * Attributs du cookie portant le contexte clinique (`active_clinic_id`).
+ *
+ * `secure` est activé uniquement en production : `next dev` sert l'application
+ * en `http://localhost:3000` et un cookie marqué `Secure` y serait refusé par
+ * le navigateur (au mieux), ce qui casserait la résolution du contexte clinique
+ * et provoquerait une boucle de redirection vers `/select-clinic`.
+ *
+ * ⚠️ ATTENTION — `NODE_ENV === "production"` **ne garantit pas HTTPS**. Un
+ * build de production servi en clair (conteneur sur `http://IP:3000`, host
+ * interne, reverse-proxy mal configuré) ferait échouer ce cookie et
+ * déclencherait exactement la même boucle. **Toute instance non-localhost doit
+ * être servie en HTTPS** ; c'est la condition réelle, `NODE_ENV` n'en est qu'un
+ * proxy imparfait. Vercel sert tout en HTTPS (production et preview), ce qui
+ * couvre le déploiement actuel.
+ */
+const activeClinicCookieOptions = {
+  httpOnly: true,
+  sameSite: "lax",
+  path: "/",
+  maxAge: 60 * 60 * 24 * 365,
+  secure: process.env.NODE_ENV === "production",
+} as const;
+
 export async function createClinic(formData: FormData) {
   const user = await requireAuth();
 
@@ -64,12 +88,7 @@ export async function createClinic(formData: FormData) {
     });
 
     const cookieStore = await cookies();
-    cookieStore.set("active_clinic_id", clinic.id, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-    });
+    cookieStore.set("active_clinic_id", clinic.id, activeClinicCookieOptions);
 
     await logAction({
       clinicId: clinic.id,
@@ -114,12 +133,7 @@ export async function switchClinic(
     }
 
     const cookieStore = await cookies();
-    cookieStore.set("active_clinic_id", clinicId, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-    });
+    cookieStore.set("active_clinic_id", clinicId, activeClinicCookieOptions);
 
     revalidatePath("/");
     redirect("/");

@@ -27,6 +27,21 @@ import * as XLSX from "xlsx";
 const CATALOG_MANAGE_ABILITY = "prescriptions:manage";
 const ACCESS_DENIED_MESSAGE = `Accès refusé : capacité « ${CATALOG_MANAGE_ABILITY} » requise`;
 
+/**
+ * Échappe les métacaractères d'un pattern LIKE/ILIKE (`%`, `_`, et le
+ * caractère d'échappement lui-même) pour que la saisie utilisateur soit
+ * recherchée littéralement (`q=%` ne doit pas balayer tout le catalogue).
+ *
+ * PostgreSQL utilise `\` comme caractère d'échappement par défaut de LIKE,
+ * aucune clause `ESCAPE` n'est donc nécessaire (même convention que le helper
+ * `escapeLike` de `src/lib/actions/patient.ts`, qui n'est pas exporté —
+ * copie locale assumée car ce fichier est un module `use server` dont seules
+ * les fonctions async peuvent être exportées).
+ */
+function escapeLike(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 export async function searchDrugs(query: string) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
@@ -50,7 +65,7 @@ export async function searchDrugs(query: string) {
         and(
           eq(drugCatalog.clinicId, clinicId),
           eq(drugCatalog.isActive, true),
-          ilike(drugCatalog.name, `%${query.trim()}%`),
+          ilike(drugCatalog.name, `%${escapeLike(query.trim())}%`),
         )
       )
       .orderBy(desc(drugCatalog.name))
