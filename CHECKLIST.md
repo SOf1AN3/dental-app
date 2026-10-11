@@ -88,16 +88,16 @@
 - [x] Z-70 `requireAuth` sur les notifications
 
 ## Lot 7 — Fiabilité transverse
-- [ ] Z-71 erreurs DB avalées (`[]` / `null` / succès)
-- [ ] Z-72 résultats des `UPDATE` testés
-- [ ] Z-73 quota patients (TOCTOU)
-- [ ] Z-74 IP `x-forwarded-for` journalisée comme vérité
-- [ ] Z-75 échecs d'audit avalés
-- [ ] Z-76 consommation de token atomique
-- [ ] Z-77 rétrogradation du dernier owner
-- [ ] Z-78 ré-vérification de l'email
-- [ ] Z-79 sanitisation des clés de stockage
-- [ ] Z-80 `emailVerified` exigé dans `requireAuth`
+- [x] Z-71 erreurs DB avalées (`[]` / `null` / succès)
+- [x] Z-72 résultats des `UPDATE` testés
+- [x] Z-73 quota patients (TOCTOU)
+- [x] Z-74 IP `x-forwarded-for` journalisée comme vérité
+- [x] Z-75 échecs d'audit avalés
+- [x] Z-76 consommation de token atomique
+- [x] Z-77 rétrogradation du dernier owner
+- [x] Z-78 ré-vérification de l'email
+- [x] Z-79 sanitisation des clés de stockage
+- [ ] **Z-80** `emailVerified` exigé dans `requireAuth` *(refusé — verrouillerait `resendVerificationEmail`, analyse documentée)*
 
 ## Lot 8 — Propreté & reconnaissance
 - [x] Z-81 artefacts `.js` compilés supprimés
@@ -117,7 +117,7 @@
 ---
 
 ## ⬜ En cours
-**Lot 7** — Z-71 à Z-80 (fiabilité transverse).
+**Lot 8** — Z-82 à Z-83 (reconnaissance), puis **Lot 9** — tests T-2 à T-8.
 
 ## ⚠️ À trancher par le client (bloquent certains lots)
 - **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
