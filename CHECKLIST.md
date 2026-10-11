@@ -1,146 +1,124 @@
-# CHECKLIST — Reste à faire
+# RESTE À FAIRE
 
-> Suivi d'exécution. Mis à jour au fil des commits.
-> ✅ = fait et committé · ⬜ = à faire · N/A = hors périmètre actuel
-
-## Lot 1 — Correctifs structurels
-- [x] Z-1 `requireCurrentClinic()`
-- [x] Z-2 `requireOwnedPatient` / `requirePatientOwnership`
-- [x] Z-3 `joinedAt` exigé (invitation non acceptée)
-- [x] Z-4 test anti-réintroduction
-- [x] Z-5 jointures `financial.ts`
-- [x] Z-5B garde d'accès au layout `(clinic)`
-
-## Lot 2 — Sécurité de profondeur
-- [x] Z-6 export owner (tokens de reset + `passwordHash`)
-- [x] Z-7 `passwordHash` retiré du profil
-- [x] Z-8 abilities (abonnement + catalogue)
-- [x] Z-9 uploads sortis de `public/` + route authentifiée
-- [x] Z-10 `tokenVersion` — révocation des sessions JWT
-- [x] Z-11 brute-force (backoff + plafond IP)
-- [x] Z-12 wildcards `ILIKE` échappées
-- [x] Z-13 cookie `secure`
-- [x] Z-14 `timingSafeEqual` sur `CRON_SECRET`
-- [x] Z-15 throttle reset/inscription + mot de passe 12 car.
-- [x] Z-16 clinique archivée inaccessible
-- [x] FAC-B01 gardes de patient à l'écriture facturation
-
-## Lot 3 — Facturation & séances
-- [x] Z-17 `round2` (demi-centimes)
-- [x] Z-18 `taxRate` côté séance
-- [x] Z-19 transaction `createInvoice`
-- [x] Z-20 transaction `createQuote`
-- [x] Z-21 verrou `closeSession`
-- [x] Z-22 verrou `convertQuoteToInvoice`
-- [x] Z-23 verrou `recordPayment`
-- [x] Z-24 bornes de saisie
-- [x] Z-25 encours « en attente »
-- [x] Z-26 paiement sur facture `paid` + `patientId`
-- [x] Z-27 `updateSessionStatus` sans `hasAbility`
-- [x] Z-28 lignes de séance modifiables après facturation
-- [x] Z-29 machine à états des séances
-- [x] Z-30 numéros brûlés par la séquence
-- [x] Z-31 transitions facture/devis non validées
-- [x] Z-32 erreurs avalées → 404 / liste vide
-- [x] Z-33 « Marquer payée » sans traçabilité
-- [x] Z-34 `sessionItemTotal` négatif
-
-## Lot 4 — Patients & dossier clinique
-- [x] Z-35 JSON `items` → suppression silencieuse des médicaments
-- [x] Z-36 validation `dateOfBirth`
-- [x] Z-37 email silencieusement effacé
-- [x] Z-38 audit dans le `try` + unicité patients
-- [x] Z-39 `try/catch` sur les écritures sans garde
-- [x] Z-40 validation du fichier de radiographie
-- [x] Z-41 payload odontogramme
-- [x] Z-42 numéros de dent (plage FDI)
-- [x] Z-43 colonnes d'auteur renseignées
-- [x] Z-44 statut d'ordonnance validé
-- [x] Z-45 ordre de saisie des items d'ordonnance
-- [x] Z-46 quota patient à la restauration
-- [x] Z-47 patients archivés filtrés (ordonnances/prothèses)
-- [x] Z-48 existence testée (`updateLab`/`deleteLab`/`updateOrder`)
-- [x] Z-49 numéro de commande prothèse
-- [x] Z-50 suppression de labo lié à des commandes
-- [x] Z-51 alerte d'allergie à la prescription ⚠️ *(visible sur les 3 écrans)*
-- [x] Z-52 `revalidatePath` sur routes imbriquées
-
-## Lot 5 — Agenda, salle d'attente, stock
-- [x] Z-53 dates de RDV normalisées côté serveur
-- [x] Z-54 changement de patient dans `updateAppointment`
-- [x] Z-55 transaction sur le check-in
-- [x] Z-56 incohérence visible/actif de la file
-- [x] Z-57 `updateWaitingStatus` sans contrôle d'accès
-- [x] Z-58 garde d'état sur le RDV au check-in
-- [x] Z-59 `deleteSession` liée à son entrée de file
-- [x] Z-60 `CHECK (current_qty >= 0)` + ajustement
-- [x] Z-61 stock remis à 0 si champ omis
-- [x] Z-62 alertes de stock jamais résolues
-- [ ] **Z-63** contrainte d'exclusion sur les plages de RDV *(reportée — nécessite `btree_gist` ou index unique partiel)*
-
-## Lot 6 — Rapports & notifications
-- [x] Z-64 `getMonthlyTrends` sans permission
-- [x] Z-65 définitions de « revenu » incohérentes
-- [x] Z-66 fuseau horaire des rapports
-- [x] Z-67 taux d'occupation
-- [ ] **Z-68** `userId` sur les notifications lues *(reporté — exige une migration Drizzle)*
-- [x] Z-69 cible de `createNotification` validée
-- [x] Z-70 `requireAuth` sur les notifications
-
-## Lot 7 — Fiabilité transverse
-- [x] Z-71 erreurs DB avalées (`[]` / `null` / succès)
-- [x] Z-72 résultats des `UPDATE` testés
-- [x] Z-73 quota patients (TOCTOU)
-- [x] Z-74 IP `x-forwarded-for` journalisée comme vérité
-- [x] Z-75 échecs d'audit avalés
-- [x] Z-76 consommation de token atomique
-- [x] Z-77 rétrogradation du dernier owner
-- [x] Z-78 ré-vérification de l'email
-- [x] Z-79 sanitisation des clés de stockage
-- [ ] **Z-80** `emailVerified` exigé dans `requireAuth` *(refusé — verrouillerait `resendVerificationEmail`, analyse documentée)*
-
-## Lot 8 — Propreté & reconnaissance
-- [x] Z-81 artefacts `.js` compilés supprimés
-- [x] Z-82 `proxy.ts` inspecté (lu et modifié en A-5)
-- [ ] Z-83 `src/app/billing/**` hors groupe `(clinic)`
-
-## Lot 9 — Tests
-- [x] T-1 garde multi-tenant
-- [x] T-2 arrondis financiers *(couvert par Z-17)*
-- [x] T-3 transitions de statut
-- [x] T-4 verrous de concurrence *(tests de source — structurels, inexecutables sans base)*
-- [x] T-5 règles de séance
-- [x] T-6 alerte d'allergie *(câblage + correspondance textuelle ; Z-84 a corrigé le faux négatif pénicilline↔amoxicilline)*
-- [ ] T-7 *(N/A — migration locale hors-ligne abandonnée)*
-- [x] T-8 contrôle d'accès financier
+> **État au 2026-10-11** — document de suivi après la passe complète de stabilisation.
+> ✅ = fait et committé · ⬜ = restant · 🔴 = bloquant avant déploiement
 
 ---
 
-## ⬜ En cours
-**Bilan final.** ⬜ Restants : Z-63, Z-68, Z-80 — tous **reportés ou refusés**, motifs documentés dans la checklist.
+## 1. Où on en est
 
-## ⚠️ À trancher par le client (bloquent certains lots)
-- **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
-- **Q2** 🟥 — assiette de TVA : remise déductible de l'assiette, ou déduite **après** TVA (actuel) ? → **bloque Z-17 et la conformité fiscale**
-- **Q3** — implémenter le statut `overdue` (onglet « Impayée » vide)
-- **Q4** — « Marquer payée » : écriture de paiement traçable, ou statut nu ? → **Z-33**
-- **Q5** 🟥 — contrôle d'allergie à l'ordonnance → **Z-51**
-- **Q6** — `deleteSession` liée à son entrée de file → **Z-59**
+**108 bugs** identifiés par 4 audits, corrigés en **9 lots**. **56 commits**.
 
-## 🔴 Avant tout déploiement
-- [ ] **Backfill `joined_at`** : `npx tsx scripts/backfill-membership-joined-at.ts` (diagnostic) puis `--apply`
-- [ ] **Migration `token_version`** : `npm run db:generate` puis `npm run db:migrate` **avant** le déploiement du code Z-10
-- [ ] **Migrations `order_index` (Z-45) + index unique commandes prothèse (Z-49)** :
-  1. contrôle des doublons **avant** migration :
-     `SELECT clinic_id, order_number, COUNT(*) FROM prosthesis_order GROUP BY 1, 2 HAVING COUNT(*) > 1;`
-     → si lignes retournées, renuméroter d'abord (sinon la migration **échoue**)
-  2. `npm run db:generate` → commit des fichiers `drizzle/*.sql` + `meta/`
-  3. `npm run db:migrate`
-  4. **Redéploiement obligatoire** — la sonde de Z-45 est mémoïsée par process
-- [ ] **Nettoyage lié aux numéros de dent** : `UPDATE treatment_plan_item SET tooth_number = NULL WHERE tooth_number = 0;`
-- [ ] **Contraintes stock (Z-60/Z-62)** — `CHECK (current_qty >= 0)` + index unique partiel alertes, actuellement **au schéma TS seulement** :
-  `npm run db:generate` puis, **avant** `db:migrate` :
-  `SELECT id, current_qty FROM stock_item WHERE current_qty < 0;`
-  `SELECT item_id, COUNT(*) FROM stock_alert WHERE status='active' GROUP BY item_id HAVING COUNT(*) > 1;`
-  → si lignes, nettoyer d'abord (sinon la migration **échoue**)
-- [ ] **Fumée-test** après déploiement : créer une commande prothèse → vérifier `PRO-2026-0000n` (SQL Z-49 jamais exécuté en conditions réelles)
+| | |
+|---|---|
+| Lots 1 → 9 | ✅ terminés |
+| Tests | ✅ **221 / 221** (128 au départ) |
+| Typecheck | ✅ propre (5 erreurs préexistantes, hors périmètre : SVG de l'odontogramme) |
+| Base de dev | ✅ PostgreSQL 18.4 embarqué, 43 tables, UTF8 |
+
+**7 failles P0 fermées**, dont 3 qui étaient exploitables aujourd'hui :
+
+- un tiers non connecté pouvait lire le **dossier patient complet**
+- une **invitation jamais acceptée** ouvrait l'accès aux dossiers médicaux (6 endroits, dont le middleware)
+- `/api/drugs/search` laissait consulter le catalogue d'un **autre cabinet**
+
+---
+
+## 2. ⬜ Reste à faire — 3 tâches délibérément laissées ouvertes
+
+| # | Tâche | Décision | Raison |
+|---|---|---|---|
+| **Z-63** | Contrainte d'exclusion sur les plages de rendez-vous (double réservation) | **Reportée** | Exige `btree_gist` — désormais **disponible nativement** dans PostgreSQL 18.4. Voir §5. |
+| **Z-68** | `userId` sur les notifications lues (le badge est global à la clinique) | **Reportée** | Une tentative avait ajouté la colonne au schéma **sans migration** → module **inexécutable** sur la base courante. À refaire **avec** migration. |
+| **Z-80** | `emailVerified` exigé dans `requireAuth` | **Refusée** | Verrouillerait `resendVerificationEmail` (qui repose sur `requireAuth`) → **verrouillage définitif** des comptes non vérifiés. Analyse documentée dans `src/lib/auth-utils.ts`. |
+
+> Aucun autre item du plan initial n'est resté ouvert.
+
+---
+
+## 3. 🔴 Questions métier — 6 en attente, 2 bloquantes
+
+Elles n'ont pas bloqué la correction des bugs, mais certaines touchent à la **conformité fiscale** et à la **sécurité clinique**. Une réponse peut nécessiter des retouches ciblées.
+
+| # | Question | Bloquant ? |
+|---|---|---|
+| **Q2** | **Assiette de TVA** — la remise est-elle déductible de l'assiette (TVA sur `base − remise`) ou déduite **après** la TVA (comportement actuel) ? Une remise de 200 sur 1000 à 19 % facture **190** de TVA au lieu de **152**. | 🔴 **Oui** — à trancher avec le comptable |
+| **Q5** | **Contrôle d'allergie** — la détection est textuelle et imparfaite. Voulu, ou refuser catégoriquement certaines molécules ? | 🔴 **Oui** — risque clinique |
+| **Q1** | Corriger les 63 bugs **P2** restants, ou se limiter aux P0/P1 ? | non |
+| **Q3** | Le statut `overdue` n'est **jamais produit** : l'onglet « Impayée » est structurellement vide. L'implémenter ? | non |
+| **Q4** | « Marquer payée » : créer une **écriture de paiement traçable**, ou conserver le simple changement de statut ? | non |
+| **Q6** | `deleteSession` supprime toutes les entrées de file du patient. Lier à la séance concernée ? | non |
+
+---
+
+## 4. 🔴 Opérations avant déploiement en production
+
+Le **code** est corrigé ; les **données** et le **schéma** de production ne le sont pas encore.
+
+- [ ] **Backfill `joined_at`** — sans ça, des membres actifs **perdent l'accès** :
+  ```
+  npx tsx scripts/backfill-membership-joined-at.ts          # diagnostic, lecture seule
+  npx tsx scripts/backfill-membership-joined-at.ts --apply  # écriture
+  ```
+- [x] ~~Migration `token_version`~~ — **générée et appliquée** en dev (`drizzle/0016_smooth_randall.sql`)
+- [ ] **Contrôles de données avant `db:migrate`** en production — la migration 0016 contient des contraintes qui **échoueraient** si des données les violent :
+  ```sql
+  SELECT clinic_id, order_number, COUNT(*) FROM prosthesis_order
+    GROUP BY 1, 2 HAVING COUNT(*) > 1;              -- index unique Z-49
+  SELECT id, current_qty FROM stock_item WHERE current_qty < 0;   -- CHECK Z-60
+  SELECT item_id, COUNT(*) FROM stock_alert WHERE status='active'
+    GROUP BY 1 HAVING COUNT(*) > 1;                 -- index unique Z-62
+  ```
+  → si des lignes sont retournées, **nettoyer d'abord**.
+- [ ] **Fumée-test** : créer une commande prothèse → vérifier `PRO-2026-0000n` (Z-49)
+
+---
+
+## 5. ⬜ Reprendre en priorité
+
+1. **Z-63 — double réservation de rendez-vous.** Le check est un *check-then-insert* en JS, sans contrainte en base : deux créations simultanées passent toutes les deux. `btree_gist` est désormais disponible dans PostgreSQL 18.4. Alternative plus simple : index unique partiel `(clinic_id, dentist_id, start_time)` — efficace pour le double-book du même créneau, sans couvrir les chevauchements de durées différentes.
+
+2. **Z-68 — notifications personnelles.** Aujourd'hui `markNotificationsRead` marque **toutes** les notifications de la clinique : le premier membre à ouvrir la cloche efface le badge de tous ses collègues. Refaire **avec** migration.
+
+3. **Backlog P2 (63 bugs).** Classés dans le plan initial, non traités par décision.
+
+---
+
+## 6. ⬜ Dette signalée par les revues
+
+Points notés en cours de route, jamais corrigés :
+
+- **`requireClinicAccessOrThrow`** ne vérifie pas `clinics.deletedAt` (contrairement à `requireClinicAccess`) — incohérence entre deux points d'accès
+- **`inviteMember`** : TOCTOU `count(maxStaff)` → `insert`, même famille que le quota patients déjà corrigé
+- **`toggleClinicStatus`** renvoie `success: true` sur une clinique inexistante (0 ligne)
+- **`updateStockItem`** : `minQty` remis à 0 si omis, et sans `.min(0)` — même bug que `currentQty`, corrigé
+- **`getAppointmentsForDate`** n'a aucun appelant (export mort ?)
+- **`payment-launcher.tsx`** : `catch { setInvoices([]) }` réinstalle silencieusement l'ambiguïté « panne = liste vide » dans le module encaissement
+- **`payments/new/page.tsx`** : affiche « Patient introuvable » sur une panne DB (message faux)
+- **`owner-dashboard.tsx`** : « Revenu global du jour » = `invoices.total` **tous statuts** — une **troisième** famille, ni production ni encaissé
+- **`btree_gist`** : disponible dans PostgreSQL, mais jamais activé — utile pour Z-63
+- **`getAuditLogHealth()`** : exposé mais **aucun consommateur** — à câbler sur `/owner/health`
+
+---
+
+## 7. ⬜ Améliorations fonctionnelles (non bugs)
+
+- **`drug_catalog`** n'est **jamais consulté** : la prescription est du texte libre, sans posologie normalisée ni interaction
+- **Alertes d'allergie** : table fermée de 3 aliases (`penicilline`, `amoxicilline`, `augmentin`). Toute extension est une décision clinique — le test d'audit force à la justifier
+- **Impression** : pas de facture électronique conforme
+- **Tests d'intégration** : la concurrence et les verrous ne sont couverts que par des tests de **source** (structurels), pas par exécution contre une vraie base
+
+---
+
+## 8. Environnement de développement
+
+```
+npm run db:dev        # base locale (terminal dédié, laisse-le ouvert)
+npm run db:migrate    # applique les migrations
+npm run dev           # l'application
+npm test              # 221 tests
+```
+
+⚠️ **Ferme toujours `db:dev` avec Ctrl+C.** Un arrêt brutal laisse un verrou `postmaster.pid` — le script le détecte et le nettoie au démarrage suivant, mais l'arrêt propre évite le problème.
+
+⚠️ Le `.env` est **gitignoré** et contient une clé de dev **sans valeur en production**. Ne jamais le copier ailleurs.
