@@ -18,6 +18,7 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "@/lib/email";
+import { isEmailVerificationRequired } from "@/lib/email-verification";
 import { eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 import { logAction } from "@/lib/audit";
@@ -161,10 +162,17 @@ export async function register(prevState: { error?: string } | undefined, formDa
       after: { name: data.name, email: data.email },
     });
 
-    const token = await createAccountToken(created.id, "email_verification");
-    await sendVerificationEmail(data.email, getVerifyLink(token));
+    // Un jeton et un email de vérification n'ont de sens que si l'on est
+    // capable d'envoyer l'email — cf. `isEmailVerificationRequired`. Sans
+    // quoi l'utilisateur serait redirigé vers une page qui l'invite à
+    // consulter une boîte qui ne recevra jamais rien.
+    if (isEmailVerificationRequired()) {
+      const token = await createAccountToken(created.id, "email_verification");
+      await sendVerificationEmail(data.email, getVerifyLink(token));
+      redirect("/verify-email");
+    }
 
-    redirect("/verify-email");
+    redirect("/select-clinic");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
     return { error: "Erreur lors de la création du compte" };
@@ -278,6 +286,18 @@ export async function resendVerificationEmail() {
 
   if (user.emailVerified) {
     return { success: false, error: "Votre email est déjà vérifié" };
+  }
+
+  // Sans canal d'envoi, « renvoyer » est une promesse impossible à tenir.
+  // On le dit plutôt que de simuler un envoi — sinon l'utilisateur attend
+  // un email qui ne viendra jamais.
+  if (!isEmailVerificationRequired()) {
+    return {
+      success: false,
+      error:
+        "L'envoi d'email n'est pas configuré sur cette instance : " +
+        "la vérification d'email n'est pas exigée.",
+    };
   }
 
   const token = await createAccountToken(user.id, "email_verification");

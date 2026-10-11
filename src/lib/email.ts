@@ -1,6 +1,11 @@
+import { getAppUrl } from "@/lib/email-verification";
+
 const EMAIL_FROM = process.env.EMAIL_FROM || "DentalCare <no-reply@dentalcare.app>";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+// `NEXT_PUBLIC_APP_URL` doit être définie en production : sans elle, les liens
+// envoyés par email pointeraient vers http://localhost:3000 et seraient
+// inutilisables pour le destinataire.
+const APP_URL = getAppUrl();
 
 export function getResetLink(token: string): string {
   return `${APP_URL}/reset-password?token=${encodeURIComponent(token)}`;

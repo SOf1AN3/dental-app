@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/db";
 import { clinicMemberships } from "@/lib/db/schema";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { isEmailVerificationRequired } from "@/lib/email-verification";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -59,8 +60,14 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/select-clinic", request.url));
   }
 
+  // Le verrou de vérification n'est exigé QUE si un canal d'envoi existe
+  // (cf. `isEmailVerificationRequired`). Sans clé Resend, rediriger vers
+  // /verify-email enferme l'utilisateur : aucun email ne part, et le bouton
+  // « Renvoyer » passe par le même canal muet. C'est exactement ce qui
+  // bloquait les 9 comptes en production.
   if (
     isLoggedIn &&
+    isEmailVerificationRequired() &&
     !emailVerified &&
     pathname !== "/verify-email" &&
     !pathname.startsWith("/api/auth") &&
