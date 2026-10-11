@@ -18,13 +18,48 @@ function escapeLike(input: string): string {
   return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+/**
+ * Valide une date au format ISO `YYYY-MM-DD` (format émis par les champs
+ * `<input type="date">`) : le calendrier doit réellement exister
+ * (`2024-02-31` → `Invalid Date` → refusé) et la date ne peut pas être future.
+ *
+ * `new Date("abc")` ou une date hors calendrier produisent `NaN` : refusés
+ * ici, avant toute écriture, pour éviter qu'un `Invalid Date` n'explose le
+ * driver au commit avec un message générique ne désignant pas le champ fautif.
+ */
+function isValidDateOfBirth(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  // `new Date("YYYY-MM-DD")` est interprété en UTC minuit : une date du jour
+  // reste donc acceptée, une date de demain est rejetée.
+  return parsed.getTime() <= Date.now();
+}
+
 const patientSchema = z.object({
   firstName: z.string().min(1, "Prénom requis"),
   lastName: z.string().min(1, "Nom requis"),
-  dateOfBirth: z.string().optional().default("").catch(""),
+  dateOfBirth: z
+    .string()
+    .optional()
+    .default("")
+    .refine(
+      (value) => value === "" || isValidDateOfBirth(value),
+      "Date de naissance invalide ou dans le futur",
+    ),
   gender: z.string().optional().default("").catch(""),
   phone: z.string().optional().default("").catch(""),
-  email: z.string().email("Email invalide").optional().default("").catch(""),
+  // Pas de `.catch("")` : un email invalide doit remonter une erreur au champ
+  // `email` — l'effacer silencieusement ferait perdre une coordonnée au
+  // patient sans le prévenir.
+  email: z
+    .string()
+    .optional()
+    .default("")
+    .refine(
+      (value) => value === "" || z.string().email().safeParse(value).success,
+      "Email invalide",
+    ),
   address: z.string().optional().default("").catch(""),
   wilayaCode: z.string().optional().default("").catch(""),
   emergencyContact: z.string().optional().default("").catch(""),
@@ -48,6 +83,8 @@ export async function createPatient(
   }
 
   const data = validated.data;
+
+  let createdId: string;
 
   try {
     const { maxPatients } = await getActivePlanLimits();
@@ -85,20 +122,31 @@ export async function createPatient(
       notes: data.notes || null,
     }).returning({ id: patients.id });
 
-    await logAction({
-      clinicId,
-      action: "create",
-      entityType: "patient",
-      entityId: created.id,
-      after: { ...data },
-    });
-
-    revalidatePath("/patients");
-    redirect("/patients");
+    createdId = created.id;
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
     return { error: { general: ["Erreur lors de la création du patient"] } };
   }
+
+  // Audit placé APRÈS le `try` d'écriture : le patient existe désormais. Si
+  // l'échec d'audit était dans le même `catch`, l'utilisateur verrait
+  // « Erreur lors de la création » et relancerait → patient en double (aucune
+  // contrainte d'unicité ne le rattraperait). `logAction` avale déjà ses
+  // erreurs ; ce `try/catch` est un filet au cas où il en lèverait une.
+  try {
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "patient",
+      entityId: createdId,
+      after: { ...data },
+    });
+  } catch (auditError) {
+    console.error("Échec de l'audit de création du patient", auditError);
+  }
+
+  revalidatePath("/patients");
+  redirect("/patients");
 }
 
 export async function deletePatient(

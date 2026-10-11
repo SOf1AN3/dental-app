@@ -111,17 +111,23 @@ const prescriptionSchema = z.object({
 
 type PrescriptionItem = z.infer<typeof prescriptionItemSchema>;
 
+/**
+ * Extrait le champ `items` (JSON sérialisé par l'éditeur).
+ *
+ * Lève une exception si le JSON est malformé : `updatePrescription` supprime
+ * puis réinsère les items dans une transaction — un parse qui retournerait
+ * `[]` effacerait silencieusement tous les médicaments de l'ordonnance.
+ */
 function parseItems(formData: FormData): unknown {
   const itemsRaw = formData.get("items");
   const items = itemsRaw === null ? "" : String(itemsRaw);
   if (!items) return [];
-  try {
-    return JSON.parse(items);
-  } catch {
-    // Invalid JSON, ignore
-    return [];
-  }
+  return JSON.parse(items);
 }
+
+/** Message remonté au formulaire si le champ `items` n'est pas un JSON lisible. */
+const INVALID_ITEMS_MESSAGE =
+  "Liste des articles illisible — modification non appliquée";
 
 function normalizeItems(items: PrescriptionItem[]) {
   return items
@@ -146,9 +152,19 @@ export async function createPrescription(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  // Le champ `items` est un JSON sérialisé côté client : un JSON malformé doit
+  // remonter une erreur, jamais être assimilé à une liste vide (cela effacerait
+  // les médicaments existants dans `updatePrescription`).
+  let itemsJson: unknown;
+  try {
+    itemsJson = parseItems(formData);
+  } catch {
+    return { error: { general: [INVALID_ITEMS_MESSAGE] } };
+  }
+
   const validated = prescriptionSchema.safeParse({
     ...Object.fromEntries(formData),
-    items: parseItems(formData),
+    items: itemsJson,
   });
   if (!validated.success) {
     return { error: validated.error.flatten().fieldErrors };
@@ -245,9 +261,18 @@ export async function updatePrescription(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  // Même garde que `createPrescription` : un JSON malformé empêche la
+  // transaction (qui supprime puis réinsère les items) de s'exécuter.
+  let itemsJson: unknown;
+  try {
+    itemsJson = parseItems(formData);
+  } catch {
+    return { error: { general: [INVALID_ITEMS_MESSAGE] } };
+  }
+
   const validated = prescriptionSchema.safeParse({
     ...Object.fromEntries(formData),
-    items: parseItems(formData),
+    items: itemsJson,
   });
   if (!validated.success) {
     return { error: validated.error.flatten().fieldErrors };

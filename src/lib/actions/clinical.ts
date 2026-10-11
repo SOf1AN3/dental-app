@@ -11,6 +11,7 @@ import {
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
 import { storage } from "@/lib/storage";
+import { extname } from "path";
 import { eq, and, asc, desc, sql, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -551,26 +552,42 @@ export async function createConsultationNote(
 
   const data = validated.data;
 
-  const [created] = await db.insert(consultationNotes).values({
-    clinicId,
-    patientId,
-    appointmentId: data.appointmentId || null,
-    diagnosis: data.diagnosis || null,
-    notes: data.notes,
-  }).returning({ id: consultationNotes.id });
+  let createdId: string;
 
-  await logAction({
-    clinicId,
-    action: "create",
-    entityType: "consultation_note",
-    entityId: created.id,
-    after: {
+  try {
+    const [created] = await db.insert(consultationNotes).values({
+      clinicId,
       patientId,
       appointmentId: data.appointmentId || null,
       diagnosis: data.diagnosis || null,
       notes: data.notes,
-    },
-  });
+    }).returning({ id: consultationNotes.id });
+
+    createdId = created.id;
+  } catch {
+    // Erreur d'écriture (FK, indisponibilité…) : remontée contrôlée, sous la
+    // clé `notes` que le formulaire affiche déjà (`general` n'est pas rendu).
+    return { error: { notes: ["Erreur lors de l'enregistrement de la note"] } };
+  }
+
+  // Audit hors du `try` d'écriture : la note existe à ce stade, un échec
+  // d'audit ne doit pas être présenté comme un échec d'enregistrement.
+  try {
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "consultation_note",
+      entityId: createdId,
+      after: {
+        patientId,
+        appointmentId: data.appointmentId || null,
+        diagnosis: data.diagnosis || null,
+        notes: data.notes,
+      },
+    });
+  } catch (auditError) {
+    console.error("Échec de l'audit de création de la note", auditError);
+  }
 
   revalidatePath(`/patients/${patientId}`);
 }
@@ -605,11 +622,80 @@ const radiographSchema = z.object({
   takenAt: z.string().optional().default("").catch(""),
 });
 
+/**
+ * Allowlist de fichiers téléversables, strictement alignée sur :
+ *  - `CONTENT_TYPE_BY_EXTENSION` de la route de lecture
+ *    `src/app/api/files/[...key]/route.ts` (un `.svg`, `.html` ou `.exe` y
+ *    serait servi en `application/octet-stream` ou avec un type actif) ;
+ *  - `ALLOWED_MIME_TYPES` de `src/lib/storage.ts`.
+ */
+const RADIOGRAPH_ALLOWED_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".pdf",
+] as const;
+
+const RADIOGRAPH_ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+] as const;
+
+/** Aligné sur `MAX_FILE_SIZE` de `src/lib/storage.ts` (10 Mo). */
+const RADIOGRAPH_MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Valide un fichier radiographie AVANT tout téléversement : extension ET type
+ * MIME contrôlés contre l'allowlist (un `.exe` renommé ou un SVG actif est
+ * rejeté), taille bornée.
+ */
+function validateRadiographFile(
+  file: File,
+): { ok: true } | { ok: false; message: string } {
+  const extension = extname(file.name).toLowerCase();
+  if (
+    !(RADIOGRAPH_ALLOWED_EXTENSIONS as readonly string[]).includes(extension)
+  ) {
+    return {
+      ok: false,
+      message:
+        "Format de fichier non autorisé (accepté : jpg, jpeg, png, webp, pdf)",
+    };
+  }
+
+  if (
+    !(RADIOGRAPH_ALLOWED_MIME_TYPES as readonly string[]).includes(file.type)
+  ) {
+    return {
+      ok: false,
+      message:
+        "Type de fichier non autorisé (accepté : jpg, jpeg, png, webp, pdf)",
+    };
+  }
+
+  if (file.size > RADIOGRAPH_MAX_FILE_SIZE) {
+    return {
+      ok: false,
+      message: "Le fichier dépasse la taille maximale de 10 Mo",
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Contrat de retour explicite aligné sur `prevState` : sans annotation,
+ * l'union inférée des retours d'erreur (`file`, `general`, fieldErrors)
+ * casserait la déduction de `useActionState` dans le formulaire client.
+ */
 export async function createRadiograph(
   patientId: string,
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
-) {
+): Promise<{ error?: Record<string, string[]> } | undefined> {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
@@ -640,6 +726,13 @@ export async function createRadiograph(
     return { error: { file: ["Fichier requis"] } };
   }
 
+  // Validation AVANT upload : type, extension et taille bornés (sinon un
+  // contenu actif — HTML, SVG, exécutable — serait stocké et servi).
+  const fileCheck = validateRadiographFile(file);
+  if (!fileCheck.ok) {
+    return { error: { file: [fileCheck.message] } };
+  }
+
   const key = `${clinicId}/radiograph-${crypto.randomUUID()}`;
   let fileKey: string;
 
@@ -649,30 +742,57 @@ export async function createRadiograph(
     return { error: { file: [(err as Error).message || "Erreur lors de l'upload"] } };
   }
 
-  const [created] = await db.insert(radiographs).values({
-    clinicId,
-    patientId,
-    fileKey,
-    fileType: data.fileType || null,
-    toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
-    region: data.region || null,
-    notes: data.notes || null,
-    takenAt: data.takenAt ? new Date(data.takenAt) : null,
-  }).returning({ id: radiographs.id });
+  let createdId: string;
 
-  await logAction({
-    clinicId,
-    action: "create",
-    entityType: "radiograph",
-    entityId: created.id,
-    after: {
+  try {
+    const [created] = await db.insert(radiographs).values({
+      clinicId,
       patientId,
       fileKey,
       fileType: data.fileType || null,
       toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
       region: data.region || null,
-    },
-  });
+      notes: data.notes || null,
+      takenAt: data.takenAt ? new Date(data.takenAt) : null,
+    }).returning({ id: radiographs.id });
+
+    createdId = created.id;
+  } catch (insertError) {
+    // L'INSERT est postérieur à l'upload : en cas d'échec, le fichier déjà
+    // téléversé serait orphelin dans le stockage → nettoyage systématique.
+    try {
+      await storage.delete(fileKey);
+    } catch (cleanupError) {
+      console.error("Échec du nettoyage du fichier orphelin", {
+        fileKey,
+        cleanupError,
+      });
+    }
+    console.error("Échec de l'enregistrement de la radiographie", insertError);
+    return {
+      error: { general: ["Erreur lors de l'enregistrement de la radiographie"] },
+    };
+  }
+
+  // Audit hors du `try` d'écriture : la radiographie existe à ce stade, un
+  // échec d'audit ne doit pas être présenté comme un échec d'enregistrement.
+  try {
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "radiograph",
+      entityId: createdId,
+      after: {
+        patientId,
+        fileKey,
+        fileType: data.fileType || null,
+        toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
+        region: data.region || null,
+      },
+    });
+  } catch (auditError) {
+    console.error("Échec de l'audit de création de la radiographie", auditError);
+  }
 
   revalidatePath(`/patients/${patientId}`);
 }
@@ -795,27 +915,48 @@ export async function createMedicalHistoryEntry(
 
   const data = validated.data;
 
-  const [created] = await db.insert(medicalHistoryEntries).values({
-    clinicId,
-    patientId,
-    condition: data.condition,
-    diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
-    notes: data.notes || null,
-    isActive: data.isActive,
-  }).returning({ id: medicalHistoryEntries.id });
+  let createdId: string;
 
-  await logAction({
-    clinicId,
-    action: "create",
-    entityType: "medical_history_entry",
-    entityId: created.id,
-    after: {
+  try {
+    const [created] = await db.insert(medicalHistoryEntries).values({
+      clinicId,
       patientId,
       condition: data.condition,
-      diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate).toISOString() : null,
+      diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
+      notes: data.notes || null,
       isActive: data.isActive,
-    },
-  });
+    }).returning({ id: medicalHistoryEntries.id });
+
+    createdId = created.id;
+  } catch {
+    // Erreur d'écriture (FK, indisponibilité…) : remontée contrôlée, sous la
+    // clé `condition` que le formulaire affiche déjà (`general` n'est pas rendu).
+    return {
+      error: { condition: ["Erreur lors de l'enregistrement de l'antécédent"] },
+    };
+  }
+
+  // Audit hors du `try` d'écriture : l'entrée existe à ce stade, un échec
+  // d'audit ne doit pas être présenté comme un échec d'enregistrement.
+  try {
+    await logAction({
+      clinicId,
+      action: "create",
+      entityType: "medical_history_entry",
+      entityId: createdId,
+      after: {
+        patientId,
+        condition: data.condition,
+        diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate).toISOString() : null,
+        isActive: data.isActive,
+      },
+    });
+  } catch (auditError) {
+    console.error(
+      "Échec de l'audit de création de l'antécédent",
+      auditError,
+    );
+  }
 
   revalidatePath(`/patients/${patientId}`);
 }
