@@ -46,24 +46,24 @@
 - [x] Z-34 `sessionItemTotal` négatif
 
 ## Lot 4 — Patients & dossier clinique
-- [ ] Z-35 JSON `items` → suppression silencieuse des médicaments
-- [ ] Z-36 validation `dateOfBirth`
-- [ ] Z-37 email silencieusement effacé
-- [ ] Z-38 audit dans le `try` + unicité patients
-- [ ] Z-39 `try/catch` sur les écritures sans garde
-- [ ] Z-40 validation du fichier de radiographie
-- [ ] Z-41 payload odontogramme
-- [ ] Z-42 numéros de dent (plage FDI)
-- [ ] Z-43 colonnes d'auteur renseignées
-- [ ] Z-44 statut d'ordonnance validé
-- [ ] Z-45 ordre de saisie des items d'ordonnance
-- [ ] Z-46 quota patient à la restauration
-- [ ] Z-47 patients archivés filtrés (ordonnances/prothèses)
-- [ ] Z-48 existence testée (`updateLab`/`deleteLab`/`updateOrder`)
-- [ ] Z-49 numéro de commande prothèse
-- [ ] Z-50 suppression de labo lié à des commandes
-- [ ] Z-51 alerte d'allergie à la prescription ⚠️
-- [ ] Z-52 `revalidatePath` sur routes imbriquées
+- [x] Z-35 JSON `items` → suppression silencieuse des médicaments
+- [x] Z-36 validation `dateOfBirth`
+- [x] Z-37 email silencieusement effacé
+- [x] Z-38 audit dans le `try` + unicité patients
+- [x] Z-39 `try/catch` sur les écritures sans garde
+- [x] Z-40 validation du fichier de radiographie
+- [x] Z-41 payload odontogramme
+- [x] Z-42 numéros de dent (plage FDI)
+- [x] Z-43 colonnes d'auteur renseignées
+- [x] Z-44 statut d'ordonnance validé
+- [x] Z-45 ordre de saisie des items d'ordonnance
+- [x] Z-46 quota patient à la restauration
+- [x] Z-47 patients archivés filtrés (ordonnances/prothèses)
+- [x] Z-48 existence testée (`updateLab`/`deleteLab`/`updateOrder`)
+- [x] Z-49 numéro de commande prothèse
+- [x] Z-50 suppression de labo lié à des commandes
+- [x] Z-51 alerte d'allergie à la prescription ⚠️ *(visible sur les 3 écrans)*
+- [x] Z-52 `revalidatePath` sur routes imbriquées
 
 ## Lot 5 — Agenda, salle d'attente, stock
 - [ ] Z-53 dates de RDV normalisées côté serveur
@@ -117,7 +117,7 @@
 ---
 
 ## ⬜ En cours
-**Lot 4** — Z-35 à Z-52 (patients & dossier clinique).
+**Lot 5** — Z-53 à Z-63 (agenda, salle d'attente, stock).
 
 ## ⚠️ À trancher par le client (bloquent certains lots)
 - **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
@@ -130,3 +130,12 @@
 ## 🔴 Avant tout déploiement
 - [ ] **Backfill `joined_at`** : `npx tsx scripts/backfill-membership-joined-at.ts` (diagnostic) puis `--apply`
 - [ ] **Migration `token_version`** : `npm run db:generate` puis `npm run db:migrate` **avant** le déploiement du code Z-10
+- [ ] **Migrations `order_index` (Z-45) + index unique commandes prothèse (Z-49)** :
+  1. contrôle des doublons **avant** migration :
+     `SELECT clinic_id, order_number, COUNT(*) FROM prosthesis_order GROUP BY 1, 2 HAVING COUNT(*) > 1;`
+     → si lignes retournées, renuméroter d'abord (sinon la migration **échoue**)
+  2. `npm run db:generate` → commit des fichiers `drizzle/*.sql` + `meta/`
+  3. `npm run db:migrate`
+  4. **Redéploiement obligatoire** — la sonde de Z-45 est mémoïsée par process
+- [ ] **Nettoyage lié aux numéros de dent** : `UPDATE treatment_plan_item SET tooth_number = NULL WHERE tooth_number = 0;`
+- [ ] **Fumée-test** après déploiement : créer une commande prothèse → vérifier `PRO-2026-0000n` (SQL Z-49 jamais exécuté en conditions réelles)
