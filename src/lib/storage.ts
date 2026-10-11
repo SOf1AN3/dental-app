@@ -9,6 +9,9 @@ const ALLOWED_MIME_TYPES = [
 ];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+/** Z-79 — longueur maximale d'une clé de stockage (segments confondus). */
+const MAX_KEY_LENGTH = 512;
+
 export interface StorageAdapter {
   upload(file: File, key: string): Promise<string>;
   getSignedUrl(key: string): Promise<string>;
@@ -23,11 +26,112 @@ export function isStoredKey(value: string): boolean {
   );
 }
 
+/**
+ * Z-79 — format admis pour une clé de stockage (anti path traversal).
+ *
+ * Les clés sont aujourd'hui générées côté serveur (`clinics/<uuid>/logo`,
+ * `<uuid>/radiograph-<uuid>`), mais elles sont CONCATÉNÉES à `basePath` dans
+ * `join(process.cwd(), basePath, key)` — un `..` dans une clé ferait sortir
+ * du dossier `uploads/` (écriture, lecture ou suppression hors base). C'est
+ * d'autant plus utile que `upload()` reçoit parfois un `clinicId` issu d'un
+ * cookie forgeable (`clinics/${clinicId}/logo` dans `settings.ts`).
+ *
+ * On VALIDE le format plutôt que de réduire la clé à son `basename()` : les
+ * clés existantes CONTIENNENT des `/` (sous-répertoires) — `basename()`
+ * casserait la lecture de TOUTES les clés déjà stockées en base.
+ *
+ * Refusé : chaîne vide, trop longue, NUL (troncature C), `\` (séparateur
+ * Windows), chemin absolu, et tout segment vide, `.` ou `..`.
+ */
+export function isSafeStorageKey(key: string): boolean {
+  if (key.length === 0 || key.length > MAX_KEY_LENGTH) return false;
+  if (key.includes("\0") || key.includes("\\")) return false;
+  if (key.startsWith("/")) return false;
+  return key
+    .split("/")
+    .every(
+      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
+    );
+}
+
+/**
+ * Z-79 — allowlist des hôtes acceptés pour une URL ABSOLUE stockée en base.
+ *
+ * Sont acceptés : l'hôte de l'endpoint S3 effectivement configuré (MinIO, R2,
+ * …), l'hôte de l'application elle-même, les endpoints AWS S3 (style virtuel
+ * `<bucket>.s3.amazonaws.com` et régionaux `<bucket>.s3.<région>.amazonaws.com`)
+ * et, en extension optionnelle, les hôtes listés dans
+ * `STORAGE_ALLOWED_HOSTS` (séparés par des virgules).
+ */
+function allowedAbsoluteUrlHosts(): Set<string> {
+  const hosts = new Set<string>();
+
+  const endpoint = process.env.S3_ENDPOINT;
+  if (endpoint) {
+    try {
+      hosts.add(new URL(endpoint).hostname.toLowerCase());
+    } catch {
+      // Endpoint illisible : simplement ignoré, l'allowlist reste fail-closed.
+    }
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (appUrl) {
+    try {
+      hosts.add(new URL(appUrl).hostname.toLowerCase());
+    } catch {
+      // Idem.
+    }
+  }
+
+  const extra = process.env.STORAGE_ALLOWED_HOSTS;
+  if (extra) {
+    for (const raw of extra.split(",")) {
+      const host = raw.trim().toLowerCase();
+      if (host) hosts.add(host);
+    }
+  }
+
+  return hosts;
+}
+
+/**
+ * Z-79 — une valeur `http(s)://` n'est renvoyée QUE si son domaine est
+ * connu : une colonne URL alimentée par un client ne doit pas pouvoir
+ * rediriger un utilisateur vers un domaine arbitraire (open redirect stocké).
+ */
+function isAllowedAbsoluteUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+
+  const host = url.hostname.toLowerCase();
+  if (allowedAbsoluteUrlHosts().has(host)) return true;
+  if (host === "s3.amazonaws.com") return true;
+  if (host.endsWith(".s3.amazonaws.com")) return true;
+  return /(^|\.)s3[.-][a-z0-9-]+\.amazonaws\.com$/.test(host);
+}
+
 export async function resolveStoredUrl(
   value: string | null,
 ): Promise<string | null> {
   if (!value) return null;
-  if (!isStoredKey(value)) return value;
+  if (!isStoredKey(value)) {
+    // URL absolue → allowlist de domaines. Les chemins relatifs historiques
+    // (`/uploads/…`) sont conservés tels quels : ils ne quittent jamais
+    // l'origine de l'application et sont déjà filtrés par la route `/api/files`.
+    if (value.startsWith("http://") || value.startsWith("https://")) {
+      return isAllowedAbsoluteUrl(value) ? value : null;
+    }
+    return value;
+  }
+  // Clé de stockage → format contrôlé AVANT d'être joinée au disque / signée.
+  if (!isSafeStorageKey(value)) return null;
   try {
     return await storage.getSignedUrl(value);
   } catch {
@@ -64,6 +168,12 @@ export class LocalStorageAdapter implements StorageAdapter {
       throw new Error("Le fichier dépasse la taille maximale de 10 Mo");
     }
 
+    // Z-79 — la clé est concaténée puis joinée au disque : format contrôlé
+    // avant toute écriture (pas de `..`, pas de chemin absolu).
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
+
     const ext = extname(file.name) || ".bin";
     const fileName = `${key}${ext}`;
     const dirPath = join(process.cwd(), this.basePath);
@@ -78,6 +188,11 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async getSignedUrl(key: string): Promise<string> {
+    // Z-79 — même contrôle que `upload` : la clé provient de la base et est
+    // joinée au disque ici.
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
     const filePath = join(process.cwd(), this.basePath, key);
     try {
       await access(filePath);
@@ -91,6 +206,11 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async delete(key: string): Promise<void> {
+    // Z-79 — une clé invalide ne doit surtout pas atteindre `unlink` (elle
+    // désignerait un fichier HORS du dossier `uploads/`).
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
     const filePath = join(process.cwd(), this.basePath, key);
     try {
       await unlink(filePath);
@@ -135,6 +255,12 @@ export class S3StorageAdapter implements StorageAdapter {
       throw new Error("Le fichier dépasse la taille maximale de 10 Mo");
     }
 
+    // Z-79 — même format de clé que l'adaptateur local : les clés sont
+    // partagées entre les deux backends, la validation doit être identique.
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
+
     const ext = extname(file.name) || ".bin";
     const fileName = `${key}${ext}`;
 
@@ -163,6 +289,10 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 
   async getSignedUrl(key: string): Promise<string> {
+    // Z-79 — format de clé contrôlé avant signature.
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
     const { SignatureV4 } = await import("@smithy/signature-v4");
     const { HttpRequest, buildQueryString } = await import(
       "@smithy/core/protocols"
@@ -221,6 +351,10 @@ export class S3StorageAdapter implements StorageAdapter {
   }
 
   async delete(key: string): Promise<void> {
+    // Z-79 — format de clé contrôlé avant suppression (cohérent avec `upload`).
+    if (!isSafeStorageKey(key)) {
+      throw new Error("Clé de stockage invalide");
+    }
     const { S3Client, DeleteObjectCommand } = await import(
       "@aws-sdk/client-s3"
     );

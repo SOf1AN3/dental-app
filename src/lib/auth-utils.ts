@@ -14,6 +14,21 @@ export const getCurrentUser = cache(async () => {
   return session.user;
 });
 
+/**
+ * Renvoie l'utilisateur de la session, ou redirige vers `/login`.
+ *
+ * Z-80 (NON appliqué, analyse documentée) : `emailVerified` n'est PAS exigé ici.
+ * `src/proxy.ts` (lignes 62-70) l'impose déjà sur TOUTE requête HTTP — y
+ * compris les POST de Server Actions, qui transittent par le proxy via le
+ * matcher — à l'exception des pages de rattrapage `/verify-email` et
+ * `/select-clinic`. Exiger `emailVerified` ici CASSERAIT ces rattrapages,
+ * car `resendVerificationEmail` (`src/lib/actions/auth.ts`) repose sur
+ * `requireAuth()` pour un compte NON vérifié : le `redirect("/verify-email")`
+ * annulerait l'action de renvoi et bloquerait définitivement le compte.
+ * Corriger cela demande une option explicite (ex. `requireAuth({ requireEmailVerified: false })`)
+ * coordonnée avec `src/lib/actions/auth.ts` et les actions de `/select-clinic` —
+ * hors périmètre de ce module.
+ */
 export const requireAuth = cache(async () => {
   const user = await getCurrentUser();
   if (!user) redirect("/login");

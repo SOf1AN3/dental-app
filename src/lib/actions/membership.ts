@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db/db";
-import { clinicMemberships, users } from "@/lib/db/schema";
+import { clinicMemberships, clinics, users } from "@/lib/db/schema";
 import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
 import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
 import { eq, and, count } from "drizzle-orm";
@@ -184,6 +184,14 @@ export async function declineInvitation(membershipId: string): Promise<{ error?:
 
     if (!membership) return { error: "Invitation introuvable" };
 
+    // Z-77 (extension) — cette action ne filtre PAS `joinedAt` : un owner
+    // (toujours `joined`) pouvait donc l'invoquer avec SON propre
+    // `membershipId` et supprimer sa membership → clinique sans aucun owner.
+    // Même garde que `removeMember`, à l'identique.
+    if (membership.role === "owner") {
+      return { error: "Impossible de supprimer le propriétaire" };
+    }
+
     await db.delete(clinicMemberships).where(eq(clinicMemberships.id, membershipId));
 
     await logAction({
@@ -213,37 +221,83 @@ export async function updateMemberRole(
   }
 
   const validRoles = ["dentist", "assistant", "receptionist", "viewer"] as const;
-  if (!validRoles.includes(role as typeof validRoles[number])) {
+  type MemberRole = (typeof validRoles)[number];
+  if (!validRoles.includes(role as MemberRole)) {
     return { error: "Rôle invalide" };
   }
+  const nextRole: MemberRole = role as MemberRole;
 
   try {
-    const [current] = await db
-      .select({ role: clinicMemberships.role })
-      .from(clinicMemberships)
-      .where(and(
-        eq(clinicMemberships.id, membershipId),
-        eq(clinicMemberships.clinicId, clinicId)
-      ))
-      .limit(1);
+    // Z-77 — garantie « au moins un owner » : l'interdiction de CRÉER un owner
+    // n'empêchait pas de RÉTROGRADER le dernier owner existant, laissant la
+    // clinique sans personne capable de gérer les membres. Lecture du rôle
+    // courant, comptage des owners et écriture sont regroupés dans une
+    // transaction verrouillée (`SELECT … FOR UPDATE` sur la ligne `clinics`) :
+    // deux rétrogradations concurrentes sont sérialisées, la seconde recompte
+    // (1 owner restant) et est refusée. Aucune modification de schéma.
+    const outcome = await db.transaction(async (tx): Promise<
+      { error: string } | { updated: true; beforeRole: string }
+    > => {
+      await tx
+        .select({ id: clinics.id })
+        .from(clinics)
+        .where(eq(clinics.id, clinicId))
+        .for("update");
 
-    await db.update(clinicMemberships)
-      .set({ role: role as typeof validRoles[number] })
-      .where(and(
-        eq(clinicMemberships.id, membershipId),
-        eq(clinicMemberships.clinicId, clinicId)
-      ));
+      const [current] = await tx
+        .select({ role: clinicMemberships.role })
+        .from(clinicMemberships)
+        .where(and(
+          eq(clinicMemberships.id, membershipId),
+          eq(clinicMemberships.clinicId, clinicId),
+        ))
+        .limit(1);
 
-    if (current) {
-      await logAction({
-        clinicId,
-        action: "update",
-        entityType: "clinic_membership",
-        entityId: membershipId,
-        before: { role: current.role },
-        after: { role: role as typeof validRoles[number] },
-      });
+      if (!current) return { error: "Membre introuvable" };
+
+      if (current.role === "owner") {
+        const [ownerCountResult] = await tx
+          .select({ count: count() })
+          .from(clinicMemberships)
+          .where(and(
+            eq(clinicMemberships.clinicId, clinicId),
+            eq(clinicMemberships.role, "owner"),
+          ));
+
+        const ownerCount = ownerCountResult?.count ?? 0;
+        if (ownerCount <= 1) {
+          return { error: "Impossible de rétrograder le dernier propriétaire" };
+        }
+      }
+
+      const updatedRows = await tx
+        .update(clinicMemberships)
+        .set({ role: nextRole })
+        .where(and(
+          eq(clinicMemberships.id, membershipId),
+          eq(clinicMemberships.clinicId, clinicId),
+        ))
+        .returning({ id: clinicMemberships.id });
+
+      // 0 ligne : la membership a disparu entre la lecture et l'écriture →
+      // ne pas annoncer un succès (avant : succès affiché sur 0 ligne).
+      if (updatedRows.length === 0) return { error: "Membre introuvable" };
+
+      return { updated: true, beforeRole: current.role };
+    });
+
+    if ("error" in outcome) {
+      return { error: outcome.error };
     }
+
+    await logAction({
+      clinicId,
+      action: "update",
+      entityType: "clinic_membership",
+      entityId: membershipId,
+      before: { role: outcome.beforeRole },
+      after: { role: nextRole },
+    });
 
     revalidatePath("/settings/members");
     return { success: true };

@@ -22,6 +22,18 @@ const subscriptionPlanSchema = z.object({
   maxPatients: z.coerce.number().int().positive("Le nombre max de patients doit être positif").optional().nullable(),
 });
 
+/**
+ * Z-77 — enum des statuts de clinique, validée CÔTÉ SERVEUR.
+ *
+ * `toggleClinicStatus` est une Server Action publique : ses arguments sont
+ * sérialisés par le navigateur et le type TypeScript `"active" | "suspended" |
+ * "trial"` n'existe PAS à l'exécution. Sans cette validation, un appel direct
+ * écrivait n'importe quelle chaîne (voire `null`) dans `clinics.status`, que
+ * `proxy.ts` et les gardes d'accès lisent ensuite comme un statut valide.
+ */
+const clinicStatusSchema = z.enum(["active", "suspended", "trial"]);
+const clinicIdSchema = z.string().min(1, "Clinique requise");
+
 export async function getOwnerStats() {
   await requirePlatformOwner();
 
@@ -90,6 +102,15 @@ export async function toggleClinicStatus(
 ): Promise<{ error?: string } | { success?: boolean }> {
   await requirePlatformOwner();
 
+  // Z-77 — validation côté serveur : les types TS sont effacés à la
+  // sérialisation d'une Server Action, d'où le re-parse du statut (et de
+  // l'identifiant) avant toute écriture.
+  const parsedClinicId = clinicIdSchema.safeParse(clinicId);
+  const parsedStatus = clinicStatusSchema.safeParse(newStatus);
+  if (!parsedClinicId.success || !parsedStatus.success) {
+    return { error: "Clinique ou statut invalide" };
+  }
+
   try {
     const [clinic] = await db
       .select({ id: clinics.id, status: clinics.status })
@@ -99,7 +120,7 @@ export async function toggleClinicStatus(
 
     await db
       .update(clinics)
-      .set({ status: newStatus })
+      .set({ status: parsedStatus.data })
       .where(eq(clinics.id, clinicId));
 
     if (clinic) {
@@ -109,7 +130,7 @@ export async function toggleClinicStatus(
         entityType: "clinic",
         entityId: clinicId,
         before: { status: clinic.status },
-        after: { status: newStatus },
+        after: { status: parsedStatus.data },
       });
     }
 
@@ -277,9 +298,22 @@ export async function updateTicketStatus(
 
 export async function toggleClinicStatusAction(formData: FormData): Promise<{ error?: string } | { success?: boolean }> {
   "use server";
-  const clinicId = formData.get("clinicId") as string;
-  const newStatus = formData.get("newStatus") as "active" | "suspended" | "trial";
-  return toggleClinicStatus(clinicId, newStatus);
+  // Z-77 — aucun `as` sur le FormData : un champ absent (`null`) ou forgé
+  // était casté en statut valide puis écrit tel quel. Re-parse Zod ici, et
+  // nouvelle validation dans `toggleClinicStatus` (elle-même Server Action
+  // publique, invoquable directement).
+  const parsed = z
+    .object({ clinicId: clinicIdSchema, newStatus: clinicStatusSchema })
+    .safeParse({
+      clinicId: formData.get("clinicId"),
+      newStatus: formData.get("newStatus"),
+    });
+
+  if (!parsed.success) {
+    return { error: "Clinique ou statut invalide" };
+  }
+
+  return toggleClinicStatus(parsed.data.clinicId, parsed.data.newStatus);
 }
 
 export async function archiveClinic(clinicId: string) {

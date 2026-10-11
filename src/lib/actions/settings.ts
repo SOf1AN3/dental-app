@@ -3,8 +3,9 @@
 import { db } from "@/lib/db/db";
 import { clinics, users, clinicMemberships, clinicSchedule } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, hasAbility, createAccountToken } from "@/lib/auth-utils";
 import { isPractitionerRole } from "@/lib/constants";
+import { getVerifyLink, sendEmail, sendVerificationEmail } from "@/lib/email";
 import { storage } from "@/lib/storage";
 import { eq, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -397,6 +398,15 @@ export async function updateUserProfile(
   const data = validated.data;
 
   try {
+    // Z-78 — lit l'adresse ACTUELLE en base (jamais la session JWT, qui peut
+    // être périmée) pour décider si l'adresse de connexion change réellement.
+    const current = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { id: true, email: true },
+    });
+    const previousEmail = current?.email ?? null;
+    const emailChanged = previousEmail !== null && previousEmail !== data.email;
+
     // Check email uniqueness
     const existing = await db.query.users.findFirst({
       where: (users, { eq, ne }) => and(eq(users.email, data.email), ne(users.id, user.id)),
@@ -407,12 +417,25 @@ export async function updateUserProfile(
       return { success: false, error: { email: ["Cet email est déjà utilisé"] } };
     }
 
+    const updateData: Partial<typeof users.$inferInsert> = {
+      name: data.name,
+      email: data.email,
+    };
+
+    if (emailChanged) {
+      // Z-78 — l'adresse de connexion change SANS ré-vérification : la preuve
+      // de possession de l'ancienne adresse est périmée. On repasse
+      // `emailVerified` à NULL : le callback `jwt` de `src/lib/auth.ts`
+      // relit la colonne à chaque requête, donc `proxy.ts` bloque l'accès
+      // jusqu'à nouvelle vérification par le flux EXISTANT (`/verify-email` +
+      // `resendVerificationEmail`), dont le jeton prouve le contrôle de la
+      // NOUVELLE adresse.
+      updateData.emailVerified = null;
+    }
+
     await db
       .update(users)
-      .set({
-        name: data.name,
-        email: data.email,
-      })
+      .set(updateData)
       .where(eq(users.id, user.id));
 
     await logAction({
@@ -424,10 +447,70 @@ export async function updateUserProfile(
       after: { name: data.name, email: data.email },
     });
 
+    if (emailChanged && previousEmail) {
+      await notifyEmailChange(previousEmail, data.email, user.id);
+    }
+
     revalidatePath("/settings/general");
     return { success: true };
   } catch {
     return { success: false, error: { general: ["Erreur lors de la mise à jour du profil"] } };
+  }
+}
+
+/**
+ * Z-78 — notifications post-changement d'email (BEST-EFFORT) : jamais
+ * bloquantes, envoyées APRÈS la validation et l'écriture en base.
+ *
+ * 1. à la NOUVELLE adresse : lien de vérification (le jeton prouve le
+ *    contrôle — même mécanisme et même jeton que l'inscription) ;
+ * 2. à l'ANCIENNE adresse : simple information, SANS lien ni jeton — si le
+ *    changement n'était pas légitime, son titulaire peut réinitialiser son
+ *    mot de passe depuis l'application.
+ *
+ * `sendEmail` n'échoue jamais (il attrape ses propres erreurs) mais
+ * `createAccountToken` touche la base : chaque envoi a son propre
+ * `try/catch` pour qu'un échec n'empêche pas l'autre ni ne remonte une
+ * exception dans l'action.
+ */
+async function notifyEmailChange(
+  previousEmail: string,
+  newEmail: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const token = await createAccountToken(userId, "email_verification");
+    await sendVerificationEmail(newEmail, getVerifyLink(token));
+  } catch (error) {
+    console.error("Échec de l'envoi de l'email de vérification après changement d'adresse", error);
+  }
+
+  try {
+    await sendEmail({
+      to: previousEmail,
+      subject: "Votre adresse email DentalCare a été modifiée",
+      html: `
+        <div style="font-family: Inter, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <h1 style="font-size: 22px; font-weight: 700; color: #1e2a5a; margin: 0 0 16px;">DentalCare</h1>
+          <p style="color: #3f424e; line-height: 1.6;">Bonjour,</p>
+          <p style="color: #3f424e; line-height: 1.6;">
+            L'adresse email de connexion associée à votre compte vient d'être
+            modifiée. Un email de vérification a été envoyé à la nouvelle
+            adresse : votre compte n'est plus accessible tant qu'elle n'est
+            pas vérifiée.
+          </p>
+          <p style="color: #3f424e; line-height: 1.6;">
+            Si vous n'êtes pas à l'origine de ce changement, réinitialisez
+            immédiatement votre mot de passe depuis l'application.
+          </p>
+          <p style="color: #858b9e; font-size: 14px; line-height: 1.5;">
+            Cet email est informatif et ne contient aucun lien.
+          </p>
+        </div>
+      `,
+    });
+  } catch (error) {
+    console.error("Échec de la notification sur l'ancienne adresse email", error);
   }
 }
 

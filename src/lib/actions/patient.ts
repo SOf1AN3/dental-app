@@ -1,7 +1,7 @@
 "use server";
 
 import { db } from "@/lib/db/db";
-import { patients } from "@/lib/db/schema";
+import { clinics, patients } from "@/lib/db/schema";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
 import { eq, and, asc, ilike, or, count, isNull } from "drizzle-orm";
@@ -89,14 +89,57 @@ export async function createPatient(
   try {
     const { maxPatients } = await getActivePlanLimits();
 
-    const [countResult] = await db
-      .select({ count: count() })
-      .from(patients)
-      .where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt)));
+    // Z-73 — quota ATOMIQUE (contre le TOCTOU « count() puis insert() ») :
+    // deux créations simultanées lisaient le même compte et passaient toutes
+    // deux la barre du plan. Le comptage ET l'insertion sont désormais dans
+    // UNE transaction verrouillée par `SELECT … FOR UPDATE` sur la ligne
+    // `clinics` : en READ COMMITTED, la seconde transaction attend le commit
+    // de la première, puis recompte (N + 1) et se voit refuser si le quota est
+    // atteint. Le verrou porte sur la clinique (une seule ligne) : il n'y a
+    // donc pas de contention inter-cliniques et AUCUNE modification de schéma
+    // (pas de colonne, pas d'index, pas de migration).
+    const created = await db.transaction(
+      async (tx): Promise<{ id: string } | { quotaReached: true }> => {
+        // Verrou-mutex par clinique : lecture exclusive, aucune écriture.
+        await tx
+          .select({ id: clinics.id })
+          .from(clinics)
+          .where(eq(clinics.id, clinicId))
+          .for("update");
 
-    const patientCount = countResult?.count ?? 0;
+        const [countResult] = await tx
+          .select({ count: count() })
+          .from(patients)
+          .where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt)));
 
-    if (maxPatients != null && patientCount >= maxPatients) {
+        const patientCount = countResult?.count ?? 0;
+
+        if (maxPatients != null && patientCount >= maxPatients) {
+          return { quotaReached: true };
+        }
+
+        const [inserted] = await tx.insert(patients).values({
+          clinicId,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
+          gender: data.gender || null,
+          phone: data.phone || null,
+          email: data.email || null,
+          address: data.address || null,
+          wilayaCode: data.wilayaCode || null,
+          emergencyContact: data.emergencyContact || null,
+          emergencyPhone: data.emergencyPhone || null,
+          insuranceProvider: data.insuranceProvider || null,
+          insuranceNumber: data.insuranceNumber || null,
+          notes: data.notes || null,
+        }).returning({ id: patients.id });
+
+        return { id: inserted.id };
+      },
+    );
+
+    if ("quotaReached" in created) {
       return {
         error: {
           general: ["Limite de patients atteinte pour votre formule. Passez à un plan supérieur."],
@@ -104,23 +147,6 @@ export async function createPatient(
         paywall: true,
       };
     }
-
-    const [created] = await db.insert(patients).values({
-      clinicId,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
-      gender: data.gender || null,
-      phone: data.phone || null,
-      email: data.email || null,
-      address: data.address || null,
-      wilayaCode: data.wilayaCode || null,
-      emergencyContact: data.emergencyContact || null,
-      emergencyPhone: data.emergencyPhone || null,
-      insuranceProvider: data.insuranceProvider || null,
-      insuranceNumber: data.insuranceNumber || null,
-      notes: data.notes || null,
-    }).returning({ id: patients.id });
 
     createdId = created.id;
   } catch (e) {
@@ -174,10 +200,20 @@ export async function deletePatient(
       .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
       .limit(1);
 
-    await db
+    const deletedRows = await db
       .update(patients)
       .set({ deletedAt: new Date() })
-      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)));
+      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
+      .returning({ id: patients.id });
+
+    // Z-73 (bonus) — compter les lignes affectées : 0 ligne signifie que le
+    // patient a disparu entre le garde d'appartenance et l'écriture (course) :
+    // annoncer « succès » et journaliser un archivage qui n'a pas eu lieu
+    // laisserait un faux état. Même message que `requirePatientOwnership`
+    // (pas d'oracle d'énumération).
+    if (deletedRows.length === 0) {
+      return { error: "Patient introuvable" };
+    }
 
     await logAction({
       clinicId,
@@ -220,12 +256,6 @@ export async function restorePatient(
     // si le patient n'existe pas ou appartient à une autre clinique.
     await requirePatientOwnership(clinicId, patientId);
 
-    const [patient] = await db
-      .select({ deletedAt: patients.deletedAt })
-      .from(patients)
-      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
-      .limit(1);
-
     // Z-46 : la restauration réactivait un patient SANS revérifier le quota,
     // alors que `createPatient` le fait : à la limite de son plan, un cabinet
     // pouvait contourner la paywall par un archivage puis une restauration.
@@ -233,32 +263,67 @@ export async function restorePatient(
     // patient déjà actif (restauration sans effet) n'est PAS bloqué.
     const { maxPatients } = await getActivePlanLimits();
 
-    const [countResult] = await db
-      .select({ count: count() })
-      .from(patients)
-      .where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt)));
+    // Z-73 (extension de Z-46) : comptage + écriture sont le MÊME TOCTOU que
+    // `createPatient` (deux restaurations simultanées passaient toutes deux la
+    // barre). Transaction + verrou `FOR UPDATE` sur la ligne `clinics` : la
+    // seconde attend le commit de la première puis recompte. La relecture de
+    // `deletedAt` DANS la transaction sert aussi de seconde garde d'appartenance
+    // (le `UPDATE … RETURNING` compte ses lignes : 0 ligne = course).
+    const outcome = await db.transaction(
+      async (tx): Promise<
+        { error: string } | { restored: true; beforeDeletedAt: Date | null }
+      > => {
+        await tx
+          .select({ id: clinics.id })
+          .from(clinics)
+          .where(eq(clinics.id, clinicId))
+          .for("update");
 
-    const activeCount = countResult?.count ?? 0;
-    const projectedCount = patient?.deletedAt ? activeCount + 1 : activeCount;
+        const [patient] = await tx
+          .select({ deletedAt: patients.deletedAt })
+          .from(patients)
+          .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
+          .limit(1);
 
-    if (maxPatients != null && projectedCount > maxPatients) {
-      return {
-        error:
-          "Limite de patients atteinte pour votre formule. Passez à un plan supérieur.",
-      };
+        if (!patient) return { error: "Patient introuvable" };
+
+        const [countResult] = await tx
+          .select({ count: count() })
+          .from(patients)
+          .where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt)));
+
+        const activeCount = countResult?.count ?? 0;
+        const projectedCount = patient.deletedAt ? activeCount + 1 : activeCount;
+
+        if (maxPatients != null && projectedCount > maxPatients) {
+          return {
+            error:
+              "Limite de patients atteinte pour votre formule. Passez à un plan supérieur.",
+          };
+        }
+
+        const restoredRows = await tx
+          .update(patients)
+          .set({ deletedAt: null })
+          .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
+          .returning({ id: patients.id });
+
+        if (restoredRows.length === 0) return { error: "Patient introuvable" };
+
+        return { restored: true, beforeDeletedAt: patient.deletedAt };
+      },
+    );
+
+    if ("error" in outcome) {
+      return { error: outcome.error };
     }
-
-    await db
-      .update(patients)
-      .set({ deletedAt: null })
-      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)));
 
     await logAction({
       clinicId,
       action: "update",
       entityType: "patient",
       entityId: patientId,
-      before: { deletedAt: patient?.deletedAt ?? null },
+      before: { deletedAt: outcome.beforeDeletedAt },
       after: { deletedAt: null },
     });
 
@@ -294,7 +359,7 @@ export async function updatePatient(
   try {
     const patient = await requireOwnedPatient(clinicId, patientId);
 
-    await db
+    const updatedRows = await db
       .update(patients)
       .set({
         firstName: data.firstName,
@@ -311,7 +376,15 @@ export async function updatePatient(
         insuranceNumber: data.insuranceNumber || null,
         notes: data.notes || null,
       })
-      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)));
+      .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
+      .returning({ id: patients.id });
+
+    // Z-73 (bonus) — 0 ligne affectée : le patient a disparu entre le garde
+    // `requireOwnedPatient` et l'écriture (course) → ne PAS annoncer un
+    // succès. Même message que le garde (cohérence du `catch` ci-dessous).
+    if (updatedRows.length === 0) {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
 
     await logAction({
       clinicId,
