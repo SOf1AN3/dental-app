@@ -226,6 +226,28 @@ export async function restorePatient(
       .where(and(eq(patients.id, patientId), eq(patients.clinicId, clinicId)))
       .limit(1);
 
+    // Z-46 : la restauration réactivait un patient SANS revérifier le quota,
+    // alors que `createPatient` le fait : à la limite de son plan, un cabinet
+    // pouvait contourner la paywall par un archivage puis une restauration.
+    // Même vérification qu'à la création, en comptant le patient restauré. Un
+    // patient déjà actif (restauration sans effet) n'est PAS bloqué.
+    const { maxPatients } = await getActivePlanLimits();
+
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(patients)
+      .where(and(eq(patients.clinicId, clinicId), isNull(patients.deletedAt)));
+
+    const activeCount = countResult?.count ?? 0;
+    const projectedCount = patient?.deletedAt ? activeCount + 1 : activeCount;
+
+    if (maxPatients != null && projectedCount > maxPatients) {
+      return {
+        error:
+          "Limite de patients atteinte pour votre formule. Passez à un plan supérieur.",
+      };
+    }
+
     await db
       .update(patients)
       .set({ deletedAt: null })

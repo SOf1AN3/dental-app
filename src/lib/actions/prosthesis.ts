@@ -5,12 +5,24 @@ import { prosthesisLabs, prosthesisOrders, patients, documentSequences } from "@
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
 import { requireOwnedPatient } from "@/lib/guards";
-import { and, eq, asc, desc, sql } from "drizzle-orm";
+import { and, eq, asc, desc, sql, isNull, like, count } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
+
+/**
+ * Bornes serveur du n° de dent (Z-42), alignées sur l'existant plutôt que sur
+ * une norme imposée : l'odontogramme utilise la numérotation FDI adulte
+ * 11–18 / 21–28 / 31–38 / 41–48, et les formulaires HTML bornent à 1–48
+ * (`order-form`, `session-treatments`) ou 1–32 (`radiograph-form`). On retient
+ * l'UNION des bornes UI, soit 1–48 : sur-ensemble de la plage FDI adulte,
+ * strictement plus permissif que l'UI actuelle → aucun saisi légal n'est
+ * rejeté, tandis que `-1`, `0` et `999` le sont.
+ */
+const TOOTH_NUMBER_MIN = 1;
+const TOOTH_NUMBER_MAX = 48;
 
 const labSchema = z.object({
   name: z.string().min(1, "Nom requis"),
@@ -27,7 +39,12 @@ const orderSchema = z.object({
   description: z.string().min(1, "Description requise"),
   toothNumber: z.preprocess(
     (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
-    z.number().int("Numéro de dent invalide").optional(),
+    z
+      .number()
+      .int("Numéro de dent invalide")
+      .min(TOOTH_NUMBER_MIN, `Numéro de dent invalide (min ${TOOTH_NUMBER_MIN})`)
+      .max(TOOTH_NUMBER_MAX, `Numéro de dent invalide (max ${TOOTH_NUMBER_MAX})`)
+      .optional(),
   ),
   material: z.string().optional().or(z.literal("")),
   color: z.string().optional().or(z.literal("")),
@@ -193,6 +210,13 @@ export async function updateLab(
       .where(and(eq(prosthesisLabs.id, labId), eq(prosthesisLabs.clinicId, clinicId)))
       .limit(1);
 
+    // Z-48 : sans test d'existence, un laboratoire inexistant (ID inconnu,
+    // déjà supprimé, appartenant à un autre cabinet) subissait un UPDATE sur
+    // 0 ligne puis était redirigé EN SUCCÈS, avec un audit `before: undefined`.
+    if (!current) {
+      return { error: { general: ["Laboratoire introuvable"] } };
+    }
+
     await db
       .update(prosthesisLabs)
       .set({
@@ -210,12 +234,12 @@ export async function updateLab(
       action: "update",
       entityType: "prosthesis_lab",
       entityId: labId,
-      before: current ? {
+      before: {
         name: current.name,
         contactPerson: current.contactPerson ?? null,
         phone: current.phone ?? null,
         email: current.email ?? null,
-      } : undefined,
+      },
       after: {
         name: data.name,
         contactPerson: data.contactPerson || null,
@@ -234,21 +258,76 @@ export async function updateLab(
   }
 }
 
+/**
+ * Z-50 : messages de refus de suppression d'un laboratoire.
+ *
+ * `deleteLab` a un contrat `Promise<void>` : aucun champ d'erreur n'est
+ * possible. Plutôt que de rediriger « en succès » alors que rien n'a été
+ * supprimé (Z-48) ou que toutes les commandes perdraient leur laboratoire
+ * (`ON DELETE SET NULL`), le refus est remonté comme exception — ce qui
+ * déclenche le gestionnaire d'erreurs côté Next.
+ */
+const LAB_DELETE_NOT_FOUND_MESSAGE = "Laboratoire introuvable";
+const LAB_DELETE_BLOCKED_PREFIX = "Laboratoire rattaché à ";
+const LAB_DELETE_BLOCKED_SUFFIX =
+  " commande(s) : sa suppression détacherait ces commandes. " +
+  "Réaffectez-les, ou confirmez explicitement la suppression " +
+  "(champ « confirm » du formulaire).";
+
+function isLabDeletionRefusal(message: string): boolean {
+  return (
+    message === LAB_DELETE_NOT_FOUND_MESSAGE ||
+    message.startsWith(LAB_DELETE_BLOCKED_PREFIX)
+  );
+}
+
 export async function deleteLab(
   labId: string,
   formData: FormData,
 ): Promise<void> {
-  void formData;
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  // Z-50 : confirmation explicite requise pour supprimer un laboratoire
+  // encore rattaché à des commandes. Le formulaire actuel n'envoie pas ce
+  // champ : la suppression d'un labo lié est donc REFUSÉE tant que l'UI de
+  // confirmation n'a pas été ajoutée (hors périmètre de cette tâche).
+  const confirmed =
+    formData.get("confirm") === "true" || formData.get("confirm") === "1";
+
   try {
+    // Z-48 : test d'existence avant suppression (sinon redirection « succès »
+    // sur 0 ligne supprimée, avec un audit `before: null`).
     const [current] = await db
       .select({ name: prosthesisLabs.name })
       .from(prosthesisLabs)
       .where(and(eq(prosthesisLabs.id, labId), eq(prosthesisLabs.clinicId, clinicId)))
       .limit(1);
+
+    if (!current) {
+      throw new Error(LAB_DELETE_NOT_FOUND_MESSAGE);
+    }
+
+    // Z-50 : les commandes référencent le laboratoire avec
+    // `onDelete: "set null"` : supprimer un labo lié détacherait silencieusement
+    // toutes ses commandes.
+    const [linked] = await db
+      .select({ count: count() })
+      .from(prosthesisOrders)
+      .where(
+        and(
+          eq(prosthesisOrders.labId, labId),
+          eq(prosthesisOrders.clinicId, clinicId),
+        ),
+      );
+    const linkedCount = linked?.count ?? 0;
+
+    if (linkedCount > 0 && !confirmed) {
+      throw new Error(
+        `${LAB_DELETE_BLOCKED_PREFIX}${linkedCount}${LAB_DELETE_BLOCKED_SUFFIX}`,
+      );
+    }
 
     await db
       .delete(prosthesisLabs)
@@ -259,7 +338,7 @@ export async function deleteLab(
       action: "delete",
       entityType: "prosthesis_lab",
       entityId: labId,
-      before: { name: current?.name ?? null },
+      before: { name: current.name, linkedOrders: linkedCount },
     });
 
     revalidatePath("/prostheses");
@@ -267,6 +346,9 @@ export async function deleteLab(
     redirect("/prostheses");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
+    // Z-48/Z-50 : les refus sont remontés tels quels (contrat `Promise<void>`).
+    if (e instanceof Error && isLabDeletionRefusal(e.message)) throw e;
+    // Erreur technique : rien n'a été supprimé → pas de redirection « succès ».
     return;
   }
 }
@@ -307,7 +389,12 @@ export async function getOrders(patientId?: string, labId?: string) {
         prosthesisLabs,
         and(eq(prosthesisOrders.labId, prosthesisLabs.id), eq(prosthesisLabs.clinicId, clinicId)),
       )
-      .where(and(...conditions))
+      // Z-47 : `patients` est en INNER JOIN → le filtre d'archivage peut
+      // légitimement être placé dans le `where` (aucun risque de masquer une
+      // ligne dont la colonne jointe est NULL, contrairement à la LEFT JOIN
+      // laboratoires). Un patient archivé disparaît de la liste patients : il
+      // ne doit donc pas rester visible ici.
+      .where(and(...conditions, isNull(patients.deletedAt)))
       .orderBy(desc(prosthesisOrders.createdAt));
 
     return results;
@@ -389,7 +476,7 @@ export async function createOrder(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
 ) {
-  await requireAuth();
+  const user = await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
@@ -422,33 +509,66 @@ export async function createOrder(
   const now = new Date();
   const year = now.getFullYear();
 
-  // Ensure sequence row exists (ignore if already exists)
+  // Z-49 : la génération du numéro est désormais DANS le `try` (elle était
+  // hors bloc, avec un `catch {}` qui avalait toute erreur d'INSERT de séquence
+  // et un `seq?.lastNumber ?? 1` qui recollait `PRO-<année>-00001` en cas
+  // d'échec — numéro non protégé par aucune contrainte d'unicité). Échec de
+  // séquence ⇒ échec propre de la création, jamais un numéro dupliqué.
   try {
-    await db.insert(documentSequences).values({
-      clinicId,
-      type: "prosthesis",
-      lastNumber: 0,
-    });
-  } catch {
-    // Row already exists, ignore
-  }
+    // Clé de séquence bornée à l'année : le compteur repart à zéro chaque
+    // année, cohérent avec le format `PRO-<année>-<n>`. La clé historique
+    // `prosthesis` n'est plus lue (aucune autre requête ne la référence).
+    const sequenceType = `prosthesis:${year}`;
+    const orderNumberPattern = `^PRO-${year}-(\\d+)$`;
 
-  // Atomic increment
-  const [seq] = await db
-    .update(documentSequences)
-    .set({ lastNumber: sql`last_number + 1` })
-    .where(
-      and(
-        eq(documentSequences.clinicId, clinicId),
-        eq(documentSequences.type, "prosthesis"),
-      ),
-    )
-    .returning();
+    // Plus grand numéro DÉJÀ émis cette année : sert de plancher, ce qui rend
+    // la génération robuste à un compteur perdu, réinitialisé ou à une course
+    // entre deux créations.
+    const [highestRow] = await db
+      .select({
+        highest: sql<number | null>`MAX(CAST(SUBSTRING(${prosthesisOrders.orderNumber} FROM CAST(${orderNumberPattern} AS text)) AS integer))`,
+      })
+      .from(prosthesisOrders)
+      .where(
+        and(
+          eq(prosthesisOrders.clinicId, clinicId),
+          like(prosthesisOrders.orderNumber, `PRO-${year}-%`),
+        ),
+      );
 
-  const nextNumber = seq?.lastNumber ?? 1;
-  const orderNumber = `PRO-${year}-${String(nextNumber).padStart(5, "0")}`;
+    const lowestAvailable = (highestRow?.highest ?? 0) + 1;
 
-  try {
+    // Crée la ligne de séquence si absente ; une erreur réelle remonte
+    // (plus de `catch {}` muet qui l'avalerait).
+    await db
+      .insert(documentSequences)
+      .values({ clinicId, type: sequenceType, lastNumber: 0 })
+      .onConflictDoNothing();
+
+    // Incrément atomique sous verrou de ligne, plané sur le numéro le plus
+    // élevé déjà émis : deux créations concurrentes obtiennent deux valeurs
+    // distinctes.
+    const [seq] = await db
+      .update(documentSequences)
+      .set({
+        lastNumber: sql`GREATEST(${documentSequences.lastNumber} + 1, ${lowestAvailable})`,
+      })
+      .where(
+        and(
+          eq(documentSequences.clinicId, clinicId),
+          eq(documentSequences.type, sequenceType),
+        ),
+      )
+      .returning({ lastNumber: documentSequences.lastNumber });
+
+    if (!seq) {
+      return {
+        error: { general: ["Erreur lors de la génération du numéro de commande"] },
+      };
+    }
+
+    const orderNumber = `PRO-${year}-${String(seq.lastNumber).padStart(5, "0")}`;
+
     const [created] = await db.insert(prosthesisOrders).values({
       clinicId,
       patientId: data.patientId,
@@ -461,6 +581,10 @@ export async function createOrder(
       deliveryDate: data.deliveryDate ?? null,
       cost: data.cost ?? null,
       notes: data.notes || null,
+      // Z-43 : colonne d'auteur existante mais jamais renseignée. Nullable en
+      // base (l'INSERT fonctionnait avec NULL) ; renseignée avec l'utilisateur
+      // de session.
+      createdBy: user.id,
     }).returning({ id: prosthesisOrders.id });
 
     await logAction({
@@ -581,6 +705,13 @@ export async function updateOrder(
       .where(and(eq(prosthesisOrders.id, orderId), eq(prosthesisOrders.clinicId, clinicId)))
       .limit(1);
 
+    // Z-48 : sans test d'existence, une commande inexistante (ID inconnu,
+    // déjà supprimée, autre cabinet) subissait un UPDATE sur 0 ligne puis
+    // était redirigée EN SUCCÈS, avec un audit `before: undefined`.
+    if (!current) {
+      return { error: { general: ["Commande introuvable"] } };
+    }
+
     await db
       .update(prosthesisOrders)
       .set({
@@ -601,13 +732,13 @@ export async function updateOrder(
       action: "update",
       entityType: "prosthesis_order",
       entityId: orderId,
-      before: current ? {
+      before: {
         patientId: current.patientId,
         labId: current.labId ?? null,
         description: current.description,
         material: current.material ?? null,
         cost: current.cost ?? null,
-      } : undefined,
+      },
       after: {
         patientId: data.patientId,
         labId: data.labId || null,

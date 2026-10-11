@@ -22,6 +22,38 @@ import { requireOwnedPatient } from "@/lib/guards";
 
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+/**
+ * Bornes serveur du n° de dent (Z-42), alignées sur l'existant plutôt que sur
+ * une norme imposée :
+ *  - l'odontogramme (source de vérité clinique de l'app) utilise la
+ *    numérotation FDI adulte 11–18 / 21–28 / 31–38 / 41–48 ;
+ *  - les formulaires HTML existants bornent à 1–48 (`order-form`,
+ *    `session-treatments`) et 1–32 (`radiograph-form`).
+ * On retient l'UNION des bornes UI, soit 1–48 : sur-ensemble de la plage FDI
+ * adulte, strictement plus permissif que l'UI actuelle → aucun saisi légal du
+ * formulaire n'est rejeté, tandis que `-1`, `0` et `999` le sont.
+ */
+const TOOTH_NUMBER_MIN = 1;
+const TOOTH_NUMBER_MAX = 48;
+
+/**
+ * Schéma commun d'un n° de dent soumis par un formulaire.
+ *
+ * `z.coerce.number()` convertit `""` en `0` : sans le prétraitement, un champ
+ * dent vide serait rejeté par `min(1)` (radiographies) ou stocké à `0`
+ * (plans de traitement). Le prétraitement mappe explicitement la valeur vide
+ * sur `undefined` = « pas de dent renseignée ».
+ */
+const toothNumberFieldSchema = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce
+    .number()
+    .int("Numéro de dent invalide")
+    .min(TOOTH_NUMBER_MIN, `Numéro de dent invalide (min ${TOOTH_NUMBER_MIN})`)
+    .max(TOOTH_NUMBER_MAX, `Numéro de dent invalide (max ${TOOTH_NUMBER_MAX})`)
+    .optional(),
+);
+
 export async function getTreatmentPlans(patientId: string) {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
@@ -116,7 +148,7 @@ export async function createTreatmentPlan(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
 ) {
-  await requireAuth();
+  const user = await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
@@ -140,6 +172,10 @@ export async function createTreatmentPlan(
       description: data.description || null,
       totalAmount: 0,
       discount: data.discount != null && data.discount >= 0 ? data.discount : null,
+      // Z-43 : colonne d'auteur existante mais jamais renseignée. Nullable en
+      // base (l'INSERT fonctionnait avec NULL) ; on la renseigne avec
+      // l'utilisateur de session.
+      createdBy: user.id,
     }).returning({ id: treatmentPlans.id });
 
     await logAction({
@@ -170,7 +206,7 @@ export async function createTreatmentPlan(
 }
 
 const treatmentPlanItemSchema = z.object({
-  toothNumber: z.coerce.number().int().optional(),
+  toothNumber: toothNumberFieldSchema,
   surface: z.string().optional().default("").catch(""),
   procedureCode: z.string().optional().default("").catch(""),
   description: z.string().min(1, "Description requise"),
@@ -525,7 +561,7 @@ export async function createConsultationNote(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
 ) {
-  await requireAuth();
+  const user = await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
@@ -559,6 +595,10 @@ export async function createConsultationNote(
       clinicId,
       patientId,
       appointmentId: data.appointmentId || null,
+      // Z-43 : colonne d'auteur existante mais jamais renseignée. Nullable en
+      // base (l'INSERT fonctionnait avec NULL) ; renseignée avec l'utilisateur
+      // de session.
+      dentistId: user.id,
       diagnosis: data.diagnosis || null,
       notes: data.notes,
     }).returning({ id: consultationNotes.id });
@@ -589,7 +629,10 @@ export async function createConsultationNote(
     console.error("Échec de l'audit de création de la note", auditError);
   }
 
+  // Z-52 : invalidation harmonisée avec la route réellement affichée (racine
+  // du dossier + liste des notes), au même titre que `deleteRadiograph`.
   revalidatePath(`/patients/${patientId}`);
+  revalidatePath(`/patients/${patientId}/consultation-notes`);
 }
 
 export async function getRadiographs(patientId: string) {
@@ -616,7 +659,7 @@ export async function getRadiographs(patientId: string) {
 
 const radiographSchema = z.object({
   fileType: z.string().optional().default("").catch(""),
-  toothNumber: z.coerce.number().int().optional(),
+  toothNumber: toothNumberFieldSchema,
   region: z.string().optional().default("").catch(""),
   notes: z.string().optional().default("").catch(""),
   takenAt: z.string().optional().default("").catch(""),
@@ -696,7 +739,7 @@ export async function createRadiograph(
   prevState: { error?: Record<string, string[]> } | undefined,
   formData: FormData,
 ): Promise<{ error?: Record<string, string[]> } | undefined> {
-  await requireAuth();
+  const user = await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
@@ -750,9 +793,16 @@ export async function createRadiograph(
       patientId,
       fileKey,
       fileType: data.fileType || null,
-      toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
+      // Z-42 : `data.toothNumber` est déjà un `number | undefined` validé
+      // (1–48). L'ancien `data.toothNumber ? Number(...) : null` convertissait
+      // silencieusement le 0 (issu de `z.coerce` sur un champ vide) en `null`.
+      toothNumber: data.toothNumber ?? null,
       region: data.region || null,
       notes: data.notes || null,
+      // Z-43 : colonne d'auteur existante mais jamais renseignée. Nullable en
+      // base (l'INSERT fonctionnait avec NULL) ; renseignée avec l'utilisateur
+      // de session.
+      uploadedBy: user.id,
       takenAt: data.takenAt ? new Date(data.takenAt) : null,
     }).returning({ id: radiographs.id });
 
@@ -786,7 +836,7 @@ export async function createRadiograph(
         patientId,
         fileKey,
         fileType: data.fileType || null,
-        toothNumber: data.toothNumber ? Number(data.toothNumber) : null,
+        toothNumber: data.toothNumber ?? null,
         region: data.region || null,
       },
     });
@@ -794,7 +844,10 @@ export async function createRadiograph(
     console.error("Échec de l'audit de création de la radiographie", auditError);
   }
 
+  // Z-52 : la création n'invalidisait que la racine du dossier alors que
+  // `deleteRadiograph` invalide aussi la liste des radios → harmonisé.
   revalidatePath(`/patients/${patientId}`);
+  revalidatePath(`/patients/${patientId}/radiographs`);
 }
 
 export async function deleteRadiograph(
@@ -958,7 +1011,10 @@ export async function createMedicalHistoryEntry(
     );
   }
 
+  // Z-52 : invalidation harmonisée avec la route réellement affichée (racine
+  // du dossier + liste des antécédents).
   revalidatePath(`/patients/${patientId}`);
+  revalidatePath(`/patients/${patientId}/medical-history`);
 }
 
 export async function updateMedicalHistoryEntry(

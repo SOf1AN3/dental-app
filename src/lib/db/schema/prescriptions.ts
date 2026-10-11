@@ -43,6 +43,15 @@ export const prescriptionItems = pgTable("prescription_item", {
   duration: text("duration"),
   quantity: integer("quantity"),
   instructions: text("instructions"),
+  /**
+   * Z-45 — ordre de saisie des lignes.
+   *
+   * ⚠️ COLONNE NON MIGRÉE : `npm run db:generate` puis `npm run db:migrate`
+   * doivent être lancés par le client. Tant que la migration n'est pas
+   * appliquée, `prescription.ts` détecte l'absence de la colonne et retombe
+   * sur le tri alphabétique historique.
+   */
+  orderIndex: integer("order_index"),
 }, (table) => [
   index("idx_prescription_items_prescription_id").on(table.prescriptionId),
 ]);

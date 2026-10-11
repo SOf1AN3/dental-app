@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, integer, numeric, index } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, integer, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { clinics } from "./tenant";
 import { patients } from "./patients";
 import { users } from "./auth";
@@ -44,4 +44,15 @@ export const prosthesisOrders = pgTable("prosthesis_order", {
   index("idx_prosthesis_orders_lab_id").on(table.labId),
   index("idx_prosthesis_orders_status").on(table.status),
   index("idx_prosthesis_orders_created_by").on(table.createdBy),
+  // Z-49 — garde-fou anti-duplication du numéro de commande.
+  // ⚠️ INDEX NON MIGRÉ : `npm run db:generate` puis `npm run db:migrate`
+  // devront être lancés par le client. Porté sur (clinic_id, order_number)
+  // et NON sur order_number seul : la séquence est PAR CABINET, deux
+  // cabinets peuvent donc légitimement émettre `PRO-2026-00001`.
+  // Vérifier l'absence de doublons historiques avant migration, sinon
+  // celle-ci échouera sur les lignes existantes.
+  uniqueIndex("uq_prosthesis_orders_clinic_order_number").on(
+    table.clinicId,
+    table.orderNumber,
+  ),
 ]);
