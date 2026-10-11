@@ -22,6 +22,15 @@ describe("sessionItemTotal", () => {
   it("treats a zero discount as no discount", () => {
     expect(sessionItemTotal(250, 2, 0)).toBe(500);
   });
+
+  // Z-34
+  it("floors the total at 0 when the discount exceeds the line amount", () => {
+    expect(sessionItemTotal(100, 1, 150)).toBe(0);
+  });
+
+  it("keeps a positive remainder when the discount is just below the line amount", () => {
+    expect(sessionItemTotal(100, 1, 99.5)).toBe(0.5);
+  });
 });
 
 describe("sessionSubtotal", () => {
@@ -57,14 +66,34 @@ describe("sessionSubtotal", () => {
       ]),
     ).toBe(1050);
   });
+
+  it("never lets an over-discounted item push the subtotal below zero", () => {
+    expect(
+      sessionSubtotal([
+        { fee: 500, quantity: 1 }, // 500
+        { fee: 100, quantity: 1, discount: 500 }, // floored at 0 (Z-34)
+      ]),
+    ).toBe(500);
+  });
 });
 
 describe("session status transitions", () => {
   it("defines the exact transition whitelist", () => {
+    // Z-29 : le graphe reflète le flux réel (closeSession crée la facture en
+    // même temps qu'elle passe la séance `completed`).
+    // `completed | invoiced → in_progress` : reprise après annulation de la
+    // facture liée (réouverture de séance → re-clôture → nouveau numéro).
     expect(SESSION_STATUS_TRANSITIONS).toEqual({
-      completed: ["invoiced"],
-      invoiced: ["paid"],
+      pending: ["in_progress", "completed"],
+      in_progress: ["completed"],
+      completed: ["invoiced", "paid", "in_progress"],
+      invoiced: ["paid", "in_progress"],
+      paid: [],
     });
+  });
+
+  it("allows in_progress → completed (closeSession)", () => {
+    expect(isSessionStatusTransitionAllowed("in_progress", "completed")).toBe(true);
   });
 
   it("allows completed → invoiced", () => {
@@ -75,8 +104,13 @@ describe("session status transitions", () => {
     expect(isSessionStatusTransitionAllowed("invoiced", "paid")).toBe(true);
   });
 
-  it("does not allow skipping invoiced (completed → paid)", () => {
-    expect(isSessionStatusTransitionAllowed("completed", "paid")).toBe(false);
+  it("allows completed → paid (direct settlement, e.g. cash at closing)", () => {
+    expect(isSessionStatusTransitionAllowed("completed", "paid")).toBe(true);
+  });
+
+  it("does not allow invoicing or paying a session that is still in progress", () => {
+    expect(isSessionStatusTransitionAllowed("in_progress", "invoiced")).toBe(false);
+    expect(isSessionStatusTransitionAllowed("in_progress", "paid")).toBe(false);
   });
 
   it("does not allow backwards transitions (invoiced → completed)", () => {

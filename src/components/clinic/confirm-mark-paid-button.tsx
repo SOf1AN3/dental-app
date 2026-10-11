@@ -4,8 +4,11 @@ import { useRef } from "react";
 
 /**
  * Wraps a status-change form (e.g. "Marquer payée") with a browser confirm
- * dialog. When the invoice is still a draft, the message explains the
- * side-effects (numbering, TVA) so the user isn't caught off guard (FACT-3).
+ * dialog. Z-33 — the previous message claimed the invoice would be "numérotée
+ * et la TVA calculée automatiquement", which `updateInvoiceStatus` never does:
+ * it only writes `invoices.status = 'paid'`, creates NO payment and touches
+ * neither the numbering nor the tax. The dialog now states exactly what
+ * happens (statut seul, sans encaissement), for drafts and non-drafts alike.
  */
 export function ConfirmMarkPaidButton({
   action,
@@ -19,9 +22,12 @@ export function ConfirmMarkPaidButton({
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent) {
-    const msg = isDraft
-      ? "La facture sera numérotée et la TVA calculée automatiquement.\nMarquer cette facture comme payée ?"
-      : "Marquer cette facture comme payée ?";
+    const draftNotice = isDraft
+      ? "Attention : la facture est encore un brouillon et ne sera ni numérotée ni recalculée (TVA) par cette action.\n"
+      : "";
+    const msg =
+      `${draftNotice}Aucun paiement ne sera enregistré : seul le statut de la facture passera à « payée ».\n` +
+      "Marquer cette facture comme payée ?";
     if (!window.confirm(msg)) {
       e.preventDefault();
     }

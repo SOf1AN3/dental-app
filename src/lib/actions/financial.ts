@@ -27,6 +27,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import { docTotals, lineTotal, recalcInvoiceStatus } from "@/lib/billing-math";
+import { isSessionStatusTransitionAllowed } from "@/lib/session-rules";
 import { isRedirectOrReject } from "./errors";
 import { requireOwnedPatient, requirePatientOwnership } from "@/lib/guards";
 
@@ -57,6 +58,88 @@ const MAX_AMOUNT = 99_999_999_999.99;
  */
 function isMoney(value: number): boolean {
   return Number.isFinite(value) && Number(value.toFixed(2)) === value;
+}
+
+/**
+ * Domaine réel de `invoice.status` (enum PG `invoice_status`, voir
+ * `src/lib/db/schema/financial.ts`). Sert à la fois au filtre d'URL de
+ * `getInvoices` (Z-32) et à la validation de `updateInvoiceStatus` (Z-31).
+ */
+const INVOICE_STATUSES = [
+  "draft",
+  "sent",
+  "paid",
+  "partially_paid",
+  "overdue",
+  "cancelled",
+] as const;
+
+const invoiceStatusSchema = z.enum(INVOICE_STATUSES);
+
+/**
+ * Z-31 — graphe des transitions MANUELLES de facture (`updateInvoiceStatus`).
+ * Justification du graphe retenu :
+ * - `draft ⇄ sent` : émission et réémission du document avant tout
+ *   encaissement ;
+ * - `draft / sent / partially_paid / overdue → cancelled` : toute facture non
+ *   soldée peut être annulée ; `paid → cancelled` est conservé comme sortie
+ *   LÉGITIME (une facture soldée doit pouvoir être annulée pour annulation
+ *   d'acte, remboursement hors application, etc.) — exigence Z-31 ;
+ * - `sent / partially_paid / overdue → paid` (et `partially_paid → overdue`,
+ *   `overdue → partially_paid`) : marquage manuel de règlement / relance ;
+ * - `paid` n'a que la sortie `cancelled` : surtout PAS `paid → draft`
+ *   (un numéro de facture déjà émis ne se réattribue pas) ni régression vers
+ *   un statut d'encours (un encaissement enregistré ne s'oublie pas) ;
+ * - `cancelled` est terminal : une facture annulée est un document comptable
+ *   neutralisé ; toute reprise passe par une NOUVELLE facture (nouveau numéro
+ *   via `document_sequence`) ;
+ * - `draft → overdue` est refusé : une facture non émise n'a pas d'échéance.
+ *
+ * Les encaissements (`recordPayment`) ne passent PAS par ce graphe : leur
+ * statut est recalculé par `recalcInvoiceStatus()` sur la base des paiements
+ * réellement encaissés (autorité comptable).
+ */
+const INVOICE_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
+  draft: ["sent", "partially_paid", "paid", "cancelled"],
+  sent: ["draft", "partially_paid", "paid", "overdue", "cancelled"],
+  partially_paid: ["sent", "paid", "overdue", "cancelled"],
+  overdue: ["sent", "partially_paid", "paid", "cancelled"],
+  paid: ["cancelled"],
+  cancelled: [],
+};
+
+/**
+ * Z-31 — graphe des transitions manuelles de devis (`updateQuoteStatus`).
+ * Justification du graphe retenu :
+ * - `draft ⇄ sent` : émission / reprise en brouillon avant acceptation ;
+ * - `draft / sent → accepted | rejected | expired` : réponse client à tout
+ *   stade (acceptation orale y compris, d'où `draft → accepted`) ;
+ * - `accepted` est TERMINAL : c'est l'entrée unique de
+ *   `convertQuoteToInvoice` (qui exige `status = 'accepted'` ET
+ *   `converted_invoice_id IS NULL`) ; laisser un devis accepté repartir vers
+ *   `rejected`/`expired`/`draft` créerait des factures issues d'un devis
+ *   officiellement non accepté ;
+ * - `rejected → draft` et `expired → draft` sont les SEULES reprises : elles
+ *   cassent explicitement `rejected → accepted` et `expired → accepted`
+ *   (désormais refusées, Z-31) — un devis refusé ou périmé qui reprend vie
+ *   est réécrit en brouillon (nouveau cycle d'offre), jamais rétro-accepté ;
+ * - le cron `expire-quotes` écrit `expired` directement en SQL, hors de ce
+ *   graphe (il ne passe pas par `updateQuoteStatus`).
+ */
+const QUOTE_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
+  draft: ["sent", "accepted", "rejected", "expired"],
+  sent: ["draft", "accepted", "rejected", "expired"],
+  accepted: [],
+  rejected: ["draft"],
+  expired: ["draft"],
+};
+
+function isInvoiceStatusTransitionAllowed(from: string, to: string): boolean {
+  return (INVOICE_STATUS_TRANSITIONS[from] ?? []).includes(to);
+}
+
+function isQuoteStatusTransitionAllowed(from: string, to: string): boolean {
+  return (QUOTE_STATUS_TRANSITIONS[from] ?? []).includes(to);
 }
 
 const lineItemSchema = z
@@ -126,18 +209,23 @@ export async function getInvoices(status?: string) {
 
   const conditions = [eq(invoices.clinicId, clinicId)];
   if (status) {
-    conditions.push(eq(invoices.status, status as "draft" | "sent" | "paid" | "partially_paid" | "overdue" | "cancelled"));
+    // Z-32 — filtre d'URL validé AVANT la requête : `?status=bogus` déclenchait
+    // une erreur d'énumération PG (`invalid input value for enum invoice_status`)
+    // avalée par le `catch` ci-dessous → liste vide silencieuse. Un filtre
+    // invalide est maintenant refusé explicitement, et les erreurs DB
+    // techniques REMONTENT (plus de masquage en liste vide).
+    const parsedStatus = invoiceStatusSchema.safeParse(status);
+    if (!parsedStatus.success) {
+      throw new Error("Filtre de statut de facture invalide");
+    }
+    conditions.push(eq(invoices.status, parsedStatus.data));
   }
 
-  try {
-    return await db
-      .select()
-      .from(invoices)
-      .where(and(...conditions))
-      .orderBy(desc(invoices.createdAt));
-  } catch {
-    return [];
-  }
+  return await db
+    .select()
+    .from(invoices)
+    .where(and(...conditions))
+    .orderBy(desc(invoices.createdAt));
 }
 
 export async function getInvoice(id: string) {
@@ -145,34 +233,35 @@ export async function getInvoice(id: string) {
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
-  try {
-    const invoice = await db.query.invoices.findFirst({
-      where: and(eq(invoices.id, id), eq(invoices.clinicId, clinicId)),
-      with: {
-        items: true,
-        // Filtre multi-tenant sur la table jointe : sans `eq(payments.clinicId, …)`,
-        // la jointure retournerait les paiements d'une autre clinique.
-        payments: {
-          where: eq(payments.clinicId, clinicId),
-        },
+  // Z-32 — plus de `try/catch` global : une erreur DB/transitoire était
+  // avalée puis transformée en `null` → `notFound()` → 404 sur une facture
+  // EXISTANTE. Le contrat est maintenant net : `null` = ressource absente
+  // (ou appartenant à une autre clinique, cf. filtre multi-tenant), et toute
+  // erreur technique remonte (erreur 500 explicite plutôt que 404 mensonger).
+  const invoice = await db.query.invoices.findFirst({
+    where: and(eq(invoices.id, id), eq(invoices.clinicId, clinicId)),
+    with: {
+      items: true,
+      // Filtre multi-tenant sur la table jointe : sans `eq(payments.clinicId, …)`,
+      // la jointure retournerait les paiements d'une autre clinique.
+      payments: {
+        where: eq(payments.clinicId, clinicId),
       },
-    });
-    if (!invoice) return null;
+    },
+  });
+  if (!invoice) return null;
 
-    // La relation `patient` ne peut pas porter `where` (Drizzle n'accepte que
-    // columns/with/extras sur une relation `one`) : on la relit avec le filtre
-    // multi-tenant. Patient d'une autre clinique → facture illisible (null → 404).
-    const [patient] = await db
-      .select()
-      .from(patients)
-      .where(and(eq(patients.id, invoice.patientId), eq(patients.clinicId, clinicId)))
-      .limit(1);
-    if (!patient) return null;
+  // La relation `patient` ne peut pas porter `where` (Drizzle n'accepte que
+  // columns/with/extras sur une relation `one`) : on la relit avec le filtre
+  // multi-tenant. Patient d'une autre clinique → facture illisible (null → 404).
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, invoice.patientId), eq(patients.clinicId, clinicId)))
+    .limit(1);
+  if (!patient) return null;
 
-    return { ...invoice, patient };
-  } catch {
-    return null;
-  }
+  return { ...invoice, patient };
 }
 
 export async function getInvoicesSummary() {
@@ -324,6 +413,18 @@ export async function createQuote(
   const now = new Date();
   const year = now.getFullYear();
 
+  // Z-30 — les lignes sont validées AVANT toute écriture de séquence : un
+  // `parseLineItems` raté consommait déjà un numéro (`last_number + 1`) sans
+  // jamais créer de devis → trous dans la numérotation. Aucune écriture ne
+  // part donc tant que le formulaire n'est pas entièrement valide.
+  const itemsParsed = parseLineItems(formData.get("items"));
+  if (!itemsParsed.ok) {
+    return { error: { items: ["Lignes de devis invalides : vérifiez descriptions, quantités et prix"] } };
+  }
+  const items = itemsParsed.items;
+
+  const totals = docTotals(items);
+
   // Ensure sequence row exists (ignore if already exists)
   try {
     await db.insert(documentSequences).values({
@@ -349,14 +450,6 @@ export async function createQuote(
 
   const nextNumber = seq?.lastNumber ?? 1;
   const number = `DEV-${year}-${String(nextNumber).padStart(4, "0")}`;
-
-  const itemsParsed = parseLineItems(formData.get("items"));
-  if (!itemsParsed.ok) {
-    return { error: { items: ["Lignes de devis invalides : vérifiez descriptions, quantités et prix"] } };
-  }
-  const items = itemsParsed.items;
-
-  const totals = docTotals(items);
 
   // Z-20 : le devis, ses lignes et l'audit sont écrits dans UNE transaction.
   // Sans elle, un échec du second INSERT survenait APRÈS
@@ -437,21 +530,39 @@ export async function updateQuoteStatus(
     .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)))
     .limit(1);
 
+  // Z-31 — sans cette garde, l'UPDATE silencieux « réussissait » sur 0 ligne
+  // et l'action renvoyait un succès pour un devis inexistant. Le statut courant
+  // sert aussi de base à la validation de transition ci-dessous.
+  if (!quote) {
+    throw new Error("Devis introuvable");
+  }
+
+  // Z-31 — transitions de devis validées (graphe `QUOTE_STATUS_TRANSITIONS`) :
+  // `cancelled → paid`, `rejected → accepted`, `expired → accepted` et tout
+  // retour en arrière après acceptation sont désormais refusés. Un rejeu du
+  // formulaire (même statut) reste accepté — c'est un no-op.
+  if (
+    quote.status !== status &&
+    !isQuoteStatusTransitionAllowed(quote.status, status)
+  ) {
+    throw new Error(
+      `Transition de statut non autorisée sur ce devis (${quote.status} → ${status})`,
+    );
+  }
+
   await db
     .update(quotes)
     .set({ status })
     .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)));
 
-  if (quote) {
-    await logAction({
-      clinicId,
-      action: "status_change",
-      entityType: "quote",
-      entityId: quoteId,
-      before: { status: quote.status },
-      after: { status },
-    });
-  }
+  await logAction({
+    clinicId,
+    action: "status_change",
+    entityType: "quote",
+    entityId: quoteId,
+    before: { status: quote.status },
+    after: { status },
+  });
 
   revalidatePath(`/billing/quotes/${quoteId}`);
   revalidatePath("/billing/quotes");
@@ -685,6 +796,18 @@ export async function createInvoice(
   const now = new Date();
   const year = now.getFullYear();
 
+  // Z-30 — les lignes sont validées AVANT toute écriture de séquence : un
+  // `parseLineItems` raté consommait déjà un numéro (`last_number + 1`) sans
+  // jamais créer de facture → trous dans la numérotation. Aucune écriture ne
+  // part donc tant que le formulaire n'est pas entièrement valide.
+  const itemsParsed = parseLineItems(formData.get("items"));
+  if (!itemsParsed.ok) {
+    return { error: { items: ["Lignes de facture invalides : vérifiez descriptions, quantités et prix"] } };
+  }
+  const items = itemsParsed.items;
+
+  const totals = docTotals(items);
+
   // Ensure sequence row exists (ignore if already exists)
   try {
     await db.insert(documentSequences).values({
@@ -710,14 +833,6 @@ export async function createInvoice(
 
   const nextNumber = seq?.lastNumber ?? 1;
   const number = `FAC-${year}-${String(nextNumber).padStart(5, "0")}`;
-
-  const itemsParsed = parseLineItems(formData.get("items"));
-  if (!itemsParsed.ok) {
-    return { error: { items: ["Lignes de facture invalides : vérifiez descriptions, quantités et prix"] } };
-  }
-  const items = itemsParsed.items;
-
-  const totals = docTotals(items);
 
   // Z-19 : la facture, ses lignes et l'audit sont écrits dans UNE transaction.
   // Sans elle, un échec du second INSERT survenait APRÈS
@@ -813,16 +928,113 @@ export async function getUnpaidInvoicesForPatient(patientId: string) {
   }
 }
 
+/**
+ * Z-31 — le schéma valide le DOMAINE (`invoice_status`), le GRAPHE est
+ * validé dans `updateInvoiceStatus` contre le statut courant de la facture.
+ */
 const updateStatusSchema = z.object({
-  status: z.enum([
-    "draft",
-    "sent",
-    "paid",
-    "partially_paid",
-    "overdue",
-    "cancelled",
-  ]),
+  status: invoiceStatusSchema,
 });
+
+/**
+ * BLOQUANT 2 — point 2 : annulation d'une facture LIÉE À UNE SÉANCE.
+ *
+ * Le graphe des factures autorise `… → cancelled` (y compris depuis `paid`,
+ * Z-31). L'annulation doit pouvoir « défaire » la clôture de séance
+ * correspondante, sous peine de laisser la séance `completed`/`invoiced` avec
+ * une facture neutralisée : les actes redeviennent modifiables (le garde
+ * `lockSessionForItemEdit` exclut désormais les factures `cancelled`) et une
+ * RE-CLÔTURE (`closeSession`, qui exige `in_progress`) attribue une NOUVELLE
+ * facture avec un nouveau numéro (`document_sequence`).
+ *
+ * Règles appliquées :
+ *  - facture SANS `sessionId` (créée manuellement) : la séance n'est pas
+ *    concernée — aucune écriture séance (cas non joint ici) ;
+ *  - séance `paid` : un ENCAISSEMENT a eu lieu → on n'y touche PAS (et le
+ *    graphe des séances garde `paid` terminal). Annuler une facture soldée
+ *    dont la séance est payée est un cas métier distinct (remboursement
+ *    traité hors application) : il est SIGNALÉ au client via le message
+ *    retourné plutôt que « traité » ici ;
+ *  - séance `completed | invoiced` : ramenée à `in_progress`, après validation
+ *    de l'arête dans `SESSION_STATUS_TRANSITIONS` (Z-29) et sous garde
+ *    optimiste `WHERE status = <statut lu>`.
+ *
+ * ORDRE DES VERROUS — cette écriture N'INTRODUIT AUCUN NOUVEAU CYCLE ABBA :
+ * `updateInvoiceStatus` n'exécute PAS ses statements dans une transaction
+ * (autocommit). L'`UPDATE invoices` (verrou de ligne exclusif) est COMMITTÉ —
+ * son verrou donc LIBÉRÉ — AVANT que l'`UPDATE clinical_sessions` ne démarre.
+ * Aucune transaction ne tient jamais la facture tout en demandant la séance :
+ * l'ordre « facture → séance » de Z-23 (`recordPayment`, sous transaction)
+ * n'est jamais reproduit simultanément ici, et les ordres « séance →
+ * facture » (`closeSession`, `lockSessionForItemEdit`, `updateSessionStatus`)
+ * ne peuvent pas s'emmorceler avec cette action.
+ *
+ * Contrepartie assumée : sans transaction, annulation de facture et réouverture
+ * de séance ne sont pas atomiques — la séance est relue puis réécrite sous
+ * garde optimiste. Si cette réconciliation échoue APRÈS l'engagement de
+ * l'`UPDATE invoices`, la séance reste `completed`/`invoiced` avec une facture
+ * annulée. Ce n'est PAS « auto-réparable » par un appel répété de cette
+ * action : la page facture masque tous les formulaires dès `cancelled`
+ * (`isTerminal`) et `updateInvoiceStatus` n'a aucun autre appelant, donc le
+ * rejeu est inatteignable depuis l'UI. La réparation est maintenant portée par
+ * `updateSessionStatus(…, "in_progress")` : sa garde corrélée n'autorise cette
+ * régression QUE si TOUTES les factures liées de la séance sont `cancelled`
+ * (constaté avant toute écriture, dans la même lecture que le ciblage de la
+ * facture `invoiced`/`paid`). L'anti-double-facture est donc conservé à
+ * l'identique — une séance dont la facture est ACTIVE n'est jamais régressée —
+ * et la réouverture ne dépend plus d'un rejeu UI.
+ *
+ * Retourne `null` si la séance a été ramenée à `in_progress` (ou n'a pas eu
+ * besoin de l'être), sinon le message à signaler au client.
+ */
+async function reopenSessionAfterInvoiceCancellation(
+  clinicId: string,
+  sessionId: string,
+  patientId: string,
+): Promise<string | null> {
+  const [sessionRow] = await db
+    .select({ id: clinicalSessions.id, status: clinicalSessions.status })
+    .from(clinicalSessions)
+    .where(
+      and(
+        eq(clinicalSessions.id, sessionId),
+        eq(clinicalSessions.clinicId, clinicId),
+      ),
+    )
+    .limit(1);
+
+  // Séance supprimée ou appartenant à une autre clinique : rien à réconcilier.
+  if (!sessionRow) return null;
+
+  if (sessionRow.status === "paid") {
+    // Encaissement enregistré : on ne rouvre PAS la séance (paiement prioritaire,
+    // `paid` reste terminal). Cas métier distinct → signalé, pas traité.
+    return "Facture annulée, mais la séance liée est payée (encaissement enregistré) : elle n'a pas été rouverte. Traitez le remboursement et la re-facturation séparément.";
+  }
+
+  if (sessionRow.status === "completed" || sessionRow.status === "invoiced") {
+    // Arête `completed | invoiced → in_progress` du graphe Z-29 (ajoutée pour
+    // cette réouverture) ; rejeu optimiste sur le statut lu.
+    if (!isSessionStatusTransitionAllowed(sessionRow.status, "in_progress")) {
+      return null;
+    }
+
+    await db
+      .update(clinicalSessions)
+      .set({ status: "in_progress" })
+      .where(
+        and(
+          eq(clinicalSessions.id, sessionRow.id),
+          eq(clinicalSessions.clinicId, clinicId),
+          eq(clinicalSessions.status, sessionRow.status),
+        ),
+      );
+
+    revalidatePath(`/patients/${patientId}/session/${sessionId}`);
+  }
+
+  return null;
+}
 
 export async function updateInvoiceStatus(
   invoiceId: string,
@@ -846,29 +1058,70 @@ export async function updateInvoiceStatus(
 
   try {
     const [invoice] = await db
-      .select({ id: invoices.id, status: invoices.status })
+      .select({
+        id: invoices.id,
+        status: invoices.status,
+        sessionId: invoices.sessionId,
+        patientId: invoices.patientId,
+      })
       .from(invoices)
       .where(and(eq(invoices.id, invoiceId), eq(invoices.clinicId, clinicId)))
       .limit(1);
+
+    // Z-31 — sans cette garde, l'UPDATE silencieux « réussissait » sur 0 ligne
+    // et l'action renvoyait `{ success: true }` pour une facture inexistante.
+    // Le statut courant sert aussi de base à la validation de transition.
+    if (!invoice) {
+      return { error: "Facture introuvable" };
+    }
+
+    // Z-31 — transitions de facture validées (graphe
+    // `INVOICE_STATUS_TRANSITIONS`) : `cancelled → paid`, `paid → draft` et
+    // toute régression d'un statut encaissé sont désormais refusés ; la sortie
+    // vers `cancelled` est conservée depuis tous les statuts, y compris `paid`.
+    // Un rejeu du formulaire (même statut) reste accepté — c'est un no-op.
+    if (
+      invoice.status !== validated.data.status &&
+      !isInvoiceStatusTransitionAllowed(invoice.status, validated.data.status)
+    ) {
+      return {
+        error: `Transition de statut non autorisée (${invoice.status} → ${validated.data.status})`,
+      };
+    }
 
     await db
       .update(invoices)
       .set({ status: validated.data.status })
       .where(and(eq(invoices.id, invoiceId), eq(invoices.clinicId, clinicId)));
 
-    if (invoice) {
-      await logAction({
+    await logAction({
+      clinicId,
+      action: "status_change",
+      entityType: "invoice",
+      entityId: invoiceId,
+      before: { status: invoice.status },
+      after: { status: validated.data.status },
+    });
+
+    // BLOQUANT 2 — point 2 : annulation d'une facture liée à une séance →
+    // ramener la séance `completed | invoiced` à `in_progress` (re-clôture et
+    // nouveau numéro possibles). Aucune écriture si la facture n'a pas de
+    // `sessionId`, ou si la séance est `paid` (signalée plus bas).
+    let sessionReopenSignal: string | null = null;
+    if (validated.data.status === "cancelled" && invoice.sessionId) {
+      sessionReopenSignal = await reopenSessionAfterInvoiceCancellation(
         clinicId,
-        action: "status_change",
-        entityType: "invoice",
-        entityId: invoiceId,
-        before: { status: invoice.status },
-        after: { status: validated.data.status },
-      });
+        invoice.sessionId,
+        invoice.patientId,
+      );
     }
 
     revalidatePath(`/billing/invoices/${invoiceId}`);
     revalidatePath("/billing/invoices");
+
+    if (sessionReopenSignal) {
+      return { error: sessionReopenSignal };
+    }
 
     return { success: true };
   } catch {
@@ -1122,11 +1375,48 @@ export async function recordPayment(
           .where(eq(invoices.id, lockedInvoice.id));
 
         if (newStatus === "paid" && lockedInvoice.sessionId) {
-          await tx
-            .update(clinicalSessions)
-            .set({ status: "paid" })
-            .where(eq(clinicalSessions.id, lockedInvoice.sessionId));
-          revalidatePath(`/patients/${lockedInvoice.patientId}/session/${lockedInvoice.sessionId}`);
+          // Z-29 — la séance ne passe `paid` qu'après VALIDATION de la
+          // transition (`SESSION_STATUS_TRANSITIONS`), comme dans
+          // `updateSessionStatus` : plus d'écriture forcée en dehors du graphe.
+          // Cas nominal : `completed → paid` (règlement à la clôture) ou
+          // `invoiced → paid`. Une lecture SANS `FOR UPDATE` sur la séance est
+          // certes utilisée ci-dessous, mais elle NE SUPPRIME PAS le risque de
+          // deadlock : l'`UPDATE clinical_sessions` suivant acquiert le MÊME
+          // verrou de ligne exclusif, simplement plus tard. Le cycle ABBA
+          // `recordPayment` (facture → séance, Z-23) ↔ `updateSessionStatus` /
+          // `closeSession` (séance → facture) DONC SUBSISTE. Il est détecté
+          // par PostgreSQL, qui rollback l'une des deux transactions sans
+          // corruption (paiement et facture restent cohérents) ; l'UPDATE
+          // rejoue le statut lu dans son `WHERE` (rejeu optimiste), et le
+          // paiement — fait comptable prioritaire — reste engagé même si
+          // cette course se produit.
+          const [sessionRow] = await tx
+            .select({ id: clinicalSessions.id, status: clinicalSessions.status })
+            .from(clinicalSessions)
+            .where(
+              and(
+                eq(clinicalSessions.id, lockedInvoice.sessionId),
+                eq(clinicalSessions.clinicId, clinicId),
+              ),
+            )
+            .limit(1);
+
+          if (
+            sessionRow &&
+            sessionRow.status !== "paid" &&
+            isSessionStatusTransitionAllowed(sessionRow.status, "paid")
+          ) {
+            await tx
+              .update(clinicalSessions)
+              .set({ status: "paid" })
+              .where(
+                and(
+                  eq(clinicalSessions.id, sessionRow.id),
+                  eq(clinicalSessions.status, sessionRow.status),
+                ),
+              );
+            revalidatePath(`/patients/${lockedInvoice.patientId}/session/${lockedInvoice.sessionId}`);
+          }
         }
 
         if (lockedInvoice.sessionId) {

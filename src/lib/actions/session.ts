@@ -16,7 +16,7 @@ import {
 } from "@/lib/db/schema";
 import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
-import { eq, and, asc, sql, inArray } from "drizzle-orm";
+import { eq, ne, and, asc, desc, sql, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -162,7 +162,7 @@ export async function getSession(sessionId: string): Promise<SessionData | null>
       eq(clinicalSessions.id, sessionId),
       eq(clinicalSessions.clinicId, clinicId),
     ),
-    with: { patient: true, prescription: true, invoice: true },
+    with: { patient: true, prescription: true },
   });
 
   if (!session) return null;
@@ -182,14 +182,31 @@ export async function getSession(sessionId: string): Promise<SessionData | null>
     prescription = row ?? null;
   }
 
-  let invoice: SessionData["invoice"] = null;
-  if (session.invoice) {
-    const row = await db.query.invoices.findFirst({
-      where: eq(invoices.id, session.invoice.id),
+  // BLOQUANT 1 (ii) — la séance renvoie sa facture ACTIVE la plus récente ;
+  // une facture `cancelled` vaut `null` (« la séance n'a pas de facture
+  // active »). C'est cette sémantique qui fait réapparaître
+  // `CloseSessionForm` (`status === "in_progress" && !invoice`) après une
+  // annulation, donc qui rend la RE-CLÔTURE possible.
+  //
+  // La relation `invoice` (sans filtre de statut, sans `ORDER BY`) ne convient
+  // plus : depuis l'annulation puis la re-clôture, une séance peut porter
+  // DEUX factures (l'annulée + la re-facturée, `UNIQUE (invoice.session_id)`
+  // partiel absent — cf. Z-21), et son `LIMIT 1` pouvait tomber sur la facture
+  // ANNULÉE → après filtrage, `invoice` aurait été `null` sur une séance
+  // pourtant facturée (bouton « Clore la séance » affiché à tort ET boutons
+  // « Marquer facturée »/« Marquer payée » masqués). D'où le filtre
+  // `ne(cancelled)` + `ORDER BY createdAt DESC` : cible non annulée et
+  // déterministe, exactement comme dans `updateSessionStatus`.
+  const invoice =
+    (await db.query.invoices.findFirst({
+      where: and(
+        eq(invoices.sessionId, sessionId),
+        eq(invoices.clinicId, clinicId),
+        ne(invoices.status, "cancelled"),
+      ),
+      orderBy: (fields, { desc }) => [desc(fields.createdAt)],
       with: { items: true, payments: true },
-    });
-    invoice = row ?? null;
-  }
+    })) ?? null;
 
   return {
     ...session,
@@ -285,16 +302,97 @@ async function recalculateSessionTotal(
   return total;
 }
 
-const clinicalSessionItemSchema = z.object({
-  toothNumber: z.coerce.number().int().optional(),
-  surface: z.string().optional().default("").catch(""),
-  procedureCode: z.string().optional().default("").catch(""),
-  description: z.string().min(1, "Description requise"),
-  fee: z.coerce.number().min(0),
-  quantity: z.coerce.number().int().positive().default(1),
-  discount: z.coerce.number().min(0).default(0),
-  taxRate: z.coerce.number().int().default(0),
-});
+const clinicalSessionItemSchema = z
+  .object({
+    toothNumber: z.coerce.number().int().optional(),
+    surface: z.string().optional().default("").catch(""),
+    procedureCode: z.string().optional().default("").catch(""),
+    description: z.string().min(1, "Description requise"),
+    fee: z.coerce.number().min(0),
+    quantity: z.coerce.number().int().positive().default(1),
+    discount: z.coerce.number().min(0).default(0),
+    taxRate: z.coerce.number().int().default(0),
+  })
+  // Z-34 — même garde que `lineItemSchema` côté facturation : sans elle, une
+  // remise supérieure au montant de la ligne (`fee × quantity − discount < 0`)
+  // était acceptée puis recalculée dans `clinical_sessions.total_amount` comme
+  // un total négatif.
+  .refine((item) => item.fee * item.quantity - item.discount >= 0, {
+    message: "La remise dépasse le montant de la ligne",
+    path: ["discount"],
+  });
+
+/**
+ * Z-28 — verrou + garde « séance déjà facturée », à appeler EN PREMIER dans
+ * chaque transaction qui modifie les actes d'une séance (ajout / modification /
+ * suppression), avant toute écriture.
+ *
+ * Statuts réels de `clinical_session` (enum PG `clinical_session_status`) :
+ * `pending`, `in_progress`, `completed`, `invoiced`, `paid`. Le seul statut
+ * qui garantisse l'absence de facture est `in_progress` (et `pending`,
+ * état initial jamais facturé) — `closeSession` laisse la séance `completed`
+ * APRÈS avoir créé la facture, donc `completed` ne suffit pas : on teste
+ * aussi l'existence d'une facture liée (`invoice.session_id`), qui est
+ * l'indicateur exact de « déjà facturée ». Renvoie `null` si la séance est
+ * modifiable, sinon le message d'erreur à afficher.
+ *
+ * Modifiable = statut non facturé ET aucune facture LIÉE active. Les factures
+ * `cancelled` sont EXCLUES du garde : une facture annulée est un document
+ * comptable neutralisé (statut terminal, Z-31) qui ne garantit plus rien. Sans
+ * cette exclusion, une séance dont l'utilisateur a annulé la facture Brouillon
+ * pour corriger des actes était gelée à jamais (« Séance déjà facturée » alors
+ * que la facture est annulée) et AUCUN chemin de re-facturation n'existait.
+ * La séance redevient alors éditable ; une nouvelle clôture (`closeSession`)
+ * créera une NOUVELLE facture avec un nouveau numéro (`document_sequence`).
+ *
+ * Le `SELECT … FOR UPDATE` sérialise la mutation d'actes avec `closeSession`
+ * (dont le `UPDATE … WHERE status = 'in_progress'` verrouille la même ligne) :
+ * une clôture concurrente ne peut pas s'intercaler entre la garde et
+ * l'écriture. Verrou ajouté SANS réordonner les verrous existants (les
+ * transactions d'actes n'en contenaient aucun auparavant).
+ */
+async function lockSessionForItemEdit(
+  tx: DbOrTx,
+  clinicId: string,
+  sessionId: string,
+): Promise<string | null> {
+  const [session] = await tx
+    .select({ id: clinicalSessions.id, status: clinicalSessions.status })
+    .from(clinicalSessions)
+    .where(
+      and(
+        eq(clinicalSessions.id, sessionId),
+        eq(clinicalSessions.clinicId, clinicId),
+      ),
+    )
+    .limit(1)
+    .for("update");
+
+  if (!session) return "Séance introuvable";
+
+  if (session.status === "invoiced" || session.status === "paid") {
+    return "Séance déjà facturée : les actes ne peuvent plus être modifiés";
+  }
+
+  const [invoice] = await tx
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.sessionId, sessionId),
+        eq(invoices.clinicId, clinicId),
+        // BLOQUANT 2 : une facture annulée ne gèle plus les actes.
+        ne(invoices.status, "cancelled"),
+      ),
+    )
+    .limit(1);
+
+  if (invoice) {
+    return "Séance déjà facturée : les actes ne peuvent plus être modifiés";
+  }
+
+  return null;
+}
 
 export async function createSessionItem(
   sessionId: string,
@@ -331,32 +429,40 @@ export async function createSessionItem(
       return { error: { general: ["Séance introuvable"] } };
     }
 
-    let createdId: string | undefined;
+    const result = await db.transaction(
+      async (tx): Promise<{ blocked: string; createdId?: null } | { blocked: null; createdId: string | null }> => {
+        // Z-28 : garde « séance déjà facturée » posée AVANT toute écriture.
+        const blocked = await lockSessionForItemEdit(tx, clinicId, sessionId);
+        if (blocked) return { blocked, createdId: null };
 
-    await db.transaction(async (tx) => {
-      const [created] = await tx.insert(clinicalSessionItems).values({
-        sessionId,
-        toothNumber: data.toothNumber ?? null,
-        surface: data.surface || null,
-        procedureCode: data.procedureCode || null,
-        description: data.description,
-        fee: data.fee,
-        quantity: data.quantity,
-        discount: data.discount,
-        taxRate: data.taxRate,
-      }).returning({ id: clinicalSessionItems.id });
+        const [created] = await tx.insert(clinicalSessionItems).values({
+          sessionId,
+          toothNumber: data.toothNumber ?? null,
+          surface: data.surface || null,
+          procedureCode: data.procedureCode || null,
+          description: data.description,
+          fee: data.fee,
+          quantity: data.quantity,
+          discount: data.discount,
+          taxRate: data.taxRate,
+        }).returning({ id: clinicalSessionItems.id });
 
-      createdId = created?.id;
+        await recalculateSessionTotal(sessionId, tx);
 
-      await recalculateSessionTotal(sessionId, tx);
-    });
+        return { blocked: null, createdId: created?.id ?? null };
+      },
+    );
 
-    if (createdId) {
+    if (result.blocked) {
+      return { error: { general: [result.blocked] } };
+    }
+
+    if (result.createdId) {
       await logAction({
         clinicId,
         action: "create",
         entityType: "clinical_session_item",
-        entityId: createdId,
+        entityId: result.createdId,
         after: { ...data, sessionId },
       });
     }
@@ -418,23 +524,35 @@ export async function updateSessionItem(
       return { error: { general: ["Élément introuvable"] } };
     }
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(clinicalSessionItems)
-        .set({
-          toothNumber: data.toothNumber ?? null,
-          surface: data.surface || null,
-          procedureCode: data.procedureCode || null,
-          description: data.description,
-          fee: data.fee,
-          quantity: data.quantity,
-          discount: data.discount,
-          taxRate: data.taxRate,
-        })
-        .where(eq(clinicalSessionItems.id, itemId));
+    const result = await db.transaction(
+      async (tx): Promise<{ blocked: string } | { blocked: null }> => {
+        // Z-28 : garde « séance déjà facturée » posée AVANT toute écriture.
+        const blocked = await lockSessionForItemEdit(tx, clinicId, item.sessionId);
+        if (blocked) return { blocked };
 
-      await recalculateSessionTotal(item.sessionId, tx);
-    });
+        await tx
+          .update(clinicalSessionItems)
+          .set({
+            toothNumber: data.toothNumber ?? null,
+            surface: data.surface || null,
+            procedureCode: data.procedureCode || null,
+            description: data.description,
+            fee: data.fee,
+            quantity: data.quantity,
+            discount: data.discount,
+            taxRate: data.taxRate,
+          })
+          .where(eq(clinicalSessionItems.id, itemId));
+
+        await recalculateSessionTotal(item.sessionId, tx);
+
+        return { blocked: null };
+      },
+    );
+
+    if (result.blocked) {
+      return { error: { general: [result.blocked] } };
+    }
 
     await logAction({
       clinicId,
@@ -495,13 +613,25 @@ export async function deleteSessionItem(
       return { error: "Élément introuvable" };
     }
 
-    await db.transaction(async (tx) => {
-      await tx
-        .delete(clinicalSessionItems)
-        .where(eq(clinicalSessionItems.id, itemId));
+    const result = await db.transaction(
+      async (tx): Promise<{ blocked: string } | { blocked: null }> => {
+        // Z-28 : garde « séance déjà facturée » posée AVANT toute écriture.
+        const blocked = await lockSessionForItemEdit(tx, clinicId, item.sessionId);
+        if (blocked) return { blocked };
 
-      await recalculateSessionTotal(item.sessionId, tx);
-    });
+        await tx
+          .delete(clinicalSessionItems)
+          .where(eq(clinicalSessionItems.id, itemId));
+
+        await recalculateSessionTotal(item.sessionId, tx);
+
+        return { blocked: null };
+      },
+    );
+
+    if (result.blocked) {
+      return { error: result.blocked };
+    }
 
     await logAction({
       clinicId,
@@ -750,6 +880,49 @@ export async function updateSessionStatus(
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
+  // Z-27 — contrôle de rôle (jusqu'ici absent : `requireAuth` +
+  // `requireClinicAccessOrThrow` suffisaient, alors que cette action écrit
+  // DIRECTEMENT `invoices.status`). Cohérent avec les actions voisines :
+  //  • les cibles qui touchent une facture (`invoiced` → facture `sent`,
+  //    `paid` → facture `paid`) exigent la même habilité que
+  //    `updateInvoiceStatus` : `billing:manage` ;
+  //  • la réouverture de séance (`in_progress`, BLOQUANT 2) exige la même
+  //    habilité que `closeSession` : `billing:session_close` (c'est la branche
+  //    `!touchesInvoice` ci-dessous).
+  const touchesInvoice = status === "invoiced" || status === "paid";
+  if (touchesInvoice && !(await hasAbility(clinicId, "billing:manage"))) {
+    return { error: "Action non autorisée sur les factures" };
+  }
+  if (!touchesInvoice && !(await hasAbility(clinicId, "billing:session_close"))) {
+    return { error: "Vous n'êtes pas autorisé à clôturer une séance" };
+  }
+
+  // MINEUR + BLOQUANT 2 — domaine RUNTIME de la cible. `status` est un
+  // argument de Server Action : la validité TypeScript n'est PAS vérifiée à
+  // l'exécution, et aucun Zod ne valide cette action. On le recopie dans un
+  // `string` : la signature publique de l'action est FIGÉE (union
+  // `"completed" | "invoiced" | "paid"`), or `in_progress` — accepté plus bas
+  // sous garde corrélée — n'en fait pas partie, et comparer littéralement la
+  // union rétrécie `status` à `"in_progress"` ne compilerait pas.
+  //  • `completed` est RETIRÉ du domaine : aucun appelant UI ne l'utilise
+  //    (`session-invoice.tsx` ne lie que `invoiced`/`paid`), et avec l'arête
+  //    `in_progress → completed`, un détenteur de `billing:session_close`
+  //    aurait pu marquer une séance `completed` SANS facture → état non
+  //    récupérable ;
+  //  • `invoiced | paid` : cibles « facturation » (habilité `billing:manage`
+  //    exigée ci-dessus) ;
+  //  • `in_progress` : réouverture, admise UNIQUEMENT sous la garde corrélée
+  //    posée dans la transaction (toutes les factures liées sont `cancelled`).
+  //    Sans cette garde, un appelant régresserait une séance DÉJÀ facturée
+  //    vers `in_progress` puis relancerait `closeSession` → une SECONDE
+  //    facture pour la même séance (pas de contrainte
+  //    `UNIQUE (invoice.session_id)` encore, cf. Z-21).
+  const target: string = status;
+  const isReopen = target === "in_progress";
+  if (!isReopen && target !== "invoiced" && target !== "paid") {
+    return { error: "Statut de séance invalide" };
+  }
+
   try {
     const [session] = await db
       .select({
@@ -780,33 +953,85 @@ export async function updateSessionStatus(
 
     let invoiceId: string | null = null;
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(clinicalSessions)
-        .set({ status })
-        .where(eq(clinicalSessions.id, sessionId));
-
-      if (status === "invoiced" || status === "paid") {
-        const [invoice] = await tx
+    const txResult = await db.transaction(
+      async (tx): Promise<{ blocked: string | null }> => {
+        // BLOQUANT 1 (i) + BLOQUANT 2 — LECTURE UNIQUE de la facture cible,
+        // exécutée AVANT toute écriture et faisant foi pour LES DEUX gardes
+        // (ciblage `invoiced`/`paid` ET garde corrélée de réouverture).
+        // Elle est SANS `FOR UPDATE` : elle n'acquiert AUCUN verrou de ligne,
+        // donc aucun verrou n'est réordonné par rapport à l'écriture initiale
+        // (le premier verrou acquis par cette transaction reste l'`UPDATE
+        // clinical_sessions`) — ordre des verrous Z-19 → Z-26 inchangé.
+        //
+        // `ne(cancelled)` + `ORDER BY createdAt DESC` : depuis l'annulation
+        // puis la re-clôture, une séance peut légitimement porter plusieurs
+        // factures (l'annulée + l'active). Ce `LIMIT 1` doit viser
+        // DÉTERMINISTEMENT la facture NON ANNULÉE ; sans le filtre, il
+        // retombait très probablement sur l'ancienne facture annulée et le
+        // refus « Facture annulée » partait alors sur une facture ACTIVE →
+        // « Marquer facturée » / « Marquer payée » refusés à tort.
+        const [activeInvoice] = await tx
           .select({ id: invoices.id })
           .from(invoices)
           .where(
             and(
               eq(invoices.sessionId, sessionId),
               eq(invoices.clinicId, clinicId),
+              ne(invoices.status, "cancelled"),
             ),
           )
+          .orderBy(desc(invoices.createdAt))
           .limit(1);
 
-        if (invoice) {
-          invoiceId = invoice.id;
+        if (isReopen) {
+          // BLOQUANT 2 — garde CORRÉLÉE (remplace le refus catégorique de la
+          // cible `in_progress`) : la réouverture n'est admise que si TOUTES
+          // les factures liées de la séance sont `cancelled`, ce qui est
+          // exactement l'absence de facture active constatée ci-dessus.
+          // La justification anti-double-facture est conservée INTEGRALEMENT :
+          // une séance dont la facture est ACTIVE n'est jamais régressée vers
+          // `in_progress`, donc jamais re-clôturable en double.
+          if (activeInvoice) {
+            return {
+              blocked:
+                "Séance facturée : la réouverture n'est autorisée que si toutes ses factures liées sont annulées",
+            };
+          }
+        } else if (!activeInvoice) {
+          // BLOQUANT 1 (i) — refus UNIQUEMENT quand AUCUNE facture active
+          // n'existe. `cancelled` est TERMINAL dans
+          // `INVOICE_STATUS_TRANSITIONS` (Z-31) : sans facture cible, on ne
+          // réécrit RIEN dans ce cas (sinon l'UPDATE de facture ci-dessous
+          // RÉSSUSCITERAIT un document annulé en `sent`/`paid`).
+          return {
+            blocked:
+              "Facture annulée : la séance ne peut plus être facturée ni marquée payée",
+          };
+        }
+
+        // Aucune écriture tant que les gardes ci-dessus n'ont pas été franchies.
+        await tx
+          .update(clinicalSessions)
+          .set({ status })
+          .where(eq(clinicalSessions.id, sessionId));
+
+        // Inatteignable pour `in_progress` (la garde corrélée ci-dessus
+        // garantit `activeInvoice === null` dans cette branche).
+        if (activeInvoice) {
+          invoiceId = activeInvoice.id;
           await tx
             .update(invoices)
-            .set({ status: status === "invoiced" ? "sent" : "paid" })
-            .where(eq(invoices.id, invoice.id));
+            .set({ status: target === "invoiced" ? "sent" : "paid" })
+            .where(eq(invoices.id, activeInvoice.id));
         }
-      }
-    });
+
+        return { blocked: null };
+      },
+    );
+
+    if (txResult.blocked) {
+      return { error: txResult.blocked };
+    }
 
     await logAction({
       clinicId,
