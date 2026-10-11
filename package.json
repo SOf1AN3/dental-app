@@ -9,6 +9,7 @@
     "lint": "eslint",
     "seed": "npx tsx seed.ts",
     "typecheck": "tsc --noEmit",
+    "db:dev": "npx tsx scripts/dev-db.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "npx tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
@@ -46,6 +47,8 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@tailwindcss/postcss": "^4",
     "@types/fhir": "^0.0.44",
     "@types/node": "^20",
