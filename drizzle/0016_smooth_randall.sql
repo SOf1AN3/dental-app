@@ -1,28 +1,31 @@
 --
 -- Migration 0016 — changements de schéma en attente + normalisation des données
 --
--- ⚠️ Cette migration est AUTO-RÉPARATRICE.
+-- ⚠️ Cette migration est AUTO-RÉPARATRICE et IDEMPOTENTE.
 --
--- Elle pose des contraintes (index uniques, CHECK) qui ÉCHOUEAIENT si des
--- données préexistantes les violent. Or deux des bugs corrigés ont produit
--- exactement de telles données en production :
---   - Z-49 : le `catch {}` muet de la séquence réémisait PRO-YYYY-00001 dès
---     que la ligne de séquence était absente → commandes en double
+-- AUTO-RÉPARATRICE : elle pose des contraintes (index uniques, CHECK) qui
+-- ÉCHOUEAIENT si des données préexistantes les violent. Or trois bugs
+-- corrigés ont produit exactement de telles données :
+--   - Z-49 : le `catch {}` muet de la séquence réémisait PRO-YYYY-00001
 --   - Z-61 : `currentQty` acceptait une valeur négative saisie par le client
 --   - Z-62 : les alertes de stock n'étaient JAMAIS résolues → doublons actifs
---
 -- Chaque bloc de normalisation précède donc la contrainte qu'il rend
--- applicable. Idempotent : rejouer la migration ne fait rien de plus.
+-- applicable.
 --
--- En cas de doute, exécuter d'abord `npm run db:preflight` (lecture seule).
+-- IDEMPOTENTE : chaque DDL tolère une exécution répétée. C'est nécessaire
+-- car deux colonnes (`clinic.default_tax_rate`, `clinic.document_branding`)
+-- ont été appliquées MANUELLEMENT en production via la console, sans passer
+-- par le journal — elles y existent déjà. Un ADD COLUMN nu y échouerait.
+--
+-- En cas de doute : `npm run db:preflight` (lecture seule).
 --
 
 --> statement-breakpoint
 -- 1. Révocation des sessions JWT (Z-10) — aucun impact sur les données.
-ALTER TABLE "user" ADD COLUMN "token_version" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "token_version" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 --> statement-breakpoint
 -- 2. Ordre de saisie des items d'ordonnance (Z-45) — colonne nullable.
-ALTER TABLE "prescription_item" ADD COLUMN "order_index" integer;--> statement-breakpoint
+ALTER TABLE "prescription_item" ADD COLUMN IF NOT EXISTS "order_index" integer;--> statement-breakpoint
 --> statement-breakpoint
 -- 3. Marquage des memberships directs comme acceptés (Z-3 / SEC-B02).
 --
@@ -37,7 +40,7 @@ WHERE "invited_at" IS NULL AND "joined_at" IS NULL;--> statement-breakpoint
 -- 4. Résolution des alertes de stock en doublon (Z-62) — AVANT l'index unique.
 --
 -- Le contrôle SELECT-then-INSERT n'était pas atomique : un même article peut
--- avoir plusieurs alertes actives. On garde la plus récente, les autres
+-- avoir plusieurs alertes actives. On garde la plus récente ; les autres
 -- passent en résolues — elles ne doivent pas être perdues, mais bloquer
 -- l'index.
 UPDATE "stock_alert" sa
@@ -45,7 +48,7 @@ SET "status" = 'resolved', "resolved_at" = now()
 FROM (
   SELECT "id", ROW_NUMBER() OVER (
     PARTITION BY "item_id"
-    ORDER BY "created_at" DESC, "id" DESC
+    ORDER BY "triggered_at" DESC, "id" DESC
   ) AS "rn"
   FROM "stock_alert"
   WHERE "status" = 'active'
@@ -72,21 +75,36 @@ WHERE po."id" = ranked."id" AND ranked."rn" > 1;--> statement-breakpoint
 --
 -- Une quantité négative est impossible métier : elle signifie que le registre
 -- des mouvements et le stock courant divergent. On renvoie à zéro plutôt que
--- de supprimer l'article. Vérifier ensuite la cohérence avec `stock_transaction`.
+-- de supprimer l'article.
 UPDATE "stock_item"
 SET "current_qty" = 0
 WHERE "current_qty" < 0;--> statement-breakpoint
 --> statement-breakpoint
 -- 7. Contraintes.
-CREATE UNIQUE INDEX "uq_stock_alerts_item_id_active" ON "stock_alert" USING btree ("item_id") WHERE status = 'active';--> statement-breakpoint
-CREATE UNIQUE INDEX "uq_prosthesis_orders_clinic_order_number" ON "prosthesis_order" USING btree ("clinic_id","order_number");--> statement-breakpoint
-ALTER TABLE "stock_item" ADD CONSTRAINT "ck_stock_items_current_qty_non_negative" CHECK ("stock_item"."current_qty" >= 0);--> statement-breakpoint
+--
+-- `CREATE INDEX` tolère IF NOT EXISTS. `ALTER TABLE ... ADD CONSTRAINT` NON —
+-- PostgreSQL n'offre pas cette syntaxe, d'où le bloc DO conditionnel.
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_stock_alerts_item_id_active" ON "stock_alert" USING btree ("item_id") WHERE status = 'active';--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_prosthesis_orders_clinic_order_number" ON "prosthesis_order" USING btree ("clinic_id","order_number");--> statement-breakpoint
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ck_stock_items_current_qty_non_negative'
+  ) THEN
+    ALTER TABLE "stock_item"
+      ADD CONSTRAINT "ck_stock_items_current_qty_non_negative"
+      CHECK ("stock_item"."current_qty" >= 0);
+  END IF;
+END $$;--> statement-breakpoint
 --> statement-breakpoint
 -- 8. Colonnes de la clinique — orphelines du journal (voir commit a5038d6).
 --
 -- Ces deux migrations manuelles existaient dans drizzle/ mais n'étaient pas
 -- dans meta/_journal.json : le runner s'en basant sur le journal, elles
--- n'avaient JAMAIS été appliquées, alors que le snapshot Drizzle les
--- jugeait migrées et que le code les référence à 35 endroits.
-ALTER TABLE "clinic" ADD COLUMN "default_tax_rate" integer DEFAULT 19 NOT NULL;--> statement-breakpoint
-ALTER TABLE "clinic" ADD COLUMN "document_branding" jsonb;
+-- n'avaient JAMAIS été appliquées — alors que le snapshot Drizzle les jugeait
+-- migrées et que le code les référence à 35 endroits.
+--
+-- ⚠️ Elles EXISTENT DÉJÀ en production (appliquées manuellement via la
+-- console). IF NOT EXISTS est donc indispensable ici.
+ALTER TABLE "clinic" ADD COLUMN IF NOT EXISTS "default_tax_rate" integer DEFAULT 19 NOT NULL;--> statement-breakpoint
+ALTER TABLE "clinic" ADD COLUMN IF NOT EXISTS "document_branding" jsonb;
