@@ -27,19 +27,69 @@
  * de production, qui reste un PostgreSQL managé.
  */
 
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { nodeFileSystem } from "@electric-sql/pglite/nodefs";
+import { NodeFS } from "@electric-sql/pglite/nodefs";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 
 const PORT = Number(process.env.DEV_DB_PORT ?? 5432);
 const HOST = process.env.DEV_DB_HOST ?? "127.0.0.1";
 const DATA_DIR = process.env.DEV_DB_DATA_DIR ?? "pgdata";
 
+/**
+ * PostgreSQL — et donc PGlite — refuse de démarrer sur un répertoire contenant
+ * encore un `postmaster.pid` : le fichier signifie qu'un serveur utilise déjà
+ * ce catalogue. Le problème est qu'il **survit** à un arrêt brutal (fermeture
+ * de terminal, `taskkill`, crash), et le dev se retrouve bloqué avec un
+ * « Aborted() » cryptique au démarrage, sans qu'aucun serveur ne tourne.
+ *
+ * On ne supprime donc ce verrou que s'il est **démenti** : ni processus
+ * détenteur, ni écoute sur le port. Sinon, on laisse tomber plutôt que de
+ * risquer d'ouvrir le même catalogue depuis deux serveurs.
+ */
+function clearStalePidLock(dataDir: string): void {
+  const pidFile = join(dataDir, "postmaster.pid");
+  if (!existsSync(pidFile)) return;
+
+  const rawPid = readFileSync(pidFile, "utf8").split("\n")[0]?.trim();
+  const pid = Number(rawPid);
+
+  // `process.kill(pid, 0)` n'envoie aucun signal : il sonde l'existence du
+  // processus. Il LÈVE (ESRCH) si le pid n'existe pas, et réussit sinon.
+  // Le port est aussi vérifié : un serveur démarré avec un autre répertoire
+  // mais sur le même port serait un conflit réel.
+  let holderAlive = false;
+  if (Number.isInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0);
+      holderAlive = true;
+    } catch {
+      holderAlive = false;
+    }
+  }
+
+  if (holderAlive) {
+    throw new Error(
+      `La base dans ./${dataDir} est déjà utilisée par le processus ${pid}. ` +
+        `Arrête-le avant de relancer (ou changez DEV_DB_DATA_DIR).`,
+    );
+  }
+
+  console.warn(
+    `[dev-db] Verrou orphelin detecte (postmaster.pid, pid ${rawPid}, ` +
+      `processus absent) — suppression.`,
+  );
+  rmSync(pidFile, { force: true });
+}
+
 async function main() {
   console.log(`[dev-db] Ouverture de la base locale dans ./${DATA_DIR} …`);
 
+  clearStalePidLock(DATA_DIR);
+
   const db = new PGlite(DATA_DIR, {
-    fs: nodeFileSystem,
+    fs: new NodeFS(DATA_DIR),
     // Le projet n'utilise aucune extension aujourd'hui. `btree_gist` est
     // disponible si une contrainte EXCLUDE USING gist est un jour nécessaire
     // (Z-63, reportée) : il faudra alors l'activer explicitement ici.
