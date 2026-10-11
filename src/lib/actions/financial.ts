@@ -35,16 +35,71 @@ import { requireOwnedPatient, requirePatientOwnership } from "@/lib/guards";
  * monetary amounts are recomputed server-side via billing-math (FACT-5).
  * The client's hidden total/subtotal inputs are never trusted.
  */
-const lineItemSchema = z.object({
-  description: z.string().trim().min(1, "Description requise"),
-  quantity: z.coerce
-    .number()
-    .int("La quantité doit être un entier")
-    .positive("La quantité doit être positive"),
-  unitPrice: z.coerce.number().min(0, "Le prix unitaire doit être positif"),
-  taxRate: z.coerce.number().int().min(0).max(100).catch(0),
-  discount: z.coerce.number().min(0).catch(0),
-});
+
+/**
+ * Z-24 — plafond des montants monétaires : les colonnes concernées sont des
+ * `numeric(12, 2)` (10 chiffres entiers + 2 décimales, migration 0011), donc
+ * `99 999 999 999,99` DZD est la plus grande valeur stockable. Au-delà,
+ * PostgreSQL rejette l'INSERT et l'utilisateur n'obtient qu'une erreur
+ * générique : on échoue donc ici, avec un message de champ.
+ */
+const MAX_AMOUNT = 99_999_999_999.99;
+
+/**
+ * Z-24 — un montant doit être FINI (rejette `NaN` / `Infinity`, que
+ * `z.coerce.number()` ne bloque pas toujours : `z.number()` ne vérifie pas
+ * `Infinity`) et n'avoir au plus 2 décimales. Sans cette borne, `2.135`
+ * était arrondi à `2.14` par `round2()` côté JS alors que PostgreSQL
+ * arrondissait `numeric(12, 2)` selon sa propre règle : le total du document
+ * divergeait de la somme des lignes imprimées (199,99 vs 200,00).
+ * `Number(value.toFixed(2)) === value` est exact pour les valeurs ≤ 2
+ * décimales (le bruit binaire reste ~1e-15, très loin du palier 0,005).
+ */
+function isMoney(value: number): boolean {
+  return Number.isFinite(value) && Number(value.toFixed(2)) === value;
+}
+
+const lineItemSchema = z
+  .object({
+    description: z.string().trim().min(1, "Description requise"),
+    quantity: z.coerce
+      .number()
+      .int("La quantité doit être un entier")
+      .positive("La quantité doit être positive"),
+    unitPrice: z.coerce.number().min(0, "Le prix unitaire doit être positif"),
+    taxRate: z.coerce.number().int().min(0).max(100).catch(0),
+    discount: z.coerce.number().min(0).catch(0),
+  })
+  // Z-24 — bornes MONÉTAIRES posées au niveau de l'OBJET (`.refine`) et non
+  // champ par champ, pour deux raisons :
+  //  1. `discount` porte déjà `.catch(0)` : un `.max()` sur le champ serait
+  //     avalé par le catch (remise ramenée silencieusement à 0) au lieu de
+  //     produire une erreur explicite ;
+  //  2. le plafond de la remise dépend des AUTRES champs de la ligne : on le
+  //     recalcule avec `lineTotal()`, l'autorité de calcul du projet, ce qui
+  //     garantit `lineTotal(item) >= 0` — donc, par sommation dans
+  //     `docTotals()`, un total de document jamais négatif (et donc une
+  //     facture qui peut encore devenir `paid` automatiquement).
+  .refine((item) => isMoney(item.unitPrice), {
+    message: "Le prix unitaire ne peut pas avoir plus de 2 décimales",
+    path: ["unitPrice"],
+  })
+  .refine((item) => item.unitPrice <= MAX_AMOUNT, {
+    message: "Le prix unitaire dépasse le montant maximal stockable",
+    path: ["unitPrice"],
+  })
+  .refine((item) => isMoney(item.discount), {
+    message: "La remise ne peut pas avoir plus de 2 décimales",
+    path: ["discount"],
+  })
+  .refine((item) => item.discount <= MAX_AMOUNT, {
+    message: "La remise dépasse le montant maximal stockable",
+    path: ["discount"],
+  })
+  .refine((item) => lineTotal(item) >= 0, {
+    message: "La remise dépasse le montant de la ligne",
+    path: ["discount"],
+  });
 
 const lineItemsSchema = z.array(lineItemSchema).min(1, "Ajoutez au moins une ligne");
 
@@ -126,12 +181,25 @@ export async function getInvoicesSummary() {
   await requireClinicAccessOrThrow(clinicId);
 
   try {
+    // Z-25 — encours réel :
+    //  • `totalAmount` exclut les factures `cancelled` : une facture annulée
+    //    n'est plus de l'argent attendu (son montant gonflait artificiellement
+    //    la somme affichée) ;
+    //  • `pendingAmount` n'additionne PLUS le montant intégral des factures
+    //    ouvertes : les paiements déjà encaissés sont déduits facture par
+    //    facture via une sous-requête corrélée. Une facture de 10 000 DZD
+    //    réglée à 9 999 DZD n'encourt plus que 1 DZD, et non 10 000 DZD ;
+    //  • `GREATEST(…, 0)` borne l'encours à zéro : sur une facture
+    //    historiquement sur-payée (ou payée manuellement puis encaissée), la
+    //    soustraction ne produirait jamais un encours négatif.
+    // On se fie aux `payment` (et non au statut) : le statut est recréable à la
+    // main (`updateInvoiceStatus` « Marquer payée » ne crée aucun paiement).
     const rows = await db
       .select({
         totalCount: count(),
-        totalAmount: sql<number>`COALESCE(SUM(${invoices.total}), 0)::float8`,
+        totalAmount: sql<number>`COALESCE(SUM(CASE WHEN ${invoices.status} <> 'cancelled' THEN ${invoices.total} ELSE 0 END), 0)::float8`,
         pendingAmount:
-          sql<number>`COALESCE(SUM(CASE WHEN ${invoices.status} IN ('draft', 'sent', 'partially_paid', 'overdue') THEN ${invoices.total} ELSE 0 END), 0)::float8`,
+          sql<number>`COALESCE(SUM(CASE WHEN ${invoices.status} IN ('draft', 'sent', 'partially_paid', 'overdue') THEN GREATEST(${invoices.total} - (SELECT COALESCE(SUM(p.amount), 0) FROM payment p WHERE p.invoice_id = ${invoices.id}), 0) ELSE 0 END), 0)::float8`,
       })
       .from(invoices)
       .where(eq(invoices.clinicId, clinicId));
@@ -864,7 +932,26 @@ export async function recordPayment(
   }
 
   const data = validated.data;
-  const amount = Math.round(parseFloat(data.amount) * 100) / 100;
+
+  // Z-24 — garde explicite contre `NaN` : `parseFloat("abc") = NaN` et
+  // `NaN <= 0 === false`, ce qui laissait la validation passer pour ensuite
+  // échouer côté PostgreSQL avec un message générique. On convertit la chaîne
+  // ENTIÈRE avec `Number()` (« 12abc » → `NaN`, contrairement à `parseFloat`
+  // qui s'arrête au premier caractère non numérique), on rejette `NaN`/
+  // `Infinity`, puis on limite à 2 décimales pour que `round2()` (JS) et
+  // `numeric(12, 2)` (PostgreSQL) arrondissent la même valeur.
+  const parsedAmount = Number(data.amount.trim());
+  if (!Number.isFinite(parsedAmount)) {
+    return { error: { amount: ["Montant invalide"] } };
+  }
+  if (Number(parsedAmount.toFixed(2)) !== parsedAmount) {
+    return { error: { amount: ["Le montant ne peut pas avoir plus de 2 décimales"] } };
+  }
+  if (parsedAmount > MAX_AMOUNT) {
+    return { error: { amount: ["Montant trop élevé"] } };
+  }
+
+  const amount = Math.round(parsedAmount * 100) / 100;
 
   if (amount <= 0) {
     return { error: { amount: ["Le montant doit être supérieur à zéro"] } };
@@ -877,7 +964,12 @@ export async function recordPayment(
   try {
     if (invoiceId) {
       const [existing] = await db
-        .select({ id: invoices.id, status: invoices.status })
+        .select({
+          id: invoices.id,
+          status: invoices.status,
+          total: invoices.total,
+          patientId: invoices.patientId,
+        })
         .from(invoices)
         .where(and(eq(invoices.id, invoiceId), eq(invoices.clinicId, clinicId)))
         .limit(1);
@@ -885,8 +977,39 @@ export async function recordPayment(
       if (!existing) {
         return { error: { general: ["Facture introuvable pour cette clinique"] } };
       }
+      // Z-26 — cohérence facture ⇄ patient : `patientId` est un ARGUMENT de la
+      // Server Action, sans lien vérifié avec la facture. Sans ce garde, le
+      // paiement était rattaché au mauvais patient (dette soldée sur le bon
+      // dossier, crédit placé sur un autre).
+      if (existing.patientId !== patientId) {
+        return { error: { general: ["Cette facture n'appartient pas à ce patient"] } };
+      }
       if (existing.status === "cancelled") {
         return { error: { general: ["Impossible d'enregistrer un paiement sur une facture annulée"] } };
+      }
+      // Z-26 — une facture déjà `paid` ne peut plus recevoir d'encaissement :
+      // un « Marquer payée » manuel ne crée AUCUN paiement, donc 1 DZD de plus
+      // aurait fait régresser le statut en `partially_paid`.
+      if (existing.status === "paid") {
+        return { error: { general: ["Impossible d'enregistrer un paiement sur une facture déjà payée"] } };
+      }
+
+      // Z-24 — plafond du montant au SOLDE dû (et non au total) : c'est ce qui
+      // reste réellement encaissable. Un plafond au total laisserait dépasser
+      // dès qu'un paiement partiel existe, et `getUnpaidInvoicesForPatient`
+      // afficherait alors `total − paidAmount` négatif. Ce calcul n'est qu'un
+      // pré-calcul pour un message d'erreur précoce et précis : le garde-fou
+      // fiable est la re-vérification SOUS VERROU plus bas, un encaissement
+      // concurrent engagé ici ne étant pas encore visible.
+      const [paidRow] = await db
+        .select({ paid: sql<number>`COALESCE(SUM(${payments.amount}), 0)::float8` })
+        .from(payments)
+        .where(eq(payments.invoiceId, existing.id));
+      const dueAmount = existing.total - (paidRow?.paid ?? 0);
+      if (amount > dueAmount) {
+        return {
+          error: { amount: [`Le montant dépasse le solde dû (${dueAmount.toFixed(2)} DZD)`] },
+        };
       }
     }
 
@@ -918,8 +1041,35 @@ export async function recordPayment(
         if (!lockedInvoice) {
           throw new Error("Facture introuvable pour cette clinique");
         }
+        // Z-26 : cohérence facture ⇄ patient revérifiée sous verrou.
+        if (lockedInvoice.patientId !== patientId) {
+          throw new Error("Cette facture n'appartient pas à ce patient");
+        }
         if (lockedInvoice.status === "cancelled") {
           throw new Error("Impossible d'enregistrer un paiement sur une facture annulée");
+        }
+        // Z-26 : statut relu sous `FOR UPDATE` — une facture passée `paid`
+        // entre-temps (paiement concurrent committé, ou « Marquer payée »
+        // manuel) refuse tout nouvel encaissement au lieu de régresser en
+        // `partially_paid`.
+        if (lockedInvoice.status === "paid") {
+          throw new Error("Impossible d'enregistrer un paiement sur une facture déjà payée");
+        }
+
+        // Z-24 : plafond au SOLDE, revérifié SOUS VERROU et AVANT l'INSERT du
+        // paiement. Le `FOR UPDATE` ci-dessus sérialise les encaissements
+        // concurrents sur cette facture : deux paiements qui, pris isolément,
+        // tiendraient chacun dans le solde ne peuvent plus le dépasser
+        // ensemble, le second rejeté sur la base du cumul engagé par le
+        // premier. Cette revérification n'affecte pas l'ordre des verrous Z-19
+        // à Z-23 (elle s'exécute après le verrouillage, avant l'écriture).
+        const [prePaid] = await tx
+          .select({ paid: sql<number>`COALESCE(SUM(${payments.amount}), 0)::float8` })
+          .from(payments)
+          .where(eq(payments.invoiceId, lockedInvoice.id));
+        const dueAmount = lockedInvoice.total - (prePaid?.paid ?? 0);
+        if (amount > dueAmount) {
+          throw new Error("Le montant dépasse le solde dû");
         }
       }
 
