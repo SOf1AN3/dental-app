@@ -6,15 +6,6 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [],
   },
-  // Allow serving files from /uploads
-  async rewrites() {
-    return [
-      {
-        source: "/uploads/:path*",
-        destination: "/uploads/:path*",
-      },
-    ];
-  },
   async headers() {
     return [
       {

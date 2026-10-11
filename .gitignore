@@ -57,3 +57,6 @@ next-env.d.ts
 # tool-generated workspace dirs
 .opencode/
 .playwright-mcp/
+
+# données de santé (fichiers uploadés) — NE JAMAIS les committer
+/uploads/

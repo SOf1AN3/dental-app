@@ -35,10 +35,23 @@ export async function resolveStoredUrl(
   }
 }
 
+/**
+ * Racine du stockage local, partagée avec la route protégée
+ * `src/app/api/files/[...key]/route.ts` (qui doit lire exactement les mêmes
+ * fichiers que ceux renvoyés par `LocalStorageAdapter.getSignedUrl`).
+ *
+ * Chemin à la racine du projet, volontairement HORS de `public/` : Next.js sert
+ * `public/` statiquement et sans session, ce qui rend toute règle de routage
+ * contournable (ex. `/uploads%2F<key>`). Ces fichiers étant des données de
+ * santé, ils ne peuvent être lus que via `/api/files` (session + clinique +
+ * anti path traversal).
+ */
+export const LOCAL_UPLOADS_BASE_PATH = "uploads";
+
 export class LocalStorageAdapter implements StorageAdapter {
   private basePath: string;
 
-  constructor(basePath: string = "public/uploads") {
+  constructor(basePath: string = LOCAL_UPLOADS_BASE_PATH) {
     this.basePath = basePath;
   }
 
@@ -71,7 +84,10 @@ export class LocalStorageAdapter implements StorageAdapter {
     } catch {
       throw new Error("Fichier introuvable");
     }
-    return `/uploads/${key}`;
+    // Route protégée (session + clinique + anti path traversal) au lieu du
+    // chemin statique `/uploads/<key>` servi depuis `public/` sans contrôle.
+    const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+    return `/api/files/${encodedKey}`;
   }
 
   async delete(key: string): Promise<void> {
