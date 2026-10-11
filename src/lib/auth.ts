@@ -70,18 +70,45 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        const emailVerified = (user as { emailVerified?: Date | null }).emailVerified;
+        // Connexion : on fige la version de jeton du compte dans le JWT.
+        // `user` provient de `authorize` (ligne complète moins passwordHash).
+        const { emailVerified, tokenVersion } = user as {
+          emailVerified?: Date | null;
+          tokenVersion?: number;
+        };
         token.id = user.id;
         token.emailVerified = emailVerified ? emailVerified.toISOString() : null;
-      } else if (token.id && !token.emailVerified) {
-        const dbUser = await db.query.users.findFirst({
-          where: (users, { eq }) => eq(users.id, token.id as string),
-          columns: { emailVerified: true },
-        });
-        token.emailVerified = dbUser?.emailVerified
-          ? dbUser.emailVerified.toISOString()
-          : null;
+        token.tokenVersion = typeof tokenVersion === "number" ? tokenVersion : 0;
+        return token;
       }
+
+      if (!token.id) return token;
+
+      // Compatibilité : un jeton émis avant l'ajout de la colonne n'a pas de
+      // `tokenVersion` ; il est traité comme la version 0 (valeur par défaut en
+      // base), donc il continue de fonctionner — pas de déconnexion massive au
+      // déploiement — mais il sera révoqué au prochain changement de mot de passe.
+      const tokenVersion =
+        typeof token.tokenVersion === "number" ? token.tokenVersion : 0;
+
+      // Une seule requête, réutilisée à la fois pour rafraîchir `emailVerified`
+      // (comportement historique) et pour re-vérifier la version de jeton.
+      const dbUser = await db.query.users.findFirst({
+        where: (users, { eq }) => eq(users.id, token.id as string),
+        columns: { emailVerified: true, tokenVersion: true },
+      });
+
+      // Compte supprimé, ou mot de passe changé depuis l'émission du jeton
+      // (changePassword / resetPassword incrémentent tokenVersion) : on rejette
+      // la session. NextAuth v5 typant `jwt` en `Awaitable<null | JWT>`,
+      // retourner `null` invalide le jeton et la session devient non authentifiée.
+      if (!dbUser) return null;
+      if (tokenVersion !== dbUser.tokenVersion) return null;
+
+      token.emailVerified = dbUser.emailVerified
+        ? dbUser.emailVerified.toISOString()
+        : null;
+      token.tokenVersion = dbUser.tokenVersion;
       return token;
     },
     async session({ session, token }) {

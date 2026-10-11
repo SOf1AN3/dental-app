@@ -8,6 +8,11 @@ export const users = pgTable("user", {
   emailVerified: timestamp("emailVerified", { mode: "date" }),
   image: text("image"),
   passwordHash: text("password_hash"),
+  // Version de session du jeton : incrémentée à chaque changement de mot de passe
+  // (changePassword / resetPassword). Le callback `jwt` de src/lib/auth.ts compare
+  // cette valeur à celle portée par le jeton et rejette la session si elles diffèrent,
+  // ce qui révoque toutes les sessions existantes (strategy JWT, pas de session serveur).
+  tokenVersion: integer("token_version").notNull().default(0),
 });
 
 export const accounts = pgTable("account", {

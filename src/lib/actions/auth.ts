@@ -18,7 +18,7 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "@/lib/email";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
 
@@ -125,7 +125,11 @@ export async function resetPassword(
 
   await db
     .update(users)
-    .set({ passwordHash: await hashPassword(password) })
+    .set({
+      passwordHash: await hashPassword(password),
+      // Invalide toutes les sessions JWT existantes (vérifié dans src/lib/auth.ts).
+      tokenVersion: sql`${users.tokenVersion} + 1`,
+    })
     .where(eq(users.id, consumed.userId));
 
   return { success: true };
@@ -206,7 +210,11 @@ export async function changePassword(
 
   await db
     .update(users)
-    .set({ passwordHash: await hashPassword(newPassword) })
+    .set({
+      passwordHash: await hashPassword(newPassword),
+      // Invalide toutes les sessions JWT existantes (vérifié dans src/lib/auth.ts).
+      tokenVersion: sql`${users.tokenVersion} + 1`,
+    })
     .where(eq(users.id, user.id));
 
   await logAction({
