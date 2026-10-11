@@ -28,6 +28,11 @@ describe("sessionItemTotal", () => {
     expect(sessionItemTotal(100, 1, 150)).toBe(0);
   });
 
+  it("floors the total at 0 when the discount exactly equals the line amount (frontière)", () => {
+    // Frontière exacte de Z-34 : 100 × 1 − 100 = 0 → plafonné à 0 (pas de −0).
+    expect(sessionItemTotal(100, 1, 100)).toBe(0);
+  });
+
   it("keeps a positive remainder when the discount is just below the line amount", () => {
     expect(sessionItemTotal(100, 1, 99.5)).toBe(0.5);
   });
@@ -75,6 +80,15 @@ describe("sessionSubtotal", () => {
       ]),
     ).toBe(500);
   });
+
+  it("returns 0 when every line is over-discounted (subtotal never negative)", () => {
+    expect(
+      sessionSubtotal([
+        { fee: 100, quantity: 1, discount: 250 }, // floored at 0
+        { fee: 50, quantity: 2, discount: 100 }, // floored at 0
+      ]),
+    ).toBe(0);
+  });
 });
 
 describe("session status transitions", () => {
@@ -104,6 +118,13 @@ describe("session status transitions", () => {
     expect(isSessionStatusTransitionAllowed("invoiced", "paid")).toBe(true);
   });
 
+  it("allows reopening completed | invoiced → in_progress (after invoice cancellation)", () => {
+    // BLOQUANT 2 : une facture annulée doit pouvoir laisser la séance repartir
+    // en in_progress pour re-clôture et nouveau numéro.
+    expect(isSessionStatusTransitionAllowed("completed", "in_progress")).toBe(true);
+    expect(isSessionStatusTransitionAllowed("invoiced", "in_progress")).toBe(true);
+  });
+
   it("allows completed → paid (direct settlement, e.g. cash at closing)", () => {
     expect(isSessionStatusTransitionAllowed("completed", "paid")).toBe(true);
   });
@@ -120,6 +141,13 @@ describe("session status transitions", () => {
   it("does not allow any transition from a terminal state (paid)", () => {
     expect(isSessionStatusTransitionAllowed("paid", "completed")).toBe(false);
     expect(isSessionStatusTransitionAllowed("paid", "invoiced")).toBe(false);
+  });
+
+  it("does not allow reopening a paid session (paid → in_progress is terminal)", () => {
+    // Une séance réglée ne repart jamais en in_progress, même après annulation
+    // de la facture : le rééquilibrage se fait côté facture, pas côté séance.
+    expect(isSessionStatusTransitionAllowed("paid", "in_progress")).toBe(false);
+    expect(isSessionStatusTransitionAllowed("paid", "pending")).toBe(false);
   });
 
   it("returns false for unknown statuses", () => {
