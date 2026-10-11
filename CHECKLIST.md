@@ -79,13 +79,13 @@
 - [ ] **Z-63** contrainte d'exclusion sur les plages de RDV *(reportée — nécessite `btree_gist` ou index unique partiel)*
 
 ## Lot 6 — Rapports & notifications
-- [ ] Z-64 `getMonthlyTrends` sans permission
-- [ ] Z-65 définitions de « revenu » incohérentes
-- [ ] Z-66 fuseau horaire des rapports
-- [ ] Z-67 taux d'occupation
-- [ ] Z-68 `userId` sur les notifications lues
-- [ ] Z-69 cible de `createNotification` validée
-- [ ] Z-70 `requireAuth` sur les notifications
+- [x] Z-64 `getMonthlyTrends` sans permission
+- [x] Z-65 définitions de « revenu » incohérentes
+- [x] Z-66 fuseau horaire des rapports
+- [x] Z-67 taux d'occupation
+- [ ] **Z-68** `userId` sur les notifications lues *(reporté — exige une migration Drizzle)*
+- [x] Z-69 cible de `createNotification` validée
+- [x] Z-70 `requireAuth` sur les notifications
 
 ## Lot 7 — Fiabilité transverse
 - [ ] Z-71 erreurs DB avalées (`[]` / `null` / succès)
@@ -117,7 +117,7 @@
 ---
 
 ## ⬜ En cours
-**Lot 6** — Z-64 à Z-70 (rapports & notifications).
+**Lot 7** — Z-71 à Z-80 (fiabilité transverse).
 
 ## ⚠️ À trancher par le client (bloquent certains lots)
 - **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
