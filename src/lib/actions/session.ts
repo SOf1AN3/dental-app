@@ -581,11 +581,30 @@ export async function closeSession(
     const now = new Date();
     const year = now.getFullYear();
 
-    await db.transaction(async (tx) => {
-      await tx
+    // Z-21 : la garde `status !== "in_progress"` ci-dessus est lue HORS
+    // transaction — deux clôtures concurrentes passent toutes les deux la garde
+    // JS. Le verrou retenu : la condition `status = 'in_progress'` est REJOUÉE
+    // dans le `WHERE` de l'UPDATE, et le décompte de lignes affectées
+    // (`RETURNING`) décide qui poursuit AVANT toute écriture de facture,
+    // de séquence ou d'audit. Le second appel sort immédiatement du callback :
+    // sa transaction ne contient alors AUCUNE écriture (l'UPDATE a affecté 0
+    // ligne), donc rien à annuler → une seule facture par séance, y compris
+    // sous concurrence. (Le verrou DB définitif serait
+    // `UNIQUE (invoice.session_id)` — hors périmètre de cette tâche.)
+    const closed = await db.transaction(async (tx): Promise<boolean> => {
+      const [claimed] = await tx
         .update(clinicalSessions)
         .set({ status: "completed", completedAt: new Date() })
-        .where(eq(clinicalSessions.id, sessionId));
+        .where(
+          and(
+            eq(clinicalSessions.id, sessionId),
+            eq(clinicalSessions.clinicId, clinicId),
+            eq(clinicalSessions.status, "in_progress"),
+          ),
+        )
+        .returning({ id: clinicalSessions.id });
+
+      if (!claimed) return false;
 
       // Ensure sequence row exists (ignore if already exists)
       await tx
@@ -704,7 +723,14 @@ export async function closeSession(
           });
         }
       }
+
+      return true;
     });
+
+    if (!closed) {
+      // Course perdue : une autre clôture a verrouillé la séance la première.
+      return { error: "Séance déjà clôturée ou terminée" };
+    }
 
     revalidatePath(`/patients/${session.patientId}/session/${sessionId}`);
     revalidatePath("/billing/invoices");

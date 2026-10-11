@@ -18,6 +18,7 @@ import {
   and,
   desc,
   inArray,
+  isNull,
   sql,
   count,
 } from "drizzle-orm";
@@ -289,48 +290,56 @@ export async function createQuote(
 
   const totals = docTotals(items);
 
+  // Z-20 : le devis, ses lignes et l'audit sont écrits dans UNE transaction.
+  // Sans elle, un échec du second INSERT survenait APRÈS
+  // l'engagement du devis : le `catch` renvoyait « Erreur lors de la création »
+  // alors que le devis existait déjà → devis orphelin sans lignes, ou double
+  // devis après relance du formulaire. Même pattern que `convertQuoteToInvoice`
+  // et `closeSession` (`db.transaction` + `tx.insert`).
   try {
-    const [quote] = await db.insert(quotes).values({
-      clinicId,
-      patientId: data.patientId,
-      number,
-      date: new Date(data.date),
-      validUntil: data.validUntil ? new Date(data.validUntil) : null,
-      status: "draft",
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      discountTotal: totals.discountTotal,
-      total: totals.total,
-      notes: data.notes || null,
-    }).returning();
-
-    if (quote && items.length > 0) {
-      await db.insert(quoteItems).values(
-        items.map((item) => ({
-          quoteId: quote.id,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate,
-          discount: item.discount,
-          total: lineTotal(item),
-        }))
-      );
-    }
-
-    await logAction({
-      clinicId,
-      action: "create",
-      entityType: "quote",
-      entityId: quote.id,
-      after: {
+    await db.transaction(async (tx) => {
+      const [quote] = await tx.insert(quotes).values({
+        clinicId,
         patientId: data.patientId,
         number,
+        date: new Date(data.date),
+        validUntil: data.validUntil ? new Date(data.validUntil) : null,
         status: "draft",
-        ...totals,
+        subtotal: totals.subtotal,
+        taxTotal: totals.taxTotal,
+        discountTotal: totals.discountTotal,
+        total: totals.total,
         notes: data.notes || null,
-        itemCount: items.length,
-      },
+      }).returning();
+
+      if (quote && items.length > 0) {
+        await tx.insert(quoteItems).values(
+          items.map((item) => ({
+            quoteId: quote.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            discount: item.discount,
+            total: lineTotal(item),
+          }))
+        );
+      }
+
+      await logAction({
+        clinicId,
+        action: "create",
+        entityType: "quote",
+        entityId: quote.id,
+        after: {
+          patientId: data.patientId,
+          number,
+          status: "draft",
+          ...totals,
+          notes: data.notes || null,
+          itemCount: items.length,
+        },
+      });
     });
 
     revalidatePath("/billing/quotes");
@@ -383,8 +392,18 @@ export async function updateQuoteStatus(
 /**
  * FACT-1 — Convert an ACCEPTED quote into a draft invoice, atomically:
  * sequence increment, invoice + copied items and the quote↔invoice link all
- * happen inside one transaction. The quote is never mutated twice thanks to
- * the convertedInvoiceId guard re-checked inside the transaction.
+ * happen inside one transaction.
+ *
+ * Double conversion is prevented by two complementary locks (Z-22):
+ * 1. the in-transaction read is a `SELECT … FOR UPDATE`, so a concurrent
+ *    conversion blocks on the quote row and, once the winner commits, reads
+ *    `convertedInvoiceId` already set → "Devis déjà facturé";
+ * 2. the link write is a conditional claim —
+ *    `UPDATE … SET converted_invoice_id = $1 WHERE … AND converted_invoice_id IS NULL`
+ *    — whose affected-row count is checked: 0 rows → throw → the whole
+ *    transaction (invoice + items + sequence) is rolled back.
+ * The JS `convertedInvoiceId` read below is only a fast-path guard; the two
+ * statements above are the actual concurrency control.
  */
 export async function convertQuoteToInvoice(
   quoteId: string,
@@ -419,11 +438,16 @@ export async function convertQuoteToInvoice(
     await requireOwnedPatient(clinicId, quoteCheck.patientId);
 
     const invoiceId = await db.transaction(async (tx) => {
+      // Z-22 : lecture VERROUILLÉE du devis. Une simple lecture laissait un
+      // check-then-act : deux transactions concurrentes lisaient toutes les deux
+      // `convertedInvoiceId = null` et facturaient chacune le devis. `FOR UPDATE`
+      // sérialise les concurrents sur la ligne du devis.
       const [quote] = await tx
         .select()
         .from(quotes)
         .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)))
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!quote) throw new Error("Devis introuvable");
       if (quote.convertedInvoiceId) throw new Error("Devis déjà facturé");
@@ -498,10 +522,26 @@ export async function convertQuoteToInvoice(
         );
       }
 
-      await tx
+      // Z-22 : « claim » conditionnel de la conversion. Sans
+      // `AND converted_invoice_id IS NULL`, la seconde transaction concurrente
+      // écrasait le lien (et sa propre facture restait engagée). Avec la
+      // condition, Postgres réévalue le WHERE contre la version engagée de la
+      // ligne : le second UPDATE affecte 0 ligne → `!claimed` → throw →
+      // rollback de la facture, des lignes et de la séquence. Le décompte de
+      // lignes (`RETURNING`) est donc le garde-fou qui annule la 2e conversion.
+      const [claimed] = await tx
         .update(quotes)
         .set({ convertedInvoiceId: invoice.id })
-        .where(and(eq(quotes.id, quoteId), eq(quotes.clinicId, clinicId)));
+        .where(
+          and(
+            eq(quotes.id, quoteId),
+            eq(quotes.clinicId, clinicId),
+            isNull(quotes.convertedInvoiceId),
+          ),
+        )
+        .returning({ id: quotes.id });
+
+      if (!claimed) throw new Error("Devis déjà facturé");
 
       return invoice.id;
     });
@@ -611,48 +651,56 @@ export async function createInvoice(
 
   const totals = docTotals(items);
 
+  // Z-19 : la facture, ses lignes et l'audit sont écrits dans UNE transaction.
+  // Sans elle, un échec du second INSERT survenait APRÈS
+  // l'engagement de la facture : le `catch` renvoyait « Erreur lors de la
+  // création » alors que la facture existait déjà → facture orpheline sans
+  // lignes, ou double facturation après relance. Même pattern que
+  // `convertQuoteToInvoice` et `closeSession` (`db.transaction` + `tx.insert`).
   try {
-    const [invoice] = await db.insert(invoices).values({
-      clinicId,
-      patientId: data.patientId,
-      number,
-      date: new Date(data.date),
-      dueDate: data.dueDate ? new Date(data.dueDate) : null,
-      status: "draft",
-      subtotal: totals.subtotal,
-      taxTotal: totals.taxTotal,
-      discountTotal: totals.discountTotal,
-      total: totals.total,
-      notes: data.notes || null,
-    }).returning();
-
-    if (invoice && items.length > 0) {
-      await db.insert(invoiceItems).values(
-        items.map((item) => ({
-          invoiceId: invoice.id,
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          taxRate: item.taxRate,
-          discount: item.discount,
-          total: lineTotal(item),
-        }))
-      );
-    }
-
-    await logAction({
-      clinicId,
-      action: "create",
-      entityType: "invoice",
-      entityId: invoice.id,
-      after: {
+    await db.transaction(async (tx) => {
+      const [invoice] = await tx.insert(invoices).values({
+        clinicId,
         patientId: data.patientId,
         number,
+        date: new Date(data.date),
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
         status: "draft",
-        ...totals,
+        subtotal: totals.subtotal,
+        taxTotal: totals.taxTotal,
+        discountTotal: totals.discountTotal,
+        total: totals.total,
         notes: data.notes || null,
-        itemCount: items.length,
-      },
+      }).returning();
+
+      if (invoice && items.length > 0) {
+        await tx.insert(invoiceItems).values(
+          items.map((item) => ({
+            invoiceId: invoice.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+            discount: item.discount,
+            total: lineTotal(item),
+          }))
+        );
+      }
+
+      await logAction({
+        clinicId,
+        action: "create",
+        entityType: "invoice",
+        entityId: invoice.id,
+        after: {
+          patientId: data.patientId,
+          number,
+          status: "draft",
+          ...totals,
+          notes: data.notes || null,
+          itemCount: items.length,
+        },
+      });
     });
 
     revalidatePath("/billing/invoices");
@@ -842,71 +890,102 @@ export async function recordPayment(
       }
     }
 
-    const [payment] = await db.insert(payments).values({
-      clinicId,
-      patientId,
-      invoiceId: invoiceId || null,
-      amount,
-      method: data.method,
-      reference: data.reference || null,
-      date: new Date(data.date),
-      notes: data.notes || null,
-      createdBy: user?.id ?? null,
-    }).returning({ id: payments.id });
+    // Z-23 : l'INSERT du paiement, la relecture de la facture et l'écriture du
+    // statut sont réunis dans UNE transaction. La facture est relue avec
+    // `SELECT … FOR UPDATE` AVANT l'insertion du paiement : le verrou de ligne
+    // tient jusqu'au COMMIT et sérialise donc entièrement les encaissements
+    // concurrents sur une même facture (aucun encaissement ne peut s'intercaler
+    // entre la relecture et l'UPDATE). Chaque transaction n'insère son paiement
+    // qu'après avoir obtenu le verrou : la dernière à le tenir revoit dans son
+    // SUM tous les paiements engagés par ses prédécesseurs → statut recalculé
+    // sur une base complète, plus de lost update (deux encaissements
+    // simultanés complétant le total laissant la facture en `partially_paid`).
+    await db.transaction(async (tx) => {
+      const lockedInvoice = invoiceId
+        ? ((await tx
+            .select()
+            .from(invoices)
+            .where(and(eq(invoices.id, invoiceId), eq(invoices.clinicId, clinicId)))
+            .limit(1)
+            .for("update"))[0] ?? null)
+        : null;
 
-    await logAction({
-      clinicId,
-      action: "create",
-      entityType: "payment",
-      entityId: payment.id,
-      after: {
+      if (invoiceId) {
+        // Re-vérification des gardes DANS la transaction (la lecture externe
+        // ci-dessus n'est qu'un pré-calcul pour un message d'erreur plus tôt) :
+        // la facture peut être annulée/supprimée entre les deux, et surtout elle
+        // peut être verrouillée par une autre transaction.
+        if (!lockedInvoice) {
+          throw new Error("Facture introuvable pour cette clinique");
+        }
+        if (lockedInvoice.status === "cancelled") {
+          throw new Error("Impossible d'enregistrer un paiement sur une facture annulée");
+        }
+      }
+
+      const [payment] = await tx.insert(payments).values({
+        clinicId,
         patientId,
         invoiceId: invoiceId || null,
         amount,
         method: data.method,
         reference: data.reference || null,
-        date: new Date(data.date).toISOString(),
-      },
-    });
+        date: new Date(data.date),
+        notes: data.notes || null,
+        createdBy: user?.id ?? null,
+      }).returning({ id: payments.id });
 
-    if (invoiceId) {
-      const invoicePayments = await db
-        .select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)::float8` })
-        .from(payments)
-        .where(eq(payments.invoiceId, invoiceId));
+      await logAction({
+        clinicId,
+        action: "create",
+        entityType: "payment",
+        entityId: payment.id,
+        after: {
+          patientId,
+          invoiceId: invoiceId || null,
+          amount,
+          method: data.method,
+          reference: data.reference || null,
+          date: new Date(data.date).toISOString(),
+        },
+      });
 
-      const invoice = await db
-        .select()
-        .from(invoices)
-        .where(eq(invoices.id, invoiceId))
-        .then((r) => r[0]);
+      if (lockedInvoice) {
+        // Somme des paiements relue SOUS verrou, après l'INSERT du paiement
+        // courant : elle inclut donc ce paiement et tout paiement concurrent
+        // déjà committé.
+        const invoicePayments = await tx
+          .select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)::float8` })
+          .from(payments)
+          .where(eq(payments.invoiceId, lockedInvoice.id));
 
-      if (invoice) {
         const paidAmount = invoicePayments[0]?.total || 0;
         const newStatus = recalcInvoiceStatus(
-          invoice.status,
-          invoice.total,
+          lockedInvoice.status,
+          lockedInvoice.total,
           paidAmount,
         );
 
-        await db
+        await tx
           .update(invoices)
           .set({ status: newStatus })
-          .where(eq(invoices.id, invoiceId));
+          .where(eq(invoices.id, lockedInvoice.id));
 
-        if (newStatus === "paid" && invoice.sessionId) {
-          await db
+        if (newStatus === "paid" && lockedInvoice.sessionId) {
+          await tx
             .update(clinicalSessions)
             .set({ status: "paid" })
-            .where(eq(clinicalSessions.id, invoice.sessionId));
-          revalidatePath(`/patients/${invoice.patientId}/session/${invoice.sessionId}`);
+            .where(eq(clinicalSessions.id, lockedInvoice.sessionId));
+          revalidatePath(`/patients/${lockedInvoice.patientId}/session/${lockedInvoice.sessionId}`);
         }
 
-        if (invoice.sessionId) {
-          sessionRedirectPath = `/patients/${invoice.patientId}/session/${invoice.sessionId}`;
+        if (lockedInvoice.sessionId) {
+          sessionRedirectPath = `/patients/${lockedInvoice.patientId}/session/${lockedInvoice.sessionId}`;
         }
       }
+    });
 
+    if (invoiceId) {
       revalidatePath(`/billing/invoices/${invoiceId}`);
     }
 
