@@ -107,17 +107,17 @@
 ## Lot 9 — Tests
 - [x] T-1 garde multi-tenant
 - [x] T-2 arrondis financiers *(couvert par Z-17)*
-- [ ] T-3 transitions de statut
-- [ ] T-4 verrous de concurrence
-- [ ] T-5 règles de séance
-- [ ] T-6 alerte d'allergie
+- [x] T-3 transitions de statut
+- [x] T-4 verrous de concurrence *(tests de source — structurels, inexecutables sans base)*
+- [x] T-5 règles de séance
+- [x] T-6 alerte d'allergie *(câblage + correspondance textuelle ; Z-84 a corrigé le faux négatif pénicilline↔amoxicilline)*
 - [ ] T-7 *(N/A — migration locale hors-ligne abandonnée)*
-- [ ] T-8 contrôle d'accès financier
+- [x] T-8 contrôle d'accès financier
 
 ---
 
 ## ⬜ En cours
-**Lot 8** — Z-82 à Z-83 (reconnaissance), puis **Lot 9** — tests T-2 à T-8.
+**Bilan final.** ⬜ Restants : Z-63, Z-68, Z-80 — tous **reportés ou refusés**, motifs documentés dans la checklist.
 
 ## ⚠️ À trancher par le client (bloquent certains lots)
 - **Q1** — corriger les 63 P2 ou seulement P0/P1 ?
