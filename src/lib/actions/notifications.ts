@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/db/db";
 import { notifications, clinics } from "@/lib/db/schema";
-import { requireClinicAccessOrThrow, requirePlatformOwner } from "@/lib/auth-utils";
+import { requireAuth, requireClinicAccessOrThrow, requirePlatformOwner } from "@/lib/auth-utils";
 import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -20,6 +20,8 @@ const notificationSchema = z.object({
 });
 
 export async function getNotifications(clinicId: string) {
+  // Z-70 — explicit authentication before any clinic-scoped read.
+  await requireAuth();
   await requireClinicAccessOrThrow(clinicId);
 
   try {
@@ -53,6 +55,8 @@ export async function getNotifications(clinicId: string) {
 }
 
 export async function markNotificationsRead(clinicId: string): Promise<{ success: boolean }> {
+  // Z-70 — explicit authentication before any clinic-scoped mutation.
+  await requireAuth();
   await requireClinicAccessOrThrow(clinicId);
 
   try {
@@ -91,11 +95,16 @@ export async function createNotification(
     let created: { id: string }[];
 
     if (data.target === "all") {
+      // Z-69 — only clinics that still exist and are not soft-deleted.
       const clinicList = await db
         .select({ id: clinics.id })
         .from(clinics)
         .where(isNull(clinics.deletedAt))
         .orderBy(asc(clinics.name));
+
+      if (clinicList.length === 0) {
+        return { error: { general: ["Aucune clinique active à notifier"] } };
+      }
 
       created = await db
         .insert(notifications)
@@ -111,6 +120,16 @@ export async function createNotification(
         )
         .returning({ id: notifications.id });
     } else {
+      // Z-69 — the target must be an existing, non-deleted clinic.
+      const clinicRows = await db
+        .select({ id: clinics.id })
+        .from(clinics)
+        .where(and(eq(clinics.id, data.target), isNull(clinics.deletedAt)));
+
+      if (!clinicRows[0]) {
+        return { error: { target: ["Clinique introuvable ou désactivée"] } };
+      }
+
       created = await db
         .insert(notifications)
         .values({

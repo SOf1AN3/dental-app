@@ -62,7 +62,7 @@ export default async function ReportsPage() {
       <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-3">
         <StatCard label="Total patients" value={patientStats.total} />
         <StatCard label="Rendez-vous" value={appointmentStats.total} />
-        <StatCard label="Revenu total" value={formatCurrency(revenueData.totalRevenue)} />
+        <StatCard label="Production totale" value={formatCurrency(revenueData.totalRevenue)} />
       </div>
 
       <Section title="Aperçu mensuel">
@@ -73,7 +73,7 @@ export default async function ReportsPage() {
                 <th className="pb-3 font-medium">Mois</th>
                 <th className="pb-3 font-medium">Patients</th>
                 <th className="pb-3 font-medium">Rendez-vous</th>
-                <th className="pb-3 font-medium">Revenu</th>
+                <th className="pb-3 font-medium">Encaissé</th>
               </tr>
             </thead>
             <tbody>

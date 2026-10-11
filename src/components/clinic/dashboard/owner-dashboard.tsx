@@ -130,13 +130,13 @@ async function OwnerCharts() {
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
-        <h2 className="text-lg font-semibold text-cool-900">Revenus (6 mois)</h2>
+        <h2 className="text-lg font-semibold text-cool-900">Production (6 mois)</h2>
         <div className="mt-4">
           <RevenueChart data={revenueData.monthlyRevenue} />
         </div>
       </div>
       <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
-        <h2 className="text-lg font-semibold text-cool-900">Tendance (6 mois)</h2>
+        <h2 className="text-lg font-semibold text-cool-900">Tendance encaissé (6 mois)</h2>
         <div className="mt-4">
           <TrendsChart data={monthlyTrends} />
         </div>
