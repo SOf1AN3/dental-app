@@ -51,26 +51,39 @@ Elles n'ont pas bloqué la correction des bugs, mais certaines touchent à la **
 
 ---
 
-## 4. 🔴 Opérations avant déploiement en production
+## 4. 🔴 Parcours de déploiement en production
 
-Le **code** est corrigé ; les **données** et le **schéma** de production ne le sont pas encore.
+Le **code** est corrigé ; les **données** de production ne le sont pas encore. La
+migration `0016_smooth_randall.sql` est désormais **auto-réparatrice** : elle
+normalise elle-même les données qui violenteraient ses contraintes, puis les pose.
+Elle **échouerait** en milieu de parcours si on la lançait à l'aveugle sur des
+données sales — d'où le parcours ci-dessous.
 
-- [ ] **Backfill `joined_at`** — sans ça, des membres actifs **perdent l'accès** :
+**Ordre impératif** : la migration doit être appliquée **avant** le déploiement du
+code, sinon `token_version` manquant bloque la connexion de tous les utilisateurs.
+
+- [ ] **1. Backfill `joined_at`** (également inclus dans la migration, mais à faire
+  valider indépendamment car il élargit l'accès) :
   ```
   npx tsx scripts/backfill-membership-joined-at.ts          # diagnostic, lecture seule
   npx tsx scripts/backfill-membership-joined-at.ts --apply  # écriture
   ```
-- [x] ~~Migration `token_version`~~ — **générée et appliquée** en dev (`drizzle/0016_smooth_randall.sql`)
-- [ ] **Contrôles de données avant `db:migrate`** en production — la migration 0016 contient des contraintes qui **échoueraient** si des données les violent :
-  ```sql
-  SELECT clinic_id, order_number, COUNT(*) FROM prosthesis_order
-    GROUP BY 1, 2 HAVING COUNT(*) > 1;              -- index unique Z-49
-  SELECT id, current_qty FROM stock_item WHERE current_qty < 0;   -- CHECK Z-60
-  SELECT item_id, COUNT(*) FROM stock_alert WHERE status='active'
-    GROUP BY 1 HAVING COUNT(*) > 1;                 -- index unique Z-62
+- [ ] **2. Contrôle préalable** — annonce ce que la migration modifiera, sans blocage :
   ```
-  → si des lignes sont retournées, **nettoyer d'abord**.
-- [ ] **Fumée-test** : créer une commande prothèse → vérifier `PRO-2026-0000n` (Z-49)
+  npm run db:preflight
+  ```
+  Un compteur non nul n'est **pas** une erreur : c'est le bug historique que la
+  migration va réparer. À relire et à faire valider.
+- [ ] **3. Migration** :
+  ```
+  npm run db:migrate
+  ```
+- [ ] **4. Redéploiement de l'application** (si elle tourne déjà)
+- [ ] **5. Fumée-test** : créer une commande prothèse → vérifier `PRO-2026-0000n` (Z-49)
+
+> La migration a été **prouvée** contre des données corrompues réelles : base
+> jetable, ancien schéma, injection des bugs Z-49/Z-61/Z-62, exécution — **9/9
+> vérifications**, dont l'invariant « aucune ligne supprimée ».
 
 ---
 
