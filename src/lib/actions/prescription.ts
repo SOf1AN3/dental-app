@@ -233,15 +233,25 @@ function normalizeItems(items: PrescriptionItem[]) {
  *    `condition` est un texte libre, un antécédent rédigé autrement
  *    (« intolérance à la pénicilline », « urticaire après Amoxil ») passe
  *    inaperçu ;
- *  - la correspondance est une simple inclusion de mots (accents et
- *    casse neutralisés) entre l'allergène et le nom du médicament saisi :
- *    « Allergie à la pénicilline » ↔ « Amoxicilline 500 mg » est détecté,
- *    mais un nom de marque (« Amoxil »), une classe thérapeutique, une
- *    abréviation ou une faute de frappe ne le sera PAS ;
+ *  - la correspondance (`matchesAllergen`) est BIDIRECTIONNELLE et combine
+ *    deux mécanismes, accents et casse neutralisés des deux côtés :
+ *    (1) l'inclusion stricte — le nom du médicament contient le token de
+ *    l'allergène, OU l'inverse (nom d'au moins 4 caractères) — ;
+ *    (2) le dictionnaire FERMÉ `ALLERGY_ALIASES`, consulté depuis
+ *    l'antécédent (« Allergie à la pénicilline » → « Amoxicilline 500 mg »)
+ *    comme depuis le médicament (« Allergie à l'amoxicilline » →
+ *    « Pénicilline 500 »). Trois entrées seulement : `penicilline`,
+ *    `amoxicilline`, `augmentin` ;
+ *  - hors de ces trois entrées, rien n'est rapproché : une marque non
+ *    listée (« Amoxil »), une autre classe thérapeutique, une abréviation ou
+ *    une faute de frappe ne sont PAS détectés. Il n'y a AUCUN stemming :
+ *    « cycline », « caine »… ne sont pas des racines dérivées — le moindre
+ *    rapprochement automatique ouvrirait une rafale de faux positifs ;
  *  - un allergène court ou générique peut produire un faux positif (mots de
  *    4 caractères minimum, hors liste d'arrêt).
  * **Une absence d'alerte ne signifie donc jamais « pas d'allergie ».** C'est
- * un filet grossier, préférable à aucune aide, mais non fiable cliniquement.
+ * un filet grossier — trois aliases décidés à la main ne couvrent pas la
+ * pharmacopée —, préférable à aucune aide, mais non fiable cliniquement.
  * Le `drug_catalog` n'est pas utilisé : sans normalisation des molécules et
  * de leurs classes, il ne réduirait ni les faux négatifs ni les faux
  * positifs (hors périmètre de cette tâche).
@@ -286,6 +296,60 @@ function allergenTokens(condition: string): string[] {
     );
 }
 
+/**
+ * Z-51 — dictionnaire **FERMÉ** d'aliases d'allergie : chaque rapprochement
+ * est décidé à la main, justifié et testé — jamais dérivé automatiquement.
+ *
+ * Clé = tel qu'écrit dans l'antécédent OU dans le nom du médicament
+ * (minuscules, sans accent, comme `normalizeLoose`) ; valeur = motif que doit
+ * avoir l'AUTRE terme pour appartenir à la même famille. Le dictionnaire est
+ * consulté dans les deux sens par `matchesAllergen` : « amoxicilline » ne
+ * contient pas « penicilline » ni l'inverse, une simple inclusion rate donc
+ * le couple le plus courant en dentisterie.
+ *
+ *  - `penicilline` / `amoxicilline` : famille des pénicillines, reconnue à
+ *    ses suffixes `-cilline` / `-cillin` (amoxicilline, ampicilline,
+ *    flucloxacilline, benzylpénicilline…). L'allergie pénicillilline est
+ *    l'allergie la plus signalée en dentisterie et l'amoxicilline
+ *    l'antibiotique le plus prescrit en odontologie. Le motif est
+ *    volontairement étroit : ni « cycline » (tétracyclines) ni « caine »
+ *    (anesthésiques locaux) n'y entrent ;
+ *  - `augmentin` : Augmentin® = amoxicilline + acide clavulanique, la
+ *    commercialisation du couple ci-dessus. Le libellé ne contient aucun
+ *    suffixe de la famille : sans cette clé, « Allergie à la pénicilline »
+ *    face à « Augmentin 1 g » reste invisible.
+ */
+const ALLERGY_ALIASES: Record<string, RegExp> = {
+  penicilline: /(cilline|cillin)/i,
+  amoxicilline: /(cilline|cillin)/i,
+  augmentin: /(cilline|cillin)/i,
+};
+
+/**
+ * Z-51 — correspondance « token d'allergène ↔ nom de médicament », traitée
+ * dans les DEUX sens.
+ *
+ * `token` et `name` sont déjà normalisés (minuscules, sans accent —
+ * `normalizeLoose`). Les deux inclusions sont symétriques (le sens inverse
+ * exige un nom d'au moins 4 caractères, même garde que `allergenTokens` :
+ * sinon un nom très court comme « eau » matcherait n'importe quel token qui
+ * le contient). Les aliases sont ensuite consultés depuis l'antécédent ET
+ * depuis le médicament, car aucun des deux termes ne contient l'autre dans
+ * le cas le plus fréquent (pénicilline / amoxicilline).
+ *
+ * ⚠️ Table FERMÉE (`ALLERGY_ALIASES`) : toute nouvelle entrée est une
+ * décision clinique à justifier et à tester — jamais une généralisation.
+ */
+function matchesAllergen(token: string, name: string): boolean {
+  if (name.includes(token)) return true;
+  if (name.length >= 4 && token.includes(name)) return true;
+  if (ALLERGY_ALIASES[token]?.test(name)) return true;
+  for (const [key, pattern] of Object.entries(ALLERGY_ALIASES)) {
+    if (name.includes(key) && pattern.test(token)) return true;
+  }
+  return false;
+}
+
 interface AllergyAlert {
   condition: string;
   medication: string;
@@ -293,6 +357,9 @@ interface AllergyAlert {
 
 /**
  * Compare les médicaments de l'ordonnance aux antécédents ACTIFS du patient.
+ * La règle de correspondance (inclusions dans les deux sens + dictionnaire
+ * fermé `ALLERGY_ALIASES`, via `matchesAllergen`) et ses limites sont
+ * détaillées plus haut.
  * Une erreur de lecture est ignorée : l'alerte ne doit jamais empêcher
  * l'enregistrement d'une ordonnance.
  */
@@ -329,7 +396,7 @@ async function findAllergyAlerts(
 
     for (const item of medications) {
       const name = normalizeLoose(item.name);
-      if (tokens.some((token) => name.includes(token))) {
+      if (tokens.some((token) => matchesAllergen(token, name))) {
         alerts.push({ condition: entry.condition, medication: item.name });
       }
     }

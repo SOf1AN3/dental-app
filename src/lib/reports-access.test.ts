@@ -527,6 +527,8 @@ type FindAllergyAlerts = (
   items: AllergyItem[],
 ) => Promise<AllergyAlert[]>;
 
+type MatchesAllergen = (token: string, name: string) => boolean;
+
 /** Instancie le corps EXTRAIT d'une fonction ; SyntaxError → échec explicite. */
 function instantiatePure<TResult>(
   label: string,
@@ -553,9 +555,9 @@ function instantiatePure<TResult>(
   return factory(...dependencyValues);
 }
 
-/** Évalue une constante littérale du module (Set, regex, …) ; absence → échec explicite. */
+/** Évalue une constante littérale du module (Set, regex, Record,…) ; annotation de type admise (`const X: T = …`) ; absence → échec explicite. */
 function evalConstant<T>(source: string, name: string): T {
-  const match = new RegExp(`const\\s+${name}\\s*=\\s*([^;]+);`).exec(maskComments(source));
+  const match = new RegExp(`const\\s+${name}\\s*(?::[^=]*)?=\\s*([^;]+);`).exec(maskComments(source));
   if (match === null) {
     throw new Error(
       `${PRESCRIPTION_FILE} → const ${name} introuvable : renommée/déplacée ? Mettre à jour ` +
@@ -688,12 +690,30 @@ function buildAllergyHarness(options: {
 
   const normalizeLoose = instantiateNormalizeLoose(source);
   const allergenTokens = instantiateAllergenTokens(source, normalizeLoose);
+  // Table d'aliases et moteur de correspondance : le CORPS de matchesAllergen
+  // est lui aussi extrait de la source (aucune logique réimplémentée ici).
+  const aliases = evalConstant<Record<string, RegExp>>(source, "ALLERGY_ALIASES");
+  const matchesAllergen = instantiatePure<MatchesAllergen>(
+    "matchesAllergen",
+    ["ALLERGY_ALIASES"],
+    "function matchesAllergen(token, name)",
+    bodyOfInline(source, "matchesAllergen"),
+    [aliases],
+  );
   const findAllergyAlerts = instantiatePure<FindAllergyAlerts>(
     "findAllergyAlerts",
-    ["db", "eq", "and", "medicalHistoryEntries", "allergenTokens", "normalizeLoose"],
+    [
+      "db",
+      "eq",
+      "and",
+      "medicalHistoryEntries",
+      "allergenTokens",
+      "normalizeLoose",
+      "matchesAllergen",
+    ],
     "async function findAllergyAlerts(clinicId, patientId, items)",
     body,
-    [db, eq, and, table, allergenTokens, normalizeLoose],
+    [db, eq, and, table, allergenTokens, normalizeLoose, matchesAllergen],
   );
 
   return {
@@ -786,11 +806,38 @@ describe("T-6 — comportement réel de findAllergyAlerts (corps extrait + base 
     ).toEqual([{ condition: "Allergie à la Pénicilline", medication: "Pénicilline 500" }]);
   });
 
-  it("limites documentées : nom de marque non détecté ; antécédent sans mot-clé « allerg… » ignoré", async () => {
-    // ⚠️ La JSDoc de findAllergyAlerts prétend que « Allergie à la pénicilline »
-    // ↔ « Amoxicilline 500 mg » est détecté : c'est FAUX (la correspondance est
-    // une inclusion de sous-chaîne stricte et « amoxicilline » ne contient pas
-    // « penicilline »). Ce cas n'est donc pas codé en attente ; signalé au Lead.
+  it("le couple le plus fréquent en dentisterie est détecté : pénicilline ↔ amoxicilline (dictionnaire consulté dans les deux sens)", async () => {
+    // Cas d'école historique : « amoxicilline 500 mg » ne CONTIENT PAS
+    // « penicilline » (ni l'inverse) — seule l'entrée de dictionnaire les
+    // rapproche. Ce cas était verrouillé en faux négatif ; il doit DÉSORMAIS
+    // être détecté (JSDoc + ALLERGY_ALIASES).
+    const forward = buildAllergyHarness({
+      entries: [{ condition: "Allergie à la pénicilline" }],
+    });
+    expect(
+      await forward.findAllergyAlerts("clinic-1", "patient-1", [
+        { type: "medication", name: "Amoxicilline 500 mg" },
+      ]),
+    ).toEqual([
+      { condition: "Allergie à la pénicilline", medication: "Amoxicilline 500 mg" },
+    ]);
+
+    // Sens inverse : l'antécédent nomme la molécule, l'ordonnance la famille.
+    const reverse = buildAllergyHarness({
+      entries: [{ condition: "Allergie à l'amoxicilline" }],
+    });
+    expect(
+      await reverse.findAllergyAlerts("clinic-1", "patient-1", [
+        { type: "medication", name: "Pénicilline 500" },
+      ]),
+    ).toEqual([
+      { condition: "Allergie à l'amoxicilline", medication: "Pénicilline 500" },
+    ]);
+  });
+
+  it("limites documentées : marque NON listée (Amoxil) ignorée ; marque listée (Augmentin) rattachée à la famille ; antécédent sans mot-clé « allerg… » ignoré", async () => {
+    // Hors du dictionnaire fermé, aucun rapprochement : « Amoxil » ne figure
+    // dans ALLERGY_ALIASES et ne contient aucun suffixe de la famille.
     const brand = buildAllergyHarness({
       entries: [{ condition: "Allergie à la pénicilline" }],
     });
@@ -800,6 +847,21 @@ describe("T-6 — comportement réel de findAllergyAlerts (corps extrait + base 
       ]),
     ).toEqual([]);
 
+    // « Augmentin » EST listé : la marque du couple amoxicilline + acide
+    // clavulanique doit éveiller une allergie pénicillilline déclarée.
+    const listedBrand = buildAllergyHarness({
+      entries: [{ condition: "Allergie à la pénicilline" }],
+    });
+    expect(
+      await listedBrand.findAllergyAlerts("clinic-1", "patient-1", [
+        { type: "medication", name: "Augmentin 1 g" },
+      ]),
+    ).toEqual([
+      { condition: "Allergie à la pénicilline", medication: "Augmentin 1 g" },
+    ]);
+
+    // Le filtre « allerg… » en amont n'a pas bougé : sans le mot-clé, aucun
+    // token n'est extrait, donc aucun alias n'est consulté.
     const noKeyword = buildAllergyHarness({
       entries: [{ condition: "Intolérance à la pénicilline" }],
     });
@@ -808,6 +870,77 @@ describe("T-6 — comportement réel de findAllergyAlerts (corps extrait + base 
         { type: "medication", name: "Pénicilline 500" },
       ]),
     ).toEqual([]);
+  });
+
+  it("aucune généralisation : hors des entrées du dictionnaire, pas de rapprochement (pas de stemming)", async () => {
+    // « cycline » n'est pas une racine dérivée de « cilline » : la rapprocher
+    // produirait des faux positifs sur les tétracyclines, et l'inverse sur
+    // les pénicillines.
+    const tetracycline = buildAllergyHarness({
+      entries: [{ condition: "Allergie à la doxycycline" }],
+    });
+    expect(
+      await tetracycline.findAllergyAlerts("clinic-1", "patient-1", [
+        { type: "medication", name: "Azithromycine 500 mg" },
+      ]),
+    ).toEqual([]);
+
+    // Même sens inverse : un nom portant une clé du dictionnaire
+    // (« amoxicilline ») n'autorise un alerte que si le token appartient à la
+    // même famille — « latex » n'y appartient pas.
+    const unrelated = buildAllergyHarness({
+      entries: [{ condition: "Allergie au latex" }],
+    });
+    expect(
+      await unrelated.findAllergyAlerts("clinic-1", "patient-1", [
+        { type: "medication", name: "Amoxicilline 500 mg" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("table d'aliases FERMÉE : exactement les 3 entrées justifiées, motifs étroits (audit anti-dérive)", () => {
+    const aliases = evalConstant<Record<string, RegExp>>(
+      readProjectFile(PRESCRIPTION_FILE),
+      "ALLERGY_ALIASES",
+    );
+    expect(
+      Object.keys(aliases).sort(),
+      "ALLERGY_ALIASES doit rester une table fermée et auditable : chaque " +
+        "ajout est une décision clinique à justifier dans ce test, jamais une " +
+        "dérive de stemming.",
+    ).toEqual(["amoxicilline", "augmentin", "penicilline"]);
+
+    // Chaque motif doit couvrir la famille visée…
+    for (const familyName of ["amoxicilline 500", "ampicilline", "flucloxacilline"]) {
+      for (const [key, pattern] of Object.entries(aliases)) {
+        expect(
+          pattern.test(familyName),
+          `ALLERGY_ALIASES[${key}] doit reconnaître « ${familyName} » (même famille).`,
+        ).toBe(true);
+      }
+    }
+
+    // …et rien d'autre parmi les molécules/libellés courants en odontologie.
+    for (const unrelated of [
+      "doxycycline",
+      "azithromycine",
+      "metronidazole",
+      "clindamycine",
+      "paracetamol",
+      "ibuprofene",
+      "lidocaine",
+      "amoxil",
+      "cycline",
+      "caine",
+    ]) {
+      for (const [key, pattern] of Object.entries(aliases)) {
+        expect(
+          pattern.test(unrelated),
+          `ALLERGY_ALIASES[${key}] ne doit PAS reconnaître « ${unrelated} » : ` +
+            "faux positif — restreindre le motif, pas l'élargir.",
+        ).toBe(false);
+      }
+    }
   });
 
   it("mots-outils écartés : « Allergie connue au médicament » ne matche pas « Médicament miracle »", async () => {
