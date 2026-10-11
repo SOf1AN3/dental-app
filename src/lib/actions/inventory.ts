@@ -48,8 +48,14 @@ export async function getStockItems() {
       .from(stockItems)
       .where(eq(stockItems.clinicId, clinicId))
       .orderBy(asc(stockItems.name));
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — une panne transitoire n'est PLUS convertie en « 0 article » :
+    // l'erreur est journalisée côté serveur puis REMONTÉE. Le contrat de
+    // retour (`StockItem[]`) est intact — il ne porte aucun type d'erreur —
+    // c'est le canal d'exception qui distingue « base indisponible » de
+    // `[]` (= réellement aucun article). Même remède que Z-32 sur `getInvoice`.
+    console.error("[getStockItems] lecture du stock impossible", { clinicId, err });
+    throw err;
   }
 }
 
@@ -76,8 +82,13 @@ export async function getStockItem(id: string) {
       .orderBy(desc(stockTransactions.createdAt));
 
     return { ...item, transactions };
-  } catch {
-    return null;
+  } catch (err) {
+    // Z-71 — `null` reste EXCLUSIVEMENT « ressource absente » : le contrat
+    // `T | null` ne peut pas porter de type d'erreur sans changer de signature,
+    // l'erreur technique est donc journalisée puis propagée (au lieu d'être
+    // avalée en un `null` identique à un article inexistant).
+    console.error("[getStockItem] lecture de l'article impossible", { id, clinicId, err });
+    throw err;
   }
 }
 
@@ -174,7 +185,17 @@ export async function updateStockItem(
       .where(and(eq(stockItems.id, itemId), eq(stockItems.clinicId, clinicId)))
       .limit(1);
 
-    await db
+    // Z-72 — sans cette garde, l'UPDATE « réussissait » sur 0 ligne (id
+    // inexistant ou déjà supprimé) et l'action redirigeait vers un succès
+    // sans jamais rien écrire ni auditer.
+    if (!current) {
+      return { error: { general: ["Article introuvable"] } };
+    }
+
+    // Z-72 — décompte des lignes réellement affectées : l'article peut avoir
+    // été supprimé entre la lecture ci-dessus et cet UPDATE (fenêtre de
+    // course) ; 0 ligne → refus explicite au lieu d'un succès mensonger.
+    const updatedRows = await db
       .update(stockItems)
       .set({
         name: data.name,
@@ -187,7 +208,12 @@ export async function updateStockItem(
         purchasePrice: data.purchasePrice ? Number(data.purchasePrice) : null,
         sellingPrice: data.sellingPrice ? Number(data.sellingPrice) : null,
       })
-      .where(and(eq(stockItems.id, itemId), eq(stockItems.clinicId, clinicId)));
+      .where(and(eq(stockItems.id, itemId), eq(stockItems.clinicId, clinicId)))
+      .returning({ id: stockItems.id });
+
+    if (updatedRows.length === 0) {
+      return { error: { general: ["Article introuvable ou déjà supprimé"] } };
+    }
 
     await logAction({
       clinicId,
@@ -440,7 +466,11 @@ export async function getLowStockItems() {
         ),
       )
       .orderBy(asc(stockItems.name));
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — « 0 article en rupture » et « lecture impossible » ne doivent pas
+    // avoir le même affichage (décision d'achat sur un faux chiffre) :
+    // journalisation puis remontée, contrat `StockItem[]` inchangé.
+    console.error("[getLowStockItems] lecture des ruptures impossible", { clinicId, err });
+    throw err;
   }
 }

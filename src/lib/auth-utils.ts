@@ -133,21 +133,34 @@ export async function consumeAccountToken(
   token: string,
   purpose: "password_reset" | "email_verification"
 ): Promise<{ userId: string } | null> {
-  const found = await db.query.accountTokens.findFirst({
-    where: and(
-      eq(accountTokens.token, token),
-      eq(accountTokens.purpose, purpose),
-      isNull(accountTokens.usedAt),
-      gt(accountTokens.expiresAt, new Date())
-    ),
-  });
-
-  if (!found) return null;
-
-  await db
+  // Z-76 — consommation ATOMIQUE en UNE requête. La version précédente
+  // (SELECT puis UPDATE en deux requêtes) laissait une fenêtre TOCTOU : deux
+  // appels concurrents du MÊME lien de reset lisaient tous deux
+  // `used_at IS NULL` et consommaient tous deux le jeton — un jeton de
+  // réinitialisation pouvait donc être RÉUTILISÉ.
+  //
+  // Ici l'`UPDATE … WHERE … AND used_at IS NULL RETURNING` est la seule
+  // autorité : en READ COMMITTED, le second UPDATE attend le commit du
+  // premier, réévalue son `WHERE` sur la version mise à jour de la ligne
+  // (`used_at` n'est plus NULL, ou `expires_at` est dépassé) → 0 ligne
+  // affectée → `null`. Les quatre prédicats sont identiques à l'ancienne
+  // lecture : jeton, usage, non-consommé, non expiré ; le contrat de retour
+  // `{ userId } | null` est inchangé.
+  const consumedRows = await db
     .update(accountTokens)
     .set({ usedAt: new Date() })
-    .where(eq(accountTokens.id, found.id));
+    .where(
+      and(
+        eq(accountTokens.token, token),
+        eq(accountTokens.purpose, purpose),
+        isNull(accountTokens.usedAt),
+        gt(accountTokens.expiresAt, new Date()),
+      ),
+    )
+    .returning({ userId: accountTokens.userId });
 
-  return { userId: found.userId };
+  const [consumed] = consumedRows;
+  if (!consumed) return null;
+
+  return { userId: consumed.userId };
 }

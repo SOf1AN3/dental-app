@@ -294,8 +294,14 @@ export async function getInvoicesSummary() {
       .where(eq(invoices.clinicId, clinicId));
 
     return rows[0] || { totalCount: 0, totalAmount: 0, pendingAmount: 0 };
-  } catch {
-    return { totalCount: 0, totalAmount: 0, pendingAmount: 0 };
+  } catch (err) {
+    // Z-71 — des totaux à 0 DZD dus à une panne DB sont des décisions
+    // financières prises sur du faux : l'erreur est journalisée puis
+    // REMONTÉE. Le contrat (`{ totalCount, totalAmount, pendingAmount }`) ne
+    // peut pas porter de type d'erreur sans changer de signature ; il n'est
+    // donc pas modifié et l'exception porte la distinction.
+    console.error("[getInvoicesSummary] calcul des totaux impossible", { clinicId, err });
+    throw err;
   }
 }
 
@@ -332,8 +338,11 @@ export async function getQuotes(status?: string) {
       ...r,
       patient: patientMap[r.patientId] || null,
     }));
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — liste vide authentique ≠ lecture impossible : journalisation puis
+    // remontée, contrat `…[]` intact (aucun type d'erreur ajouté).
+    console.error("[getQuotes] lecture des devis impossible", { clinicId, err });
+    throw err;
   }
 }
 
@@ -363,8 +372,12 @@ export async function getQuote(id: string) {
       .limit(1);
 
     return { ...quote, items, patient: patient || null };
-  } catch {
-    return null;
+  } catch (err) {
+    // Z-71 — `null` = devis ABSENT (ou d'une autre clinique) et rien d'autre :
+    // le contrat `T | null` ne peut pas recevoir de type d'erreur, l'erreur
+    // technique est donc journalisée puis propagée au lieu de simuler un 404.
+    console.error("[getQuote] lecture du devis impossible", { id, clinicId, err });
+    throw err;
   }
 }
 
@@ -923,8 +936,16 @@ export async function getUnpaidInvoicesForPatient(patientId: string) {
         ),
       )
       .orderBy(desc(invoices.date));
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — « aucun impayé » et « lecture impossible » ne sont plus confondus
+    // (le sélecteur d'encaissement se remplit de ce résultat) : journalisation
+    // puis remontée, contrat `…[]` inchangé.
+    console.error("[getUnpaidInvoicesForPatient] lecture des impayés impossible", {
+      clinicId,
+      patientId,
+      err,
+    });
+    throw err;
   }
 }
 

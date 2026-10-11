@@ -686,7 +686,12 @@ export async function getAppointmentsForDate(date: Date) {
       .orderBy(asc(appointments.startTime));
 
     return results;
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — « 0 patient aujourd'hui » et « lecture impossible » ne sont plus
+    // confondus (l'utilisateur planifie sa journée sur ce chiffre) : erreur
+    // journalisée puis remontée, contrat `…[]` inchangé — `[]` ne signifie
+    // désormais plus qu'« aucune consultation ce jour-là ».
+    console.error("[getAppointmentsForDate] lecture des rendez-vous impossible", { clinicId, err });
+    throw err;
   }
 }

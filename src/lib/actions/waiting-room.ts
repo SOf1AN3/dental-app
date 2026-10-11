@@ -311,7 +311,13 @@ export async function getWaitingRoom() {
       .orderBy(asc(waitingRoomEntries.arrivedAt));
 
     return entries;
-  } catch {
-    return [];
+  } catch (err) {
+    // Z-71 — « salle d'attente vide » et « lecture impossible » ne sont plus
+    // confondus : l'erreur est journalisée puis REMONTÉE. Le contrat de
+    // retour (`…[]`) ne peut pas porter de type d'erreur sans changer de
+    // signature — c'est donc le canal d'exception qui fait la distinction,
+    // `[]` redevenant le seul signe d'une file réellement vide.
+    console.error("[getWaitingRoom] lecture de la salle d'attente impossible", { clinicId, err });
+    throw err;
   }
 }
