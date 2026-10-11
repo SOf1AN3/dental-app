@@ -1,52 +1,53 @@
 /**
  * Base de données de DÉVELOPPEMENT locale.
  *
- * Pourquoi ce script et non un PostgreSQL installé ?
- * -----------------------------------------------
+ * Pourquoi un PostgreSQL embarqué plutôt que PostgreSQL installé ?
+ * --------------------------------------------------------------
  * L'environnement de développement n'a ni droits administrateur (l'installeur
- * PostgreSQL winget est machine-scope), ni Docker, ni PostgreSQL. Ce script
- * embarque donc **Postgres lui-même** via PGlite — le même moteur que celui
- * analysé dans OFFLINE-PLAN.md — et l'expose sur le **protocole natif** via
- * un serveur de sockets. L'application s'y connecte comme à n'importe quel
- * PostgreSQL : `postgres-js`, Drizzle, `drizzle-kit` et les migrations
- * fonctionnent **sans modification**.
+ * winget PostgreSQL est machine-scope), ni Docker, ni PostgreSQL. Ce script
+ * embarque donc les **vrais binaires PostgreSQL** via `embedded-postgres` et
+ * les exécute comme un processus enfant. Aucune installation système, aucun
+ * service Windows.
  *
- * Les données sont persistées sur disque dans `./pgdata` (déjà gitignoré).
+ * ⚠️ Un premier choix a été PGlite (Postgres en WebAssembly) exposé sur le
+ * protocole natif. Il a été **abandonné** après vérification en conditions
+ * réelles : son serveur socket sérialise les requêtes au niveau du MESSAGE,
+ * pas de la CONNEXION. Deux transactions concurrentes sur deux connexions
+ * s'interpénètrent et corrompent le protocole étendu — erreur
+ * `portal "" does not exist`. Or ce projet utilise de nombreuses transactions
+ * à verrous (`SELECT ... FOR UPDATE`) : inadapté.
  *
  * Utilisation
  * -----------
  *   npm run db:dev          # démarre la base (processus long)
  *
  * Puis, dans un autre terminal :
- *   npm run db:generate     # génère une migration à partir du schéma Drizzle
  *   npm run db:migrate      # applique les migrations
- *   npm test                # la suite de tests (dont celle qui exige DATABASE_URL)
+ *   npm test                # la suite de tests
  *   npm run dev             # l'application
  *
- * ⚠️ Ce script est réservé au DÉVELOPPEMENT. Il n'a aucun rapport avec la base
- * de production, qui reste un PostgreSQL managé.
+ * ⚠️ Réservé au DÉVELOPPEMENT. Aucun rapport avec la base de production.
  */
 
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { NodeFS } from "@electric-sql/pglite/nodefs";
-import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
+import EmbeddedPostgres from "embedded-postgres";
 
 const PORT = Number(process.env.DEV_DB_PORT ?? 5432);
-const HOST = process.env.DEV_DB_HOST ?? "127.0.0.1";
 const DATA_DIR = process.env.DEV_DB_DATA_DIR ?? "pgdata";
+const USER = process.env.DEV_DB_USER ?? "postgres";
+const PASSWORD = process.env.DEV_DB_PASSWORD ?? "devpassword";
 
 /**
- * PostgreSQL — et donc PGlite — refuse de démarrer sur un répertoire contenant
- * encore un `postmaster.pid` : le fichier signifie qu'un serveur utilise déjà
- * ce catalogue. Le problème est qu'il **survit** à un arrêt brutal (fermeture
- * de terminal, `taskkill`, crash), et le dev se retrouve bloqué avec un
- * « Aborted() » cryptique au démarrage, sans qu'aucun serveur ne tourne.
+ * PostgreSQL refuse de démarrer sur un répertoire contenant encore un
+ * `postmaster.pid` : le fichier signale un serveur déjà détenteur du
+ * catalogue. Il **survit** à un arrêt brutal (fermeture de terminal,
+ * `taskkill`, crash) et bloque alors tout redémarrage avec un message
+ * cryptique.
  *
- * On ne supprime donc ce verrou que s'il est **démenti** : ni processus
- * détenteur, ni écoute sur le port. Sinon, on laisse tomber plutôt que de
- * risquer d'ouvrir le même catalogue depuis deux serveurs.
+ * On ne supprime ce verrou que s'il est **démenti** : ni processus
+ * détenteur. Sinon on abandonne plutôt que d'ouvrir deux fois le même
+ * catalogue.
  */
 function clearStalePidLock(dataDir: string): void {
   const pidFile = join(dataDir, "postmaster.pid");
@@ -56,9 +57,7 @@ function clearStalePidLock(dataDir: string): void {
   const pid = Number(rawPid);
 
   // `process.kill(pid, 0)` n'envoie aucun signal : il sonde l'existence du
-  // processus. Il LÈVE (ESRCH) si le pid n'existe pas, et réussit sinon.
-  // Le port est aussi vérifié : un serveur démarré avec un autre répertoire
-  // mais sur le même port serait un conflit réel.
+  // processus et LÈVE (ESRCH) si le pid n'existe pas.
   let holderAlive = false;
   if (Number.isInteger(pid) && pid > 0) {
     try {
@@ -84,52 +83,58 @@ function clearStalePidLock(dataDir: string): void {
 }
 
 async function main() {
-  console.log(`[dev-db] Ouverture de la base locale dans ./${DATA_DIR} …`);
+  console.log(`[dev-db] Preparation de la base locale dans ./${DATA_DIR} …`);
 
   clearStalePidLock(DATA_DIR);
 
-  const db = new PGlite(DATA_DIR, {
-    fs: new NodeFS(DATA_DIR),
-    // Le projet n'utilise aucune extension aujourd'hui. `btree_gist` est
-    // disponible si une contrainte EXCLUDE USING gist est un jour nécessaire
-    // (Z-63, reportée) : il faudra alors l'activer explicitement ici.
-  });
+  const needsInitialisation = !existsSync(join(DATA_DIR, "PG_VERSION"));
 
-  await db.waitReady;
-
-  const server = new PGLiteSocketServer({
-    db,
+  const pg = new EmbeddedPostgres({
+    databaseDir: DATA_DIR,
     port: PORT,
-    host: HOST,
-    // `postgres-js` (utilisé par src/lib/db/db.ts) ouvre un POOL de
-    // connexions. Avec maxConnections à 1 par défaut, les requêtes
-    // concurrentes seraient rejetées au lieu d'être mises en file.
-    maxConnections: 10,
+    user: USER,
+    password: PASSWORD,
+    authMethod: "scram-sha-256",
+    persistent: true,
+    // initdb hérite de la locale système (ici French_France.1252) et en
+    // déduit WIN1252 comme encodage par défaut. Win1252 couvre le latin-1
+    // (accents français OK) mais PAS l'au-delà : postgres-js émet de
+    // l'UTF-8, donc tout caractère hors latin-1 (arabe, emoji, certains
+    // noms) serait réinterprété et corrompu silencieusement. C'est une
+    // application médicale en Algérie — on force UTF-8.
+    initdbFlags: ["--encoding=UTF8", "--no-locale"],
+    postgresFlags: [
+      // Écoute sur l'interface de bouclage uniquement.
+      "-c",
+      "listen_addresses=127.0.0.1",
+    ],
+    onLog: (m) => console.log(`[postgres] ${m}`),
+    onError: (m) => console.error(`[postgres] ${m}`),
   });
 
-  await server.start();
+  if (needsInitialisation) {
+    console.log("[dev-db] Premier demarrage — initialisation du catalogue …");
+    await pg.initialise();
+  }
 
-  const info = await db.query<{ version: string }>(
-    "SELECT version() AS version",
-  );
-  console.log(`[dev-db] Prêt sur ${HOST}:${PORT}`);
-  console.log(`[dev-db] ${info.rows[0].version}`);
+  await pg.start();
 
-  const shutdown = async (signal: string) => {
-    console.log(`\n[dev-db] Arrêt (${signal}) …`);
-    try {
-      await server.stop();
-      await db.close();
-    } finally {
-      process.exit(0);
-    }
+  console.log(`[dev-db] Pret sur 127.0.0.1:${PORT}`);
+  console.log(`[dev-db] Utilisateur : ${USER}`);
+  console.log("[dev-db] Arret propre : Ctrl+C (un arret brutal laisse un verrou)");
+
+  const shutdown = (signal: string) => {
+    console.log(`\n[dev-db] Arret (${signal}) …`);
+    pg.stop()
+      .catch((e) => console.error("[dev-db] Arret impropore :", e))
+      .finally(() => process.exit(0));
   };
 
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 main().catch((err) => {
-  console.error("[dev-db] Échec :", err);
+  console.error("[dev-db] Echec :", err);
   process.exit(1);
 });
