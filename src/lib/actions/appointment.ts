@@ -2,7 +2,7 @@
 
 import { db } from "@/lib/db/db";
 import { appointments, patients, users, clinicMemberships, clinics } from "@/lib/db/schema";
-import { eq, and, or, lt, gt, notInArray, ne, gte, lte, asc, inArray } from "drizzle-orm";
+import { eq, and, or, lt, gt, notInArray, ne, gte, asc, inArray } from "drizzle-orm";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow } from "@/lib/auth-utils";
 import { requireOwnedPatient } from "@/lib/guards";
@@ -32,6 +32,97 @@ const appointmentSchema = z.object({
   notes: z.string().optional().or(z.literal("")),
   color: z.string().optional().or(z.literal("")),
 });
+
+/**
+ * Z-53 — parse une date-heure de formulaire dans le fuseau de la CLINIQUE.
+ *
+ * Deux formes acceptées :
+ *  • ISO 8601 avec offset (`2026-06-15T09:00:00.000Z`, `…+01:00`) : instant
+ *    absolu déjà non ambigu, `Date` fait foi telle quelle ;
+ *  • forme naive `YYYY-MM-DDTHH:mm[:ss]` — format natif des `<input
+ *    type="datetime-local">` — interprétée comme une heure LOCALE de la clinique
+ *    (Alger). `new Date("2026-06-15T09:00")` l'interpréterait dans le fuseau du
+ *    SERVEUR (une chaîne sans offset est « server-local » en ECMAScript) : serveur
+ *    UTC + clinique Alger = RDV enregistrés avec 1 h d'avance, silencieusement.
+ *
+ * Le décalage provient de `offsetMinutesForTz` (DST-aware, déjà employé partout
+ * ailleurs dans ce module) : aucun calcul de fuseau n'est réécrit ici. Deux
+ * passes : l'offset est d'abord relevé sur l'instant « probe » (la date visée
+ * exprimée en UTC), puis recalculé sur l'instant résultant — si une transition
+ * d'heure locale sépare les deux, la seconde valeur l'emporte.
+ *
+ * Retourne `null` si la chaîne est vide, mal formée ou si le calendrier est
+ * invalide (`2026-02-31`) : l'appelant renvoie alors une erreur de champ (400)
+ * au lieu d'un `Invalid Date` qui se propageait dans les comparaisons jusqu'à un
+ * `RangeError` non intercepté (500).
+ */
+function parseClinicDateTime(value: string, timeZone: string): Date | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+
+  // Offset explicite : lecture directe, sans réinterprétation.
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+    const withOffset = new Date(trimmed);
+    return Number.isNaN(withOffset.getTime()) ? null : withOffset;
+  }
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? "0");
+
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const probe = new Date(asUtc);
+  // `Date.UTC` « roule » les composants hors plage (2026-02-31 → 2026-03-03,
+  // 25 h → lendemain 01:00) : on rejette tout aller-retour non conservant.
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day ||
+    probe.getUTCHours() !== hour ||
+    probe.getUTCMinutes() !== minute ||
+    probe.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  const firstOffset = offsetMinutesForTz(timeZone, probe);
+  let instant = asUtc - firstOffset * 60_000;
+  const secondOffset = offsetMinutesForTz(timeZone, new Date(instant));
+  if (secondOffset !== firstOffset) {
+    instant = asUtc - secondOffset * 60_000;
+  }
+  return new Date(instant);
+}
+
+/**
+ * Z-53 — bornes `[start, end)` (fin EXCLUSIVE) d'une journée `YYYY-MM-DD` dans
+ * le fuseau de la CLINIQUE.
+ *
+ * Remplace le découpage `setHours(0,0,0,0)` / `setHours(23,59,59,999)` effectué
+ * sur le fuseau du SERVEUR : avec un serveur UTC et une clinique Alger
+ * (UTC+1), la tranche algéroise 00:00–01:00 (et la dernière minute du jour)
+ * sortait de l'intervalle. L'offset de chaque borne est relevé à midi (probe UTC
+ * du jour — même convention que `getAvailableSlots`) puis réappliqué : une
+ * journée à cheval sur une transition d'heure reste exacte.
+ */
+function clinicDayBounds(timeZone: string, clinicDate: string): { start: Date; end: Date } {
+  const [year, month, day] = clinicDate.split("-").map(Number);
+  const dayStartUtc = Date.UTC(year, month - 1, day);
+  const nextDayStartUtc = Date.UTC(year, month - 1, day + 1);
+  const noonProbeMs = 12 * 60 * 60 * 1000;
+  const startOffset = offsetMinutesForTz(timeZone, new Date(dayStartUtc + noonProbeMs));
+  const endOffset = offsetMinutesForTz(timeZone, new Date(nextDayStartUtc + noonProbeMs));
+  return {
+    start: new Date(dayStartUtc - startOffset * 60_000),
+    end: new Date(nextDayStartUtc - endOffset * 60_000),
+  };
+}
 
 interface AppointmentConflict {
   id: string;
@@ -119,16 +210,25 @@ export async function createAppointment(
     return { error: { general: ["Erreur lors de la création du rendez-vous"] } };
   }
 
-  const startTimeValue = new Date(data.startTime);
+  // Z-53 : le fuseau de la clinique est nécessaire AVANT le parsing — les dates
+  // du formulaire sont normalisées comme heures LOCALES de la clinique.
+  const dentistId = data.dentistId && data.dentistId !== "" ? data.dentistId : null;
+  const { openingTime, closingTime, minGapMinutes, timezone } = await getClinicHoursAndGap(clinicId, dentistId);
+
+  const startTimeValue = parseClinicDateTime(data.startTime, timezone);
+  if (!startTimeValue) {
+    return { error: { startTime: ["Date et heure de début invalide"] } };
+  }
   const endTimeValue = data.endTime && data.endTime !== ""
-    ? new Date(data.endTime)
+    ? parseClinicDateTime(data.endTime, timezone)
     : new Date(startTimeValue.getTime() + 30 * 60 * 1000);
+  if (!endTimeValue) {
+    return { error: { endTime: ["Date et heure de fin invalide"] } };
+  }
 
   if (endTimeValue <= startTimeValue) {
     return { error: { general: ["L'heure de fin doit être après l'heure de début"] } };
   }
-
-  const dentistId = data.dentistId && data.dentistId !== "" ? data.dentistId : null;
 
   if (dentistId) {
     const dentistMember = await db
@@ -181,7 +281,6 @@ export async function createAppointment(
     });
   }
 
-  const { openingTime, closingTime, minGapMinutes, timezone } = await getClinicHoursAndGap(clinicId, dentistId);
   const scheduleMap = await getClinicScheduleMap(clinicId);
   const clinicDate = getClinicDateString(timezone, startTimeValue);
   const dayHours = resolveClinicHoursForDate(clinicDate, timezone, scheduleMap, openingTime, closingTime);
@@ -338,16 +437,41 @@ export async function updateAppointment(
 
   const data = validated.data;
 
-  const startTimeValue = new Date(data.startTime);
+  // Z-54 — `patientId` provient du formulaire (le select « Patient » n'est PAS
+  // désactivé en édition : l'UI autorise le changement de patient). Il doit donc
+  // exister, appartenir à la clinique courante et ne pas être archivé — même
+  // garde que `createAppointment`, placée AVANT la détection de conflit (qui
+  // joint `patients` et renvoie un nom de patient dans le payload d'erreur) et
+  // AVANT l'écriture, qui applique désormais ce `patientId`.
+  try {
+    await requireOwnedPatient(clinicId, data.patientId);
+  } catch (e) {
+    if (isRedirectOrReject(e)) throw e;
+    if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
+      return { error: { general: ["Patient introuvable ou archivé"] } };
+    }
+    return { error: { general: ["Erreur lors de la mise à jour du rendez-vous"] } };
+  }
+
+  // Z-53 : le fuseau de la clinique est nécessaire AVANT le parsing — les dates
+  // du formulaire sont normalisées comme heures LOCALES de la clinique.
+  const dentistId = data.dentistId && data.dentistId !== "" ? data.dentistId : null;
+  const { openingTime, closingTime, minGapMinutes, timezone } = await getClinicHoursAndGap(clinicId, dentistId);
+
+  const startTimeValue = parseClinicDateTime(data.startTime, timezone);
+  if (!startTimeValue) {
+    return { error: { startTime: ["Date et heure de début invalide"] } };
+  }
   const endTimeValue = data.endTime && data.endTime !== ""
-    ? new Date(data.endTime)
+    ? parseClinicDateTime(data.endTime, timezone)
     : new Date(startTimeValue.getTime() + 30 * 60 * 1000);
+  if (!endTimeValue) {
+    return { error: { endTime: ["Date et heure de fin invalide"] } };
+  }
 
   if (endTimeValue <= startTimeValue) {
     return { error: { general: ["L'heure de fin doit être après l'heure de début"] } };
   }
-
-  const dentistId = data.dentistId && data.dentistId !== "" ? data.dentistId : null;
 
   if (dentistId) {
     const dentistMember = await db
@@ -401,7 +525,6 @@ export async function updateAppointment(
     });
   }
 
-  const { openingTime, closingTime, minGapMinutes, timezone } = await getClinicHoursAndGap(clinicId, dentistId);
   const scheduleMap = await getClinicScheduleMap(clinicId);
   const clinicDate = getClinicDateString(timezone, startTimeValue);
   const dayHours = resolveClinicHoursForDate(clinicDate, timezone, scheduleMap, openingTime, closingTime);
@@ -424,6 +547,11 @@ export async function updateAppointment(
       .set({
         startTime: startTimeValue,
         endTime: endTimeValue,
+        // Z-54 — le patient du formulaire est DÉSORMAIS appliqué : sans cette
+        // ligne, l'audit enregistrait `after.patientId = data.patientId` alors
+        // que la ligne conservait l'ancien patient (audit mensonger), et les
+        // conflits étaient calculés sur un patient jamais écrit.
+        patientId: data.patientId,
         dentistId,
         type: data.type || null,
         notes: data.notes || null,
@@ -456,6 +584,11 @@ export async function updateAppointment(
 
     revalidatePath("/appointments");
     revalidatePath(`/patients/${data.patientId}`);
+    // Z-54 : si le patient a changé, la page de l'ancien patient doit aussi
+    // être invalidée (ce RDV n'y figure plus).
+    if (current.patientId !== data.patientId) {
+      revalidatePath(`/patients/${current.patientId}`);
+    }
     redirect("/appointments");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
@@ -523,12 +656,19 @@ export async function getAppointmentsForDate(date: Date) {
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
 
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-
   try {
+    // Z-53 : la journée est bornée dans le fuseau de la CLINIQUE
+    // (`getClinicDateString` + `clinicDayBounds`/`offsetMinutesForTz`) et NON
+    // plus dans celui du serveur (`setHours(0,0,0,0)` tronquait la nuit locale).
+    const clinic = await db.query.clinics.findFirst({
+      where: eq(clinics.id, clinicId),
+    });
+    const timezone = clinic?.timezone ?? "Africa/Algiers";
+    const { start, end } = clinicDayBounds(
+      timezone,
+      getClinicDateString(timezone, date),
+    );
+
     const results = await db
       .select({
         appointment: appointments,
@@ -540,7 +680,7 @@ export async function getAppointmentsForDate(date: Date) {
         and(
           eq(appointments.clinicId, clinicId),
           gte(appointments.startTime, start),
-          lte(appointments.startTime, end),
+          lt(appointments.startTime, end),
         )
       )
       .orderBy(asc(appointments.startTime));

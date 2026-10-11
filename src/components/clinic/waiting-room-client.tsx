@@ -26,6 +26,18 @@ interface WaitingRoomClientProps {
   initialEntries: WaitingEntry[];
 }
 
+/**
+ * Les entrées affichées sont les 3 statuts ACTIFS (`getWaitingRoom`) : on
+ * distingue visuellement un patient simplement en attente d'un patient déjà
+ * appelé ou en cours de soin, sinon on verrait un patient « présent » sans
+ * savoir dans quel état il est.
+ */
+const WAITING_STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  waiting: { label: "En attente", className: "bg-amber/10 text-amber" },
+  called: { label: "Appelé", className: "bg-cerulean/10 text-cerulean" },
+  in_treatment: { label: "En soin", className: "bg-teal/10 text-teal" },
+};
+
 export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
   const router = useRouter();
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
@@ -50,7 +62,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm text-cool-500">
-          {initialEntries.length} patient(s) en attente
+          {initialEntries.length} patient(s) présent(s)
         </p>
         <div className="flex items-center gap-3">
           <span className="text-xs text-cool-400">
@@ -74,7 +86,9 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
         </div>
       )}
 
-      {initialEntries.map(({ entry, patient }) => (
+      {initialEntries.map(({ entry, patient }) => {
+        const statusBadge = WAITING_STATUS_BADGES[entry.status];
+        return (
         <div
           key={entry.id}
           className="flex items-center justify-between rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-4 shadow-sm"
@@ -84,9 +98,16 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
               {patient.firstName[0]}{patient.lastName[0]}
             </div>
             <div>
-              <p className="font-medium text-cool-900">
-                {patient.lastName} {patient.firstName}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="font-medium text-cool-900">
+                  {patient.lastName} {patient.firstName}
+                </p>
+                {statusBadge && (
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge.className}`}>
+                    {statusBadge.label}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-cool-400">
                 Arrivé à {new Date(entry.arrivedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                 {patient.phone && ` · ${patient.phone}`}
@@ -113,7 +134,8 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
             </form>
           </div>
         </div>
-      ))}
+        );
+      })}
 
       <div className="rounded-lg bg-cool-50 p-3 text-center text-xs text-cool-400">
         Mise à jour automatique toutes les {initialEntries.length > 0 ? "5" : "15"} secondes

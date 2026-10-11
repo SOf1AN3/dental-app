@@ -66,7 +66,7 @@ async function ReceptionStats({
   todayStart: Date;
   tomorrowStart: Date;
 }) {
-  const [[{ count: apptCount }], [{ count: waitingCount }], [unpaid]] = await Promise.all([
+  const [[{ count: apptCount }], [{ count: presentCount }], [unpaid]] = await Promise.all([
     db
       .select({ count: count() })
       .from(appointments)
@@ -74,7 +74,10 @@ async function ReceptionStats({
     db
       .select({ count: count() })
       .from(waitingRoomEntries)
-      .where(and(eq(waitingRoomEntries.clinicId, clinicId), eq(waitingRoomEntries.status, "waiting"))),
+      // Mêmes statuts « actifs » que l'unicité `uq_waiting_room_active_patient_clinic`
+      // (et que `getWaitingRoom`) : filtrer sur `waiting` seul masquait les
+      // patients appelés / en soin qui continuaient de bloquer le ré-ajout.
+      .where(and(eq(waitingRoomEntries.clinicId, clinicId), inArray(waitingRoomEntries.status, ["waiting", "called", "in_treatment"]))),
     db
       .select({ count: count(), total: sum(invoices.total) })
       .from(invoices)
@@ -91,7 +94,7 @@ async function ReceptionStats({
       <StatCards
         stats={[
           { label: "RDV aujourd'hui", value: String(apptCount), color: "bg-mint" },
-          { label: "En salle d'attente", value: String(waitingCount), color: "bg-amber" },
+          { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber" },
           { label: "Factures ouvertes", value: String(unpaid?.count ?? 0), color: "bg-cerulean" },
           {
             label: "Montant à recouvrer",

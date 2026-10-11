@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { db } from "@/lib/db/db";
 import { appointments, patients, invoices, waitingRoomEntries } from "@/lib/db/schema";
-import { eq, and, gte, lt, count, sum } from "drizzle-orm";
+import { eq, and, gte, lt, count, sum, inArray } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
 import { UserPlus } from "lucide-react";
 import { RevenueChart } from "@/components/clinic/revenue-chart";
@@ -84,7 +84,7 @@ async function OwnerStats({
   const [
     [{ count: totalPatients }],
     [{ count: todayApptCount }],
-    [{ count: waitingCount }],
+    [{ count: presentCount }],
     [{ total: todayRevenue }],
   ] = await Promise.all([
     db.select({ count: count() }).from(patients).where(eq(patients.clinicId, clinicId)),
@@ -95,7 +95,10 @@ async function OwnerStats({
     db
       .select({ count: count() })
       .from(waitingRoomEntries)
-      .where(and(eq(waitingRoomEntries.clinicId, clinicId), eq(waitingRoomEntries.status, "waiting"))),
+      // Mêmes statuts « actifs » que l'unicité `uq_waiting_room_active_patient_clinic`
+      // (et que `getWaitingRoom`) : filtrer sur `waiting` seul masquait les
+      // patients appelés / en soin qui continuaient de bloquer le ré-ajout.
+      .where(and(eq(waitingRoomEntries.clinicId, clinicId), inArray(waitingRoomEntries.status, ["waiting", "called", "in_treatment"]))),
     db
       .select({ total: sum(invoices.total) })
       .from(invoices)
@@ -107,7 +110,7 @@ async function OwnerStats({
       stats={[
         { label: "Patients", value: String(totalPatients), color: "bg-cerulean" },
         { label: "RDV aujourd'hui", value: String(todayApptCount), color: "bg-mint" },
-        { label: "En salle d'attente", value: String(waitingCount), color: "bg-amber" },
+        { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber" },
         {
           label: "Revenu global du jour",
           value: formatCurrency(Number(todayRevenue) || 0),

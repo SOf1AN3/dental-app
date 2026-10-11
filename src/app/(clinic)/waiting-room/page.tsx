@@ -1,29 +1,13 @@
-import { db } from "@/lib/db/db";
-import { waitingRoomEntries, patients } from "@/lib/db/schema";
-import { eq, and, asc } from "drizzle-orm";
-import { getCurrentClinicId } from "@/lib/multi-tenant";
-import { requireAuth } from "@/lib/auth-utils";
+import { getWaitingRoom } from "@/lib/actions/waiting-room";
 import { WaitingRoomClient } from "@/components/clinic/waiting-room-client";
 import { UrgenceAdmission } from "@/components/clinic/urgence-admission";
 
 export default async function WaitingRoomPage() {
-  await requireAuth();
-  const clinicId = await getCurrentClinicId();
-
-  const entries = await db
-    .select({
-      entry: waitingRoomEntries,
-      patient: patients,
-    })
-    .from(waitingRoomEntries)
-    .innerJoin(patients, eq(waitingRoomEntries.patientId, patients.id))
-    .where(
-      and(
-        eq(waitingRoomEntries.clinicId, clinicId),
-        eq(waitingRoomEntries.status, "waiting"),
-      )
-    )
-    .orderBy(asc(waitingRoomEntries.arrivedAt));
+  // getWaitingRoom() fait déjà `requireAuth` + garde d'accès clinique et lit
+  // les 3 statuts ACTIFS (`waiting | called | in_treatment`), exactement ceux
+  // de l'unicité `uq_waiting_room_active_patient_clinic` — un patient appelé ou
+  // en soin reste visible au lieu de disparaître tout en bloquant son ré-ajout.
+  const entries = await getWaitingRoom();
 
   return (
     <div>

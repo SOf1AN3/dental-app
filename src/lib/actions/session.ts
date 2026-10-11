@@ -16,7 +16,7 @@ import {
 } from "@/lib/db/schema";
 import { getCurrentClinicId, requireClinicAccess } from "@/lib/multi-tenant";
 import { requireAuth, requireClinicAccessOrThrow, hasAbility } from "@/lib/auth-utils";
-import { eq, ne, and, asc, desc, sql, inArray } from "drizzle-orm";
+import { eq, ne, and, asc, desc, sql, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -1071,6 +1071,7 @@ export async function deleteSession(
         patientId: clinicalSessions.patientId,
         dentistId: clinicalSessions.dentistId,
         status: clinicalSessions.status,
+        appointmentId: clinicalSessions.appointmentId,
       })
       .from(clinicalSessions)
       .where(
@@ -1109,6 +1110,18 @@ export async function deleteSession(
     }
 
     await db.transaction(async (tx) => {
+      // Z-59 — la suppression cible l'entrée LIÉE À CETTE SÉANCE, plus toutes les
+      // entrées actives du patient (l'ancien filtre `clinicId + patientId +
+      // status actif` détruisait aussi l'entrée d'un AUTRE parcours du même
+      // patient : deux entrées actives ⇒ suppression en cascade des deux).
+      //
+      // Le lien disponible sans migration : `waiting_room_entry.appointment_id`.
+      //  • séance rattachée à un RDV → l'entrée portant CE `appointment_id` ;
+      //  • séance sans RDV (walk-in / démarrée depuis la fiche patient) →
+      //    l'entrée walk-in (`appointment_id IS NULL`), seule entrée rattachable
+      //    à une telle séance.
+      // `clinicId + patientId + statut actif` restent en place (défense en
+      // profondeur + index existant).
       await tx
         .delete(waitingRoomEntries)
         .where(
@@ -1120,6 +1133,9 @@ export async function deleteSession(
               "called",
               "in_treatment",
             ]),
+            ...(session.appointmentId
+              ? [eq(waitingRoomEntries.appointmentId, session.appointmentId)]
+              : [isNull(waitingRoomEntries.appointmentId)]),
           ),
         );
 
