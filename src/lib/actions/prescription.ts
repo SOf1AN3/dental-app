@@ -152,11 +152,20 @@ export async function getPrescription(id: string) {
         )
       : await itemsQuery.orderBy(asc(prescriptionItems.name));
 
+    // Z-51 : alertes d'allergie par correspondance textuelle, recalculées à
+    // chaque lecture pour l'affichage persistant (page de détails / édition).
+    // `findAllergyAlerts` avale ses propres erreurs de lecture : un antécédent
+    // illisible ne doit jamais faire échouer la page.
+    const warnings = formatAllergyAlerts(
+      await findAllergyAlerts(clinicId, row.patient.id, items),
+    );
+
     return {
       ...row.prescription,
       patient: row.patient,
       dentistName: row.dentistName,
       items,
+      warnings,
     };
   } catch {
     return null;
@@ -330,29 +339,52 @@ async function findAllergyAlerts(
 }
 
 /**
- * Signale une alerte allergie détectée. Le contrat de retour des actions
- * (et l'UI) ne permet pas d'afficher un avertissement sans le bloquer : la
- * trace est donc écrite dans le journal serveur et la piste d'audit de
- * l'ordonnance (`allergyAlerts`). Un affichage clinique requiert un élargissement
- * du contrat — signalé au Lead.
+ * Z-51 — messages d'alerte remontés au client (bandeau ambre) et écrits dans
+ * la piste d'audit (`allergyAlerts`).
+ *
+ * Aucune trace n'est écrite dans les logs serveur : une donnée de santé
+ * (antécédent + médicament) n'a pas à y figurer — hors contrôle d'accès et
+ * hors conservation. L'audit suffit à la traçabilité.
  */
-function reportAllergyAlerts(
-  clinicId: string,
-  prescriptionId: string,
-  alerts: AllergyAlert[],
-): void {
-  if (alerts.length === 0) return;
-  console.warn("Alerte allergie détectée à la prescription", {
-    clinicId,
-    prescriptionId,
-    alerts,
-  });
+function formatAllergyAlerts(alerts: AllergyAlert[]): string[] {
+  return alerts.map(
+    (alert) =>
+      `« ${alert.medication} » — correspondance possible avec l'antécédent « ${alert.condition} »`,
+  );
+}
+
+/**
+ * Z-51 — joint les alertes au retour de l'action, uniquement si non vides.
+ *
+ * Le champ `warnings` est OPTIONNEL : c'est un élargissement rétro-compatible
+ * du contrat (les consommateurs ne lisent que `error` / `success`).
+ */
+function withAllergyWarnings<T extends object>(
+  state: T,
+  warnings: string[],
+): T & { warnings?: string[] } {
+  return warnings.length > 0 ? { ...state, warnings } : state;
+}
+
+/**
+ * Z-51 — état partagé des actions `createPrescription` / `updatePrescription`
+ * (contrat `useActionState` de l'éditeur).
+ *
+ * `warnings` élargit le contrat de retour : champ OPTIONNEL, donc
+ * rétro-compatible — l'éditeur ne lit aujourd'hui que `error` / `success`.
+ * Il porte les alertes d'allergie détectées par correspondance textuelle
+ * (aide à la décision, JAMAIS un blocage).
+ */
+export interface PrescriptionFormState {
+  error?: Record<string, string[] | undefined>;
+  warnings?: string[];
+  success?: boolean;
 }
 
 export async function createPrescription(
-  prevState: { error?: Record<string, string[]> } | undefined,
+  prevState: PrescriptionFormState | undefined,
   formData: FormData,
-) {
+): Promise<PrescriptionFormState> {
   const user = await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
@@ -379,6 +411,18 @@ export async function createPrescription(
   const items = normalizeItems(data.items);
   const sessionId = formData.get("sessionId") as string | null;
 
+  // Z-51 : alertes d'allergie (aide à la décision, JAMAIS un blocage) lues
+  // AVANT toute écriture et calculées dès la validation réussie, pour être
+  // jointes à tous les retours de l'action susceptibles d'atteindre l'UI
+  // (le succès redirige vers la liste : un bandeau après création réussie
+  // relève de l'éditeur — cf. rapport au Lead).
+  const allergyAlerts = await findAllergyAlerts(
+    clinicId,
+    data.patientId,
+    items,
+  );
+  const allergyWarnings = formatAllergyAlerts(allergyAlerts);
+
   try {
     // Garde d'appartenance : `patientId` provient du client. Lève
     // `Error("Patient introuvable ou archivé")` si le patient n'existe pas,
@@ -394,20 +438,14 @@ export async function createPrescription(
       });
 
       if (!session) {
-        return { error: { general: ["Séance introuvable"] } };
+        return withAllergyWarnings(
+          { error: { general: ["Séance introuvable"] } },
+          allergyWarnings,
+        );
       }
     }
 
     let createdId: string | undefined;
-
-    // Z-51 : lecture des antécédents actifs du patient AVANT l'INSERT, pour
-    // alerter (sans bloquer) sur une allergie textuellement associée à un
-    // médicament de l'ordonnance.
-    const allergyAlerts = await findAllergyAlerts(
-      clinicId,
-      data.patientId,
-      items,
-    );
 
     // Z-45 : ordre de saisie des lignes, si la colonne est migrée.
     const useOrderIndex = await prescriptionItemsHaveOrderIndex();
@@ -451,7 +489,6 @@ export async function createPrescription(
           ...(allergyAlerts.length > 0 ? { allergyAlerts } : {}),
         },
       });
-      reportAllergyAlerts(clinicId, createdId, allergyAlerts);
     }
 
     if (sessionId) {
@@ -466,17 +503,23 @@ export async function createPrescription(
     // Erreur d'accès (patient d'une autre clinique, inexistant ou archivé) :
     // remontée telle quelle, distincte de l'erreur technique générique.
     if (e instanceof Error && e.message === "Patient introuvable ou archivé") {
-      return { error: { general: ["Patient introuvable ou archivé"] } };
+      return withAllergyWarnings(
+        { error: { general: ["Patient introuvable ou archivé"] } },
+        allergyWarnings,
+      );
     }
-    return { error: { general: ["Erreur lors de la création de l'ordonnance"] } };
+    return withAllergyWarnings(
+      { error: { general: ["Erreur lors de la création de l'ordonnance"] } },
+      allergyWarnings,
+    );
   }
 }
 
 export async function updatePrescription(
   id: string,
-  prevState: { error?: Record<string, string[]> } | undefined,
+  prevState: PrescriptionFormState | undefined,
   formData: FormData,
-) {
+): Promise<PrescriptionFormState> {
   await requireAuth();
   const clinicId = await getCurrentClinicId();
   await requireClinicAccessOrThrow(clinicId);
@@ -501,6 +544,12 @@ export async function updatePrescription(
   const data = validated.data;
   const items = normalizeItems(data.items);
 
+  // Z-51 : alertes d'allergie (aide à la décision, JAMAIS un blocage) jointes
+  // à tous les retours de l'action, succès COMPRIS : le bandeau reste donc
+  // visible après un enregistrement réussi. Élargissement rétro-compatible du
+  // contrat (`warnings` est un champ optionnel du retour).
+  let allergyAlerts: AllergyAlert[] = [];
+
   try {
     const [existing] = await db
       .select({
@@ -516,9 +565,9 @@ export async function updatePrescription(
       return { error: { general: ["Ordonnance introuvable"] } };
     }
 
-    // Z-51 : alerte allergie (sans blocage) — mêmes antécédents que ceux
-    // vérifiés à la création, les lignes étant entièrement réécrites.
-    const allergyAlerts = await findAllergyAlerts(
+    // Z-51 : mêmes antécédents que ceux vérifiés à la création, les lignes
+    // étant entièrement réécrites.
+    allergyAlerts = await findAllergyAlerts(
       clinicId,
       existing.patientId,
       items,
@@ -559,7 +608,6 @@ export async function updatePrescription(
         ...(allergyAlerts.length > 0 ? { allergyAlerts } : {}),
       },
     });
-    reportAllergyAlerts(clinicId, id, allergyAlerts);
 
     revalidatePath(`/prescriptions/${id}`);
     revalidatePath("/prescriptions");
@@ -568,9 +616,17 @@ export async function updatePrescription(
     if (existing.sessionId) {
       revalidatePath(`/patients/${existing.patientId}/session/${existing.sessionId}`);
     }
-    return { success: true };
+    return withAllergyWarnings(
+      { success: true },
+      formatAllergyAlerts(allergyAlerts),
+    );
   } catch {
-    return { error: { general: ["Erreur lors de la mise à jour de l'ordonnance"] } };
+    // `allergyAlerts` n'est renseigné qu'après lecture de l'ordonnance : un
+    // échec plus tôt ne joint donc aucune alerte (à défaut de patient fiable).
+    return withAllergyWarnings(
+      { error: { general: ["Erreur lors de la mise à jour de l'ordonnance"] } },
+      formatAllergyAlerts(allergyAlerts),
+    );
   }
 }
 

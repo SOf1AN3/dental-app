@@ -5,18 +5,28 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { ProsthesisStatusBadge } from "@/components/clinic/prosthesis-status-badge";
+import { AlertTriangle } from "lucide-react";
 
 export default async function LabDetailPage(props: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ confirm?: string; error?: string }>;
 }) {
   await requireAuth();
   await getCurrentClinicId();
   const { id } = await props.params;
+  const search = await props.searchParams;
 
   const lab = await getLab(id);
   if (!lab) notFound();
 
   const orders = await getLabOrders(id);
+
+  // Z-50 : étape de confirmation avant suppression (le laboratoire peut être
+  // rattaché à des commandes que la suppression détacherait).
+  const confirming = search.confirm === "1";
+  // Z-50 : message de refus éventuel transmis par `deleteLab` (redirection
+  // retour) — affiché tel quel, React l'échappe.
+  const deleteError = typeof search.error === "string" ? search.error : null;
 
   return (
     <div>
@@ -37,16 +47,64 @@ export default async function LabDetailPage(props: {
           >
             Modifier
           </Link>
-          <form action={deleteLab.bind(null, id)}>
-            <button
-              type="submit"
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
-            >
-              Supprimer
-            </button>
-          </form>
+          <Link
+            href={`/prostheses/labs/${id}?confirm=1`}
+            className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+          >
+            Supprimer
+          </Link>
         </div>
       </div>
+
+      {deleteError && (
+        <div
+          role="alert"
+          className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400"
+        >
+          {deleteError}
+        </div>
+      )}
+
+      {confirming && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              aria-hidden="true"
+              className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+            />
+            <div>
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
+                Confirmer la suppression du laboratoire « {lab.name} » ?
+              </p>
+              <p className="mt-1 text-sm text-amber-800/90 dark:text-amber-400">
+                {orders.length > 0
+                  ? `${orders.length} commande(s) sont rattachées à ce laboratoire : sa suppression les détachera (elles perdront leur laboratoire).`
+                  : "Aucune commande n'est rattachée à ce laboratoire."}{" "}
+                Cette action est irréversible.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <form action={deleteLab.bind(null, id)}>
+              {/* Z-50 : confirmation explicite exigée par `deleteLab` pour un
+                  laboratoire rattaché à des commandes. */}
+              <input type="hidden" name="confirm" value="true" />
+              <button
+                type="submit"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+              >
+                Confirmer la suppression
+              </button>
+            </form>
+            <Link
+              href={`/prostheses/labs/${id}`}
+              className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            >
+              Annuler
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">

@@ -5,7 +5,7 @@ import { formatDate } from "@/lib/utils";
 import { PrescriptionStatusBadge } from "@/components/clinic/prescription-status-badge";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Pencil, Printer } from "lucide-react";
+import { Pencil, Printer, AlertTriangle } from "lucide-react";
 
 export default async function PrescriptionDetailPage(props: {
   params: Promise<{ id: string }>;
@@ -32,6 +32,38 @@ export default async function PrescriptionDetailPage(props: {
           ← Retour aux ordonnances
         </Link>
       </div>
+
+      {rx.warnings.length > 0 && (
+        <aside
+          aria-label="Alerte d'allergie possible"
+          className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400"
+        >
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+          />
+          <div>
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-400">
+              Allergie possible — vérification manuelle requise
+            </p>
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-amber-800/90 dark:text-amber-400">
+              {rx.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400/90">
+              Détection automatique <strong>purement textuelle</strong> et très
+              imparfaite : elle compare par simple inclusion de mots les noms
+              saisis aux antécédents libres du patient. Intolérances, noms de
+              marque, classes thérapeutiques et fautes de frappe lui échappent,
+              et de faux positifs sont possibles.{" "}
+              <strong>Une absence d&apos;alerte n&apos;exclut jamais une allergie</strong>{" "}
+              : ce sont les antécédents du patient qu&apos;il faut vérifier
+              systématiquement.
+            </p>
+          </div>
+        </aside>
+      )}
 
       <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 mb-6">
         <div className="flex items-start justify-between mb-4">

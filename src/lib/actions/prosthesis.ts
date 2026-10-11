@@ -261,24 +261,23 @@ export async function updateLab(
 /**
  * Z-50 : messages de refus de suppression d'un laboratoire.
  *
- * `deleteLab` a un contrat `Promise<void>` : aucun champ d'erreur n'est
- * possible. Plutôt que de rediriger « en succès » alors que rien n'a été
- * supprimé (Z-48) ou que toutes les commandes perdraient leur laboratoire
- * (`ON DELETE SET NULL`), le refus est remonté comme exception — ce qui
- * déclenche le gestionnaire d'erreurs côté Next.
+ * `deleteLab` conserve son contrat `Promise<void>` : plutôt que de lever une
+ * exception (traduite par Next en page d'erreur générique, sans explication
+ * pour l'utilisateur) ou de rediriger « en succès » alors que rien n'a été
+ * supprimé (Z-48), chaque refus redirige vers la page du laboratoire
+ * avec le message en query string, où l'UI l'affiche. `redirect` lève
+ * NEXT_REDIRECT, ré-throwé par le `catch` commun du fichier.
  */
-const LAB_DELETE_NOT_FOUND_MESSAGE = "Laboratoire introuvable";
+const LAB_DELETE_NOT_FOUND_MESSAGE =
+  "Laboratoire introuvable : il a peut-être déjà été supprimé.";
 const LAB_DELETE_BLOCKED_PREFIX = "Laboratoire rattaché à ";
 const LAB_DELETE_BLOCKED_SUFFIX =
   " commande(s) : sa suppression détacherait ces commandes. " +
-  "Réaffectez-les, ou confirmez explicitement la suppression " +
-  "(champ « confirm » du formulaire).";
+  "Réaffectez-les d'abord, ou confirmez la suppression.";
 
-function isLabDeletionRefusal(message: string): boolean {
-  return (
-    message === LAB_DELETE_NOT_FOUND_MESSAGE ||
-    message.startsWith(LAB_DELETE_BLOCKED_PREFIX)
-  );
+/** URL de retour (page du laboratoire) portant le message de refus. */
+function labDeletionRefusalUrl(labId: string, message: string): string {
+  return `/prostheses/labs/${labId}?error=${encodeURIComponent(message)}`;
 }
 
 export async function deleteLab(
@@ -290,9 +289,8 @@ export async function deleteLab(
   await requireClinicAccessOrThrow(clinicId);
 
   // Z-50 : confirmation explicite requise pour supprimer un laboratoire
-  // encore rattaché à des commandes. Le formulaire actuel n'envoie pas ce
-  // champ : la suppression d'un labo lié est donc REFUSÉE tant que l'UI de
-  // confirmation n'a pas été ajoutée (hors périmètre de cette tâche).
+  // encore rattaché à des commandes. L'UI affiche une étape de confirmation
+  // (`?confirm=1`) qui envoie ce champ.
   const confirmed =
     formData.get("confirm") === "true" || formData.get("confirm") === "1";
 
@@ -306,7 +304,10 @@ export async function deleteLab(
       .limit(1);
 
     if (!current) {
-      throw new Error(LAB_DELETE_NOT_FOUND_MESSAGE);
+      // Z-48/Z-50 : refus remonté à l'utilisateur (redirection retour) plutôt
+      // qu'en exception : une exception se traduirait par la page d'erreur
+      // générique de Next, sans explication.
+      redirect(labDeletionRefusalUrl(labId, LAB_DELETE_NOT_FOUND_MESSAGE));
     }
 
     // Z-50 : les commandes référencent le laboratoire avec
@@ -324,8 +325,12 @@ export async function deleteLab(
     const linkedCount = linked?.count ?? 0;
 
     if (linkedCount > 0 && !confirmed) {
-      throw new Error(
-        `${LAB_DELETE_BLOCKED_PREFIX}${linkedCount}${LAB_DELETE_BLOCKED_SUFFIX}`,
+      // Z-50 : refus remonté à l'utilisateur (redirection retour).
+      redirect(
+        labDeletionRefusalUrl(
+          labId,
+          `${LAB_DELETE_BLOCKED_PREFIX}${linkedCount}${LAB_DELETE_BLOCKED_SUFFIX}`,
+        ),
       );
     }
 
@@ -345,9 +350,9 @@ export async function deleteLab(
     revalidatePath("/prostheses/labs");
     redirect("/prostheses");
   } catch (e) {
+    // Z-48/Z-50 : refus et succès redirigent — `redirect` lève NEXT_REDIRECT,
+    // qui doit être ré-throwé tel quel.
     if (isRedirectOrReject(e)) throw e;
-    // Z-48/Z-50 : les refus sont remontés tels quels (contrat `Promise<void>`).
-    if (e instanceof Error && isLabDeletionRefusal(e.message)) throw e;
     // Erreur technique : rien n'a été supprimé → pas de redirection « succès ».
     return;
   }
