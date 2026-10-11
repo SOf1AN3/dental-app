@@ -10,6 +10,7 @@
     "seed": "npx tsx seed.ts",
     "typecheck": "tsc --noEmit",
     "db:dev": "npx tsx scripts/dev-db.ts",
+    "db:preflight": "npx tsx scripts/preflight-migration.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "npx tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
