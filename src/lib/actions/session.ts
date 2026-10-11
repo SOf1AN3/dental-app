@@ -238,20 +238,44 @@ export async function getActiveSession(
   return session ? { id: session.id } : null;
 }
 
-export async function recalculateSessionTotal(
+/**
+ * Recalcule le total de la séance **en incluant la TVA**, pour qu'il soit
+ * identique au montant facturé (le `SUM` SQL précédent ignorait `tax_rate` :
+ * un acte à 1000 DZD à 19 % affichait 1000 en séance et 1190 sur la facture).
+ *
+ * ⚠️ NON EXPORTÉE : ce module porte `"use server"`, donc toute fonction
+ * exportée en devient une Server Action invocable publiquement. Les 3 call
+ * sites sont internes au fichier.
+ */
+async function recalculateSessionTotal(
   sessionId: string,
   tx?: DbOrTx,
 ): Promise<number> {
   const client = tx ?? db;
 
-  const [row] = await client
+  const items = await client
     .select({
-      total: sql<number>`COALESCE(SUM(${clinicalSessionItems.fee} * ${clinicalSessionItems.quantity} - COALESCE(${clinicalSessionItems.discount}, 0)), 0)::float8`,
+      quantity: clinicalSessionItems.quantity,
+      fee: clinicalSessionItems.fee,
+      taxRate: clinicalSessionItems.taxRate,
+      discount: clinicalSessionItems.discount,
     })
     .from(clinicalSessionItems)
     .where(eq(clinicalSessionItems.sessionId, sessionId));
 
-  const total = Number(row?.total ?? 0);
+  // Référence métier : `docTotals` (déjà utilisée par `closeSession` pour la
+  // facture et par les devis) — la TVA est calculée en TypeScript dans
+  // billing-math.ts, donc le total séance est recalculé ici en TS plutôt qu'en
+  // SQL. La séance doit toujours afficher au patient le montant qui sera
+  // facturé (base + TVA − remise).
+  const total = docTotals(
+    items.map((item) => ({
+      quantity: item.quantity,
+      unitPrice: item.fee,
+      taxRate: item.taxRate ?? 0,
+      discount: item.discount ?? 0,
+    })),
+  ).total;
 
   await client
     .update(clinicalSessions)

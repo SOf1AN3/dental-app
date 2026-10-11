@@ -22,9 +22,88 @@
  * rounded to 2 decimals at the boundary (round2) to avoid drift.
  */
 
-/** Round to 2 decimals (DZD cents), guarding against float drift. */
+/**
+ * Round to 2 decimals (DZD cents) with commercial rounding: **half away from
+ * zero**, decided on the exact decimal digits of the value.
+ *
+ * Why not `Math.round(v * 100) / 100`? Doubles cannot represent most half
+ * cents (`2.135 * 100 === 213.49999999999997`, `42.5 * 0.19` is
+ * `8.0749999999999993`…), so a value written as an exact half cent in decimal
+ * rounds DOWN and silently under-bills one centime per line. Adding
+ * `Number.EPSILON` (~2.2e-16) does not help: it is smaller than half the ULP
+ * of `v * 100` as soon as `|v| >= 4`, so it never flips the rounding.
+ * `toFixed(2)` is not a solution either: it rounds on the exact *binary*
+ * value (`(2.675).toFixed(2) === "2.67"`).
+ *
+ * Instead, this function takes the shortest decimal representation of the
+ * double (`String(v)` — i.e. the decimal the caller wrote/intended) and
+ * rounds on those digits with pure string/integer arithmetic: no binary
+ * approximation takes part in the tie-break. A value already at cent
+ * precision is returned untouched (identity), which also preserves full
+ * precision for magnitudes beyond the `numeric(12,2)` money domain.
+ */
 export function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  if (!Number.isFinite(value)) return value;
+  if (value === 0) return 0;
+
+  const parts = parseDecimal(String(value));
+  // Exponent notation (|v| >= 1e21 or < 1e-6): far outside the money domain,
+  // keep the historical numeric rounding for those magnitudes.
+  if (!parts) return Math.round(value * 100) / 100;
+  // Already exact at cent precision: nothing to round.
+  if (parts.fraction.length <= 2) return value;
+
+  const cents = roundToCentsDigits(parts);
+  return Number(
+    `${parts.negative ? "-" : ""}${cents.slice(0, -2)}.${cents.slice(-2)}`,
+  );
+}
+
+interface DecimalParts {
+  negative: boolean;
+  /** Digits before the decimal point (never empty). */
+  integer: string;
+  /** Digits after the decimal point (may be empty). */
+  fraction: string;
+}
+
+/** Splits `String(number)` into decimal digits; null on exponent notation. */
+function parseDecimal(s: string): DecimalParts | null {
+  if (s.includes("e") || s.includes("E")) return null;
+  const negative = s.startsWith("-");
+  const body = negative ? s.slice(1) : s;
+  const dot = body.indexOf(".");
+  return {
+    negative,
+    integer: dot === -1 ? body : body.slice(0, dot),
+    fraction: dot === -1 ? "" : body.slice(dot + 1),
+  };
+}
+
+/**
+ * Digits of |value| × 100 rounded to an integer, half away from zero.
+ * The tie is decided on the decimal digits only: the first dropped digit
+ * being >= 5 rounds up.
+ */
+function roundToCentsDigits(parts: DecimalParts): string {
+  const all = parts.integer + parts.fraction;
+  const dropCount = parts.fraction.length - 2;
+  const kept = all.slice(0, all.length - dropCount);
+  const dropped = all.slice(all.length - dropCount);
+  if (dropped.charCodeAt(0) < 53 /* "5" */) return kept;
+  return incrementDigits(kept);
+}
+
+/** Adds 1 to a decimal digit string, propagating the carry ("1999" → "2000"). */
+function incrementDigits(digits: string): string {
+  let i = digits.length - 1;
+  while (i >= 0 && digits[i] === "9") i -= 1;
+  if (i < 0) return `1${"0".repeat(digits.length)}`;
+  return (
+    digits.slice(0, i) +
+    String.fromCharCode(digits.charCodeAt(i) + 1) +
+    "0".repeat(digits.length - i - 1)
+  );
 }
 
 export interface BillableLine {
@@ -41,14 +120,31 @@ export function lineBase(quantity: number, unitPrice: number): number {
   return round2(quantity * unitPrice);
 }
 
-/** Tax amount of a line: base × rate/100, rounded to 2 decimals. */
+/**
+ * Tax amount of a line: base × rate/100, rounded to 2 decimals.
+ *
+ * Computed in **integer cents** (`base_cents × rate / 100`) so the half-cent
+ * tie of the division is decided by exact integer arithmetic:
+ * 42.50 × 19 % = 4250 × 19 / 100 = 807.5 cents → 808 cents = 8.08 DZD.
+ * Computing it in floats first (`42.5 × 0.19 = 8.0749999999999993…`) rounds
+ * down to 8.07 and under-bills one centime per affected line (Z-17).
+ */
 export function lineTax(
   quantity: number,
   unitPrice: number,
   taxRate?: number | null,
 ): number {
   const rate = taxRate ?? 0;
-  return round2(lineBase(quantity, unitPrice) * (rate / 100));
+  // lineBase() is cent-precision, so ×100 recovers the integer cents exactly
+  // within the numeric(12,2) money domain (rounding error < 0.02 centime).
+  const baseCents = Math.round(lineBase(quantity, unitPrice) * 100);
+  // baseCents × rate is an exact integer — worst case in the money domain is
+  // 9 999 999 999 999 cents (max numeric(12,2)) × rate 100 = 1e15, still
+  // below 2^53 (9.007e15), so no precision loss. A tie (…50 / 100) is
+  // exactly representable, so Math.round is exact here.
+  const scaled = baseCents * rate;
+  const cents = (scaled < 0 ? -1 : 1) * Math.round(Math.abs(scaled) / 100);
+  return cents / 100;
 }
 
 /** Discount of a line (absolute amount); null/undefined treated as 0. */
