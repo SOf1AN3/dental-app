@@ -62,12 +62,12 @@ export function UrgenceAdmission() {
   }
 
   return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
+    <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-4">
       <div className="flex items-center gap-3 mb-3">
-        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700 uppercase tracking-wider dark:bg-red-900 dark:text-red-300">
+        <span className="inline-flex items-center rounded-full bg-destructive px-2.5 py-0.5 text-xs font-bold text-destructive-foreground uppercase tracking-wider">
           Urgence
         </span>
-        <p className="text-sm text-red-700 dark:text-red-300">Admettre un patient sans rendez-vous</p>
+        <p className="text-sm text-destructive">Admettre un patient sans rendez-vous</p>
       </div>
 
       <div ref={containerRef} className="relative">
@@ -81,10 +81,10 @@ export function UrgenceAdmission() {
             setError(null);
           }}
           onFocus={() => { if (results.length > 0) setOpen(true); }}
-          className="block w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 dark:border-red-900 dark:bg-cool-100"
+          className="block w-full rounded-lg border border-destructive/30 bg-card px-3 py-2 text-sm focus:border-destructive focus:outline-none focus:ring-1 focus:ring-destructive/40"
         />
         {open && results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto dark:bg-cool-100">
+          <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border-card bg-card shadow-lg max-h-48 overflow-y-auto">
             {results.map((p) => (
               <li key={p.id}>
                 <button
@@ -101,14 +101,14 @@ export function UrgenceAdmission() {
       </div>
 
       {error && (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-2 text-xs text-destructive">{error}</p>
       )}
 
       <button
         type="button"
         onClick={handleAdmit}
         disabled={!selected || pending}
-        className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="mt-3 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {pending ? "Admission…" : "Admettre en urgence"}
       </button>

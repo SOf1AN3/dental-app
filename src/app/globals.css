@@ -75,6 +75,7 @@ body {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.505 0.213 27.518);   /* ≈ #c10007 */
+  --destructive-foreground: #ffffff;
   --border: #c3c9d6; /* ≈1.66:1 sur blanc — bordure décorative */
   --input: #7f8798;  /* ≈3.61:1 sur blanc — WCAG 1.4.11 (≥3:1) */
   --ring: oklch(0.708 0 0);
@@ -96,6 +97,9 @@ body {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* `--destructive` passe à un rouge clair en thème sombre : le texte blanc
+     n'y est plus lisible (2.77:1). On inverse, comme pour un bouton. */
+  --destructive-foreground: #121419;
   --border: #6b6f7a;
   --input: #6b6f7a;
   --ring: oklch(0.556 0 0);

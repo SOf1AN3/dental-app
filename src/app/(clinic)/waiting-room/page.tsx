@@ -1,6 +1,7 @@
 import { getWaitingRoom } from "@/lib/actions/waiting-room";
 import { WaitingRoomClient } from "@/components/clinic/waiting-room-client";
 import { UrgenceAdmission } from "@/components/clinic/urgence-admission";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function WaitingRoomPage() {
   // getWaitingRoom() fait déjà `requireAuth` + garde d'accès clinique et lit
@@ -11,9 +12,7 @@ export default async function WaitingRoomPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Salle d&apos;attente</h1>
-      </div>
+      <PageHeader title="Salle d'attente" />
 
       <div className="mb-6">
         <UrgenceAdmission />

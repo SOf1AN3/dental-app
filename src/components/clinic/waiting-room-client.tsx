@@ -61,7 +61,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-cool-500">
+        <p className="text-sm text-muted-fg">
           {initialEntries.length} patient(s) présent(s)
         </p>
         <div className="flex items-center gap-3">
@@ -71,7 +71,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
           <button
             onClick={refresh}
             disabled={refreshing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-cool-200 px-3 py-1.5 text-sm text-cool-600 hover:bg-cool-50 disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-card px-3 py-1.5 text-sm text-cool-600 hover:bg-cool-50 disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
             Rafraîchir
@@ -80,8 +80,8 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
       </div>
 
       {initialEntries.length === 0 && (
-        <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
-          <p className="text-lg font-medium text-cool-500">Salle d&apos;attente vide</p>
+        <div className="rounded-xl border-2 border-dashed border-border-card bg-card p-12 text-center">
+          <p className="text-lg font-medium text-muted-fg">Salle d&apos;attente vide</p>
           <p className="text-sm text-cool-400 mt-1">Aucun patient en attente</p>
         </div>
       )}
@@ -91,7 +91,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
         return (
         <div
           key={entry.id}
-          className="flex items-center justify-between rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-4 shadow-sm"
+          className="flex items-center justify-between rounded-xl border border-border-card bg-card p-4 shadow-sm"
         >
           <div className="flex items-center gap-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cerulean/10 text-cerulean font-semibold text-sm">
@@ -99,7 +99,7 @@ export function WaitingRoomClient({ initialEntries }: WaitingRoomClientProps) {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <p className="font-medium text-cool-900">
+                <p className="font-medium text-foreground">
                   {patient.lastName} {patient.firstName}
                 </p>
                 {statusBadge && (
