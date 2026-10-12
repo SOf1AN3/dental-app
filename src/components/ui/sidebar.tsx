@@ -5,16 +5,17 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  CLINIC_SIDEBAR_LINKS,
+  OWNER_SIDEBAR_LINKS,
+  type SidebarGroup,
+  type SidebarLink,
+} from "@/lib/sidebar-nav";
 
-export type SidebarGroup = "pilotage" | "clinique" | "suivi" | "reglages";
-
-export interface SidebarLink {
-  label: string;
-  href: string;
-  icon: React.ElementType;
-  /** Groupe d'appartenance — sert au regroupement visuel */
-  group: SidebarGroup;
-}
+// Les définitions vivent dans `@/lib/sidebar-nav` (sans `"use client"`) :
+// elles sont partagées entre les layouts serveur et ce module client.
+// Ré-export pour ne pas casser les consommateurs existants.
+export type { SidebarGroup, SidebarLink };
 
 /** Ordre d'affichage des sections dans la sidebar. */
 const GROUP_ORDER: readonly SidebarGroup[] = [
@@ -235,15 +236,29 @@ function SidebarBody({ links, initials, userName, compact, badge }: SidebarBodyP
 }
 
 export interface SidebarProps {
-  links: SidebarLink[];
+  /**
+   * Identifie le jeu de liens à afficher — le serveur ne transmet que des strings.
+   */
+  nav: "clinic" | "owner";
+  /**
+   * Hrefs visibles pour le rôle courant, calculés côté serveur.
+   * Seule donnée sérialisable traversant la frontière serveur/client :
+   * les définitions des liens (libellés, icônes, groupes) vivent côté client.
+   */
+  visibleHrefs: string[];
   /** Initials de l'utilisateur, pour le footer */
   initials: string;
   userName: string;
   /**
    * Badge optionnel à côté du titre de la sidebar (ex. « Admin »).
    * Absent de l'espace clinic : comportement inchangé pour ses consommateurs.
+   *
+   * Typé `string` et non `ReactNode` : cette prop **traverse la frontière
+   * serveur/client**, et un composant ou une fonction qui y serait passé
+   * ferait planter le rendu (`Functions cannot be passed directly to Client
+   * Components`). Le type rend cette erreur structurellement impossible.
    */
-  badge?: ReactNode;
+  badge?: string;
 }
 
 /**
@@ -309,7 +324,9 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 
 /**
  * Shell responsive de la sidebar, rendu par le layout server qui ne fournit
- * que les données (liens déjà filtrés par rôle, identité de l'utilisateur).
+ * que des données sérialisables (`nav` + `hrefs` visibles, identité de
+ * l'utilisateur) : les tableaux de liens, porteurs d'icônes (composants),
+ * restent côté client.
  *
  * | Viewport        | Comportement                                          |
  * | --------------- | ----------------------------------------------------- |
@@ -317,7 +334,23 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
  * | 768–1279px      | barre fixe `w-16`, icônes seules (+ `title`)          |
  * | < 768px (`md`)  | barre fixe cachée, burger + drawer en surimpression   |
  */
-export function SidebarShell({ links, initials, userName, badge }: SidebarProps) {
+/** Jeux de liens disponibles, indexés par l'identifiant transmis par le serveur. */
+const NAV_SETS = {
+  clinic: CLINIC_SIDEBAR_LINKS,
+  owner: OWNER_SIDEBAR_LINKS,
+} as const;
+
+export function SidebarShell({
+  nav,
+  visibleHrefs,
+  initials,
+  userName,
+  badge,
+}: SidebarProps) {
+  // Filtrage local : le serveur a autorisé ces hrefs, on ne rend que ceux-ci.
+  // Aucune donnée non sérialisable ne franchit la frontière RSC → client.
+  const links = NAV_SETS[nav].filter((link) => visibleHrefs.includes(link.href));
+
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const drawerRef = useRef<HTMLElement>(null);

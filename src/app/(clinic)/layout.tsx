@@ -1,4 +1,3 @@
-import { LayoutDashboard, Users, Calendar, Sofa, DollarSign, Pill, Package, Bone, TrendingUp, Settings } from "lucide-react";
 import { ThemeToggle } from "@/components/clinic/theme-toggle";
 import { UserMenu } from "@/components/clinic/user-menu";
 import { auth } from "@/lib/auth";
@@ -8,20 +7,8 @@ import { getCurrentRole } from "@/lib/auth-utils";
 import { can, NAV_ABILITY, type Role } from "@/lib/permissions";
 import { SearchInput } from "@/components/clinic/search-input";
 import { NotificationBell } from "@/components/clinic/notification-bell";
-import { SidebarShell, type SidebarLink } from "@/components/ui/sidebar";
-
-const sidebarLinks: SidebarLink[] = [
-  { label: "Tableau de bord", href: "/dashboard", icon: LayoutDashboard, group: "pilotage" },
-  { label: "Patients", href: "/patients", icon: Users, group: "clinique" },
-  { label: "Rendez-vous", href: "/appointments", icon: Calendar, group: "clinique" },
-  { label: "Salle d'attente", href: "/waiting-room", icon: Sofa, group: "clinique" },
-  { label: "Facturation", href: "/billing", icon: DollarSign, group: "suivi" },
-  { label: "Ordonnances", href: "/prescriptions", icon: Pill, group: "suivi" },
-  { label: "Stock", href: "/stock", icon: Package, group: "suivi" },
-  { label: "Prothèses", href: "/prostheses", icon: Bone, group: "suivi" },
-  { label: "Rapports", href: "/reports", icon: TrendingUp, group: "suivi" },
-  { label: "Paramètres", href: "/settings/general", icon: Settings, group: "reglages" },
-];
+import { SidebarShell } from "@/components/ui/sidebar";
+import { CLINIC_SIDEBAR_LINKS } from "@/lib/sidebar-nav";
 
 function getUserInitials(name: string): string {
   return name
@@ -79,24 +66,28 @@ export default async function ClinicLayout({
   } catch {
     role = null;
   }
-  const visibleLinks =
+  const visibleHrefs =
     role === null
-      ? sidebarLinks
-      : sidebarLinks.filter((link) => {
+      ? CLINIC_SIDEBAR_LINKS.map((l) => l.href)
+      : CLINIC_SIDEBAR_LINKS.filter((link) => {
           const ability = NAV_ABILITY[link.href];
           return ability ? can(role, ability) : true;
-        });
+        }).map((l) => l.href);
 
   return (
     <div className="flex h-full min-h-dvh">
       {/*
         Composant client complet (barre fixe responsive + drawer mobile) :
-        il ne reste que des données à transmettre, le layout reste Server
-        Component. Le garde multi-tenant ci-dessus s'exécute avant, sur le
-        serveur, et ne dépend donc pas de cette extraction.
+        il ne reçoit que des données sérialisables (identifiant de jeu de
+        liens + hrefs visibles), le layout reste Server Component. Les
+        libellés, icônes et groupes sont définis côté client
+        (`@/lib/sidebar-nav`) : un composant ne peut traverser la frontière
+        RSC → Client Components. Le garde multi-tenant ci-dessus s'exécute
+        avant, sur le serveur, et ne dépend donc pas de cette extraction.
       */}
       <SidebarShell
-        links={visibleLinks}
+        nav="clinic"
+        visibleHrefs={visibleHrefs}
         initials={initials}
         userName={userName}
       />

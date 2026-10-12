@@ -1,20 +1,9 @@
-import { LayoutDashboard, Building2, ClipboardList, DollarSign, Ticket, HeartPulse, Bell, Download } from "lucide-react";
 import { ThemeToggle } from "@/components/clinic/theme-toggle";
 import { UserMenu } from "@/components/clinic/user-menu";
 import { auth } from "@/lib/auth";
 import { requirePlatformOwner } from "@/lib/auth-utils";
-import { SidebarShell, type SidebarLink } from "@/components/ui/sidebar";
-
-const ownerLinks: SidebarLink[] = [
-  { label: "Plateforme", href: "/owner", icon: LayoutDashboard, group: "pilotage" },
-  { label: "Cliniques", href: "/owner/clinics", icon: Building2, group: "clinique" },
-  { label: "Abonnements", href: "/owner/plans", icon: ClipboardList, group: "clinique" },
-  { label: "Facturation", href: "/owner/billing", icon: DollarSign, group: "clinique" },
-  { label: "Support", href: "/owner/support", icon: Ticket, group: "suivi" },
-  { label: "Santé", href: "/owner/health", icon: HeartPulse, group: "suivi" },
-  { label: "Notifications", href: "/owner/notifications", icon: Bell, group: "suivi" },
-  { label: "Exportation", href: "/owner/export", icon: Download, group: "suivi" },
-];
+import { SidebarShell } from "@/components/ui/sidebar";
+import { OWNER_SIDEBAR_LINKS } from "@/lib/sidebar-nav";
 
 /**
  * Dupliquée depuis `src/app/(clinic)/layout.tsx` : la factorisation en
@@ -42,6 +31,10 @@ export default async function OwnerLayout({
   const userName = session?.user?.name ?? "Admin";
   const initials = getUserInitials(userName);
 
+  // L'owner n'a pas de filtrage par rôle : il transmet la liste complète des
+  // hrefs (donnée sérialisable) — les libellés et icônes restent côté client.
+  const visibleHrefs = OWNER_SIDEBAR_LINKS.map((link) => link.href);
+
   return (
     <div className="flex h-full min-h-dvh">
       {/*
@@ -56,7 +49,8 @@ export default async function OwnerLayout({
         `<span class="…">Admin</span>` à côté du titre.
       */}
       <SidebarShell
-        links={ownerLinks}
+        nav="owner"
+        visibleHrefs={visibleHrefs}
         initials={initials}
         userName={userName}
         badge="Admin"
