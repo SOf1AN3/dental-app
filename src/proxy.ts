@@ -47,13 +47,24 @@ export async function proxy(request: NextRequest) {
   const isOwnerRoute = pathname.startsWith("/owner");
   const isPublicAsset =
     pathname.startsWith("/_next") || pathname === "/favicon.ico";
+  // La landing (/) est la SEULE page publique en dehors du parcours
+  // d'authentification. Sans cette exemption, le middleware la renverrait
+  // vers /login et personne ne pourrait jamais la voir.
+  const isLanding = pathname === "/";
 
   if (isPublicAsset || isApiAuthRoute) {
     return NextResponse.next();
   }
 
-  if (!isLoggedIn && !isAuthPage) {
+  if (!isLoggedIn && !isAuthPage && !isLanding) {
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Un compte déjà connecté ne doit pas se retrouver sur le discours
+  // commercial : on le renvoie à son tableau de bord. La landing reste donc
+  // exclusive aux visiteurs anonymes.
+  if (isLoggedIn && isLanding) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   if (isLoggedIn && isAuthPage && !pathname.startsWith("/verify-email")) {

@@ -11,7 +11,7 @@ import { SearchInput } from "@/components/clinic/search-input";
 import { NotificationBell } from "@/components/clinic/notification-bell";
 
 const sidebarLinks: { label: string; href: string; icon: React.ElementType }[] = [
-  { label: "Tableau de bord", href: "/", icon: LayoutDashboard },
+  { label: "Tableau de bord", href: "/dashboard", icon: LayoutDashboard },
   { label: "Patients", href: "/patients", icon: Users },
   { label: "Rendez-vous", href: "/appointments", icon: Calendar },
   { label: "Salle d'attente", href: "/waiting-room", icon: Sofa },

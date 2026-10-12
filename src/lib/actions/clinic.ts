@@ -106,7 +106,7 @@ export async function createClinic(formData: FormData) {
     });
 
     revalidatePath("/select-clinic");
-    redirect("/");
+    redirect("/dashboard");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
     console.error("[createClinic] Erreur inattendue:", e);
@@ -135,8 +135,8 @@ export async function switchClinic(
     const cookieStore = await cookies();
     cookieStore.set("active_clinic_id", clinicId, activeClinicCookieOptions);
 
-    revalidatePath("/");
-    redirect("/");
+    revalidatePath("/dashboard");
+    redirect("/dashboard");
   } catch (e) {
     if (isRedirectOrReject(e)) throw e;
   }
