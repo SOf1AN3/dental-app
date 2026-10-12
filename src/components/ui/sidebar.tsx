@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -143,6 +143,12 @@ interface SidebarBodyProps {
    * `false` pour le drawer mobile (largeur fixe 256px : tout est affiché).
    */
   compact: boolean;
+  /**
+   * Badge optionnel rendu **à côté du titre** de l'en-tête (ex. « Admin »
+   * dans l'espace owner). Masqué en mode compact comme le titre lui-même
+   * (`hidden xl:inline-flex`) : sous `xl` seule la pastille « DC » subsiste.
+   */
+  badge?: ReactNode;
 }
 
 /**
@@ -151,7 +157,7 @@ interface SidebarBodyProps {
  * évite de dupliquer le JSX et garantit que les deux vues restent identiques
  * (mêmes liens filtrés, même état actif, même footer).
  */
-function SidebarBody({ links, initials, userName, compact }: SidebarBodyProps) {
+function SidebarBody({ links, initials, userName, compact, badge }: SidebarBodyProps) {
   return (
     <>
       <div
@@ -171,6 +177,16 @@ function SidebarBody({ links, initials, userName, compact }: SidebarBodyProps) {
         >
           DentalCare
         </span>
+        {badge ? (
+          <span
+            className={cn(
+              "rounded bg-cerulean px-2 py-0.5 text-xs font-medium text-white",
+              compact && "hidden xl:inline-flex"
+            )}
+          >
+            {badge}
+          </span>
+        ) : null}
         {compact ? (
           <span
             aria-hidden="true"
@@ -223,6 +239,11 @@ export interface SidebarProps {
   /** Initials de l'utilisateur, pour le footer */
   initials: string;
   userName: string;
+  /**
+   * Badge optionnel à côté du titre de la sidebar (ex. « Admin »).
+   * Absent de l'espace clinic : comportement inchangé pour ses consommateurs.
+   */
+  badge?: ReactNode;
 }
 
 /**
@@ -296,7 +317,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
  * | 768–1279px      | barre fixe `w-16`, icônes seules (+ `title`)          |
  * | < 768px (`md`)  | barre fixe cachée, burger + drawer en surimpression   |
  */
-export function SidebarShell({ links, initials, userName }: SidebarProps) {
+export function SidebarShell({ links, initials, userName, badge }: SidebarProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const drawerRef = useRef<HTMLElement>(null);
@@ -401,6 +422,7 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
           links={links}
           initials={initials}
           userName={userName}
+          badge={badge}
           compact
         />
       </aside>
@@ -427,6 +449,7 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
               links={links}
               initials={initials}
               userName={userName}
+              badge={badge}
               compact={false}
             />
           </aside>
