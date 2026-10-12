@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { LayoutDashboard, Users, Calendar, Sofa, DollarSign, Pill, Package, Bone, TrendingUp, Settings } from "lucide-react";
 import { ThemeToggle } from "@/components/clinic/theme-toggle";
 import { UserMenu } from "@/components/clinic/user-menu";
@@ -9,7 +8,7 @@ import { getCurrentRole } from "@/lib/auth-utils";
 import { can, NAV_ABILITY, type Role } from "@/lib/permissions";
 import { SearchInput } from "@/components/clinic/search-input";
 import { NotificationBell } from "@/components/clinic/notification-bell";
-import { SidebarNav, type SidebarLink } from "@/components/ui/sidebar";
+import { SidebarShell, type SidebarLink } from "@/components/ui/sidebar";
 
 const sidebarLinks: SidebarLink[] = [
   { label: "Tableau de bord", href: "/dashboard", icon: LayoutDashboard, group: "pilotage" },
@@ -90,36 +89,26 @@ export default async function ClinicLayout({
 
   return (
     <div className="flex h-full min-h-screen">
-      <aside className="fixed left-0 top-0 z-30 flex h-full w-64 flex-col bg-sidebar text-white">
-        <div className="flex h-16 items-center gap-2 px-6 border-b border-white/10">
-          <span className="text-xl font-bold">DentalCare</span>
-        </div>
-        {/* Composant client (état actif via le hook de route courante) — le
-            layout reste Server Component, il ne fait que transmettre les liens
-            déjà filtrés par rôle ci-dessus. */}
-        <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto py-4">
-          <SidebarNav links={visibleLinks} />
-        </nav>
-        <div className="border-t border-white/10 p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-cerulean flex items-center justify-center text-sm font-medium">
-              {initials}
-            </div>
-            <div className="text-sm">
-              <p className="font-medium">{userName}</p>
-              <Link
-                href="/select-clinic"
-                className="text-white/60 text-xs hover:text-white transition-colors"
-              >
-                Changer de clinique
-              </Link>
-            </div>
-          </div>
-        </div>
-      </aside>
+      {/*
+        Composant client complet (barre fixe responsive + drawer mobile) :
+        il ne reste que des données à transmettre, le layout reste Server
+        Component. Le garde multi-tenant ci-dessus s'exécute avant, sur le
+        serveur, et ne dépend donc pas de cette extraction.
+      */}
+      <SidebarShell
+        links={visibleLinks}
+        initials={initials}
+        userName={userName}
+      />
 
-      <div className="ml-64 flex flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-cool-200 bg-white px-8 dark:bg-cool-100">
+      {/*
+        Marges alignées sur les breakpoints de la sidebar :
+        `<768px` pleine largeur (menu en drawer), `md` barre compacte (16),
+        `xl` barre dépliée (64). `pl-14` en mobile libère la place du bouton
+        burger fixé en haut à gauche, sinon il recouvre le champ de recherche.
+      */}
+      <div className="ml-0 flex flex-1 flex-col md:ml-16 xl:ml-64">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-cool-200 bg-white pl-14 pr-8 dark:bg-cool-100 md:pl-8">
           <div className="flex-1">
             <SearchInput />
           </div>
