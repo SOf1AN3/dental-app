@@ -53,8 +53,10 @@ interface SidebarNavProps {
   /**
    * Mode « icônes seules » de la barre fixe (768–1279px) : les libellés sont
    * masqués sous `xl` et réapparaissent au-delà de 1280px. L'absence de texte
-   * est compensée par `title={link.label}` (info-bulle native) et par le
-   * libellé accessible du lien, qui n'est jamais retiré de l'arbre d'a11y.
+   * est compensée par une info-bulle native (`title`, **réservée au mode
+   * compact** : en mode déplié elle ne ferait que doubler le texte visible)
+   * et par le libellé accessible du lien, qui n'est jamais retiré de
+   * l'arbre d'a11y.
    *
    * Défaut `false` : le comportement pleine largeur d'origine est conservé tel
    * quel pour tout autre consommateur du composant (sidebar de l'espace
@@ -103,7 +105,9 @@ export function SidebarNav({ links, compact = false }: SidebarNavProps) {
                     aria-current={isActive ? "page" : undefined}
                     // Info-bulle : seule source de libellé en mode compact
                     // (768–1279px), où le `<span>` est masqué par CSS.
-                    title={link.label}
+                    // En mode déplié le texte est déjà visible → pas de
+                    // `title`, sinon double lecture (voix haute + info-bulle).
+                    title={compact ? link.label : undefined}
                     className={cn(
                       "flex items-center gap-3 rounded-lg py-2 text-sm transition-colors",
                       compact
@@ -234,21 +238,52 @@ export interface SidebarProps {
 export function SidebarTrigger({
   open,
   onOpen,
+  triggerRef,
 }: {
   open: boolean;
   onOpen: () => void;
+  /**
+   * Référence du bouton burger, détenue par `SidebarShell` afin d'y
+   * restituer le focus après la fermeture du drawer (sinon il retombe sur
+   * `<body>` et l'utilisateur clavier perd sa position).
+   * Typée `RefObject<HTMLButtonElement | null>` : compatible avec
+   * `useRef<HTMLButtonElement>(null)` quel que soit le générateur de
+   * références de la version de React installée.
+   */
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <button
       type="button"
+      ref={triggerRef}
       onClick={onOpen}
       aria-label="Ouvrir le menu"
       aria-expanded={open}
+      // `aria-controls` n'est rendu que si le panneau existe réellement :
+      // référencer un `id` absent de l'arbre est une erreur d'auteur ARIA
+      // (relation pointant vers rien). L'état ouvert/fermé est déjà porté
+      // par `aria-expanded`, qui reste présent en permanence.
+      aria-controls={open ? "sidebar-drawer" : undefined}
       className="fixed left-3 top-3 z-40 rounded-lg p-2 text-cool-500 hover:bg-cool-100 md:hidden"
     >
       <Menu className="h-5 w-5" aria-hidden="true" />
     </button>
   );
+}
+
+/**
+ * Sélecteur des éléments tabulables d'un conteneur, utilisé par le piège de
+ * focus du drawer. On exclut les `disabled` et les `tabindex="-1"` (focalisables
+ * programmatiquement mais non atteignables au clavier).
+ */
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Liste (document order) des éléments sur lesquels `Tab` peut atterrir. */
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+  ).filter((element) => !element.hasAttribute("aria-hidden"));
 }
 
 /**
@@ -265,6 +300,11 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const drawerRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // C1 — mémorise la valeur précédente de `open` : la restitution du focus ne
+  // doit avoir lieu que sur une fermeture effective (`true → false`), sinon
+  // l'effet volerait le focus au premier rendu (où `open === false`).
+  const wasOpenRef = useRef(false);
 
   // Le drawer se referme après navigation : sinon il resterait superposé à la
   // page de destination une fois le lien cliqué.
@@ -272,11 +312,22 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
     setOpen(false);
   }, [pathname]);
 
+  // C1 — restitution du focus au burger après fermeture (`Échap`, voile,
+  // navigation ou passage ≥768px). Le panneau se démonte : sans cet appel le
+  // focus retomberait sur `<body>`.
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (wasOpen && !open) {
+      triggerRef.current?.focus();
+    }
+  }, [open]);
+
   // Tant que le drawer est ouvert : focus initial dans le panneau, fermeture
-  // par `Échap`, et fermeture automatique si l'utilisateur agrandit la fenêtre
+  // par `Échap`, fermeture automatique si l'utilisateur agrandit la fenêtre
   // au-delà de 768px (le panneau est alors masqué par `md:hidden` alors que
   // l'état resterait « ouvert » — on évite un burger avec `aria-expanded`
-  // orphelin au retour en mobile).
+  // orphelin au retour en mobile) et confinement de `Tab` au panneau modal.
   useEffect(() => {
     if (!open) return;
 
@@ -285,6 +336,39 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         setOpen(false);
+        return;
+      }
+
+      // C2 — piège de focus : `aria-modal="true"` annonce un panneau modal,
+      // or le `<main>` (rendu par le layout serveur) ne peut pas être marqué
+      // `inert` depuis ce composant client. On confine donc explicitement le
+      // clavier au drawer tant qu'il est ouvert.
+      if (event.key !== "Tab") return;
+
+      const panel = drawerRef.current;
+      if (!panel) return;
+
+      const focusable = getFocusableElements(panel);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      // Hors panneau (focus déjà échappé) ou aux bornes : on boucle.
+      const isOutside = active instanceof Node && !panel.contains(active);
+
+      if (event.shiftKey) {
+        if (isOutside || active === first || active === panel) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (isOutside || active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     const media = window.matchMedia("(min-width: 768px)");
@@ -304,7 +388,11 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
 
   return (
     <>
-      <SidebarTrigger open={open} onOpen={() => setOpen(true)} />
+      <SidebarTrigger
+        open={open}
+        onOpen={() => setOpen(true)}
+        triggerRef={triggerRef}
+      />
 
       {/* Barre fixe : cachée sous 768px, compacte (`w-16`) jusqu'à 1280px,
           dépliée (`xl:w-64`) au-delà. */}
@@ -327,6 +415,7 @@ export function SidebarShell({ links, initials, userName }: SidebarProps) {
             className="absolute inset-0 h-full w-full bg-black/50"
           />
           <aside
+            id="sidebar-drawer"
             ref={drawerRef}
             tabIndex={-1}
             role="dialog"
