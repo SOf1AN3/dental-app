@@ -43,7 +43,7 @@ export default async function OwnerLayout({
   const initials = getUserInitials(userName);
 
   return (
-    <div className="flex h-full min-h-screen">
+    <div className="flex h-full min-h-dvh">
       {/*
         Composant client partagé avec l'espace clinic : barre fixe responsive
         (≥1280px dépliée, 768–1279px icônes seules, <768px drawer + burger),
@@ -68,7 +68,7 @@ export default async function OwnerLayout({
         `xl` barre dépliée (64). `pl-14` en mobile libère la place du bouton
         burger fixé en haut à gauche.
       */}
-      <div className="ml-0 flex flex-1 flex-col md:ml-16 xl:ml-64">
+      <div className="ml-0 flex w-full min-w-0 flex-1 flex-col md:ml-16 xl:ml-64">
         {/*
           Header sans `SearchInput` (la recherche patient n'a pas de sens pour
           l'admin plateforme) ni `NotificationBell` (ce composant exige un
@@ -82,7 +82,9 @@ export default async function OwnerLayout({
           </div>
         </header>
 
-        <main className="flex-1 p-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1400px] flex-1 p-4 sm:p-6 lg:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -88,7 +88,7 @@ export default async function ClinicLayout({
         });
 
   return (
-    <div className="flex h-full min-h-screen">
+    <div className="flex h-full min-h-dvh">
       {/*
         Composant client complet (barre fixe responsive + drawer mobile) :
         il ne reste que des données à transmettre, le layout reste Server
@@ -107,7 +107,7 @@ export default async function ClinicLayout({
         `xl` barre dépliée (64). `pl-14` en mobile libère la place du bouton
         burger fixé en haut à gauche, sinon il recouvre le champ de recherche.
       */}
-      <div className="ml-0 flex flex-1 flex-col md:ml-16 xl:ml-64">
+      <div className="ml-0 flex w-full min-w-0 flex-1 flex-col md:ml-16 xl:ml-64">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-border-card bg-card pl-14 pr-8 md:pl-8">
           <div className="flex-1">
             <SearchInput />
@@ -119,7 +119,9 @@ export default async function ClinicLayout({
           </div>
         </header>
 
-        <main className="flex-1 p-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1400px] flex-1 p-4 sm:p-6 lg:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );
