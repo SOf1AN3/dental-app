@@ -1,22 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import { Moon, Sun } from "lucide-react";
 
+// `false` côté serveur, `true` côté client — sans effet, donc sans
+// `set-state-in-effect`. Le rendu serveur et client restent identiques
+// au premier paint (icône Moon), ce qui corrige l'hydration d'origine.
+const subscribe = () => () => {};
+const getMountedSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const isMounted = useSyncExternalStore(
+    subscribe,
+    getMountedSnapshot,
+    getServerSnapshot
+  );
 
   // Tant que le composant n'est pas monté, on rend exactement le même HTML
   // que le serveur (icône Moon par défaut) pour éviter l'erreur d'hydration.
-  const isDark = mounted && theme === "dark";
+  const isDark = isMounted && theme === "dark";
 
-  const ariaLabel = !mounted
+  const ariaLabel = !isMounted
     ? "Changer le thème"
     : isDark
       ? "Passer en thème clair"

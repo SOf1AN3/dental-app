@@ -330,6 +330,7 @@ export function SidebarShell({ links, initials, userName, badge }: SidebarProps)
   // Le drawer se referme après navigation : sinon il resterait superposé à la
   // page de destination une fois le lien cliqué.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fermeture impérative du drawer à la navigation : ne peut pas être dérivée du state
     setOpen(false);
   }, [pathname]);
 

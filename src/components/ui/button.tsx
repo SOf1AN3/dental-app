@@ -61,7 +61,6 @@ function Button({
     size.startsWith("icon") &&
     !("aria-label" in props)
   ) {
-    // eslint-disable-next-line no-console
     console.warn("[Button] un bouton icône doit recevoir un aria-label")
   }
 
