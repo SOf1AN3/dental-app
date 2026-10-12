@@ -12,8 +12,8 @@ import { StatCards } from "./stat-cards";
 import { TodayAgenda, AgendaLegend, getTodayAgenda } from "./today-agenda";
 
 /**
- * DB-4 — Owner/admin dashboard: all-dentist agenda as the main block,
- * clinic-wide counters and global revenue + history.
+ * DB-4 — Owner/admin dashboard: KPI counters first, then the all-dentist
+ * agenda, then global revenue + history and the occupancy rate.
  */
 export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
   const todayStart = new Date();
@@ -37,17 +37,18 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
         </Link>
       </div>
 
-      {/* Main block: all-dentist agenda (DB-1) */}
-      <Suspense fallback={<div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-48 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
-        <AllAgenda clinicId={clinicId} />
-      </Suspense>
-
-      <Suspense fallback={<div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-cool-100" />)}</div>}>
+      {/* KPI first: the numbers a practitioner comes to check */}
+      <Suspense fallback={<div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-cool-100" />)}</div>}>
         <OwnerStats
           clinicId={clinicId}
           todayStart={todayStart}
           tomorrowStart={tomorrowStart}
         />
+      </Suspense>
+
+      {/* All-dentist agenda (DB-1) */}
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-48 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
+        <AllAgenda clinicId={clinicId} />
       </Suspense>
 
       <Suspense fallback={<div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">{[0, 1].map((i) => <div key={i} className="h-72 animate-pulse rounded-xl bg-cool-100" />)}</div>}>
@@ -64,7 +65,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
 async function AllAgenda({ clinicId }: { clinicId: string }) {
   const agenda = await getTodayAgenda(clinicId);
   return (
-    <div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Agenda du jour — tous dentistes</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist />
       <AgendaLegend colorByDentist={agenda.colorByDentist} nameByDentist={agenda.nameByDentist} />
@@ -106,19 +107,21 @@ async function OwnerStats({
   ]);
 
   return (
-    <StatCards
-      stats={[
-        { label: "Patients", value: String(totalPatients), color: "bg-cerulean", icon: Users },
-        { label: "RDV aujourd'hui", value: String(todayApptCount), color: "bg-mint", icon: CalendarDays },
-        { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber", icon: Sofa },
-        {
-          label: "Revenu global du jour",
-          value: formatCurrency(Number(todayRevenue) || 0),
-          color: "bg-teal",
-          icon: CircleDollarSign,
-        },
-      ]}
-    />
+    <div className="mt-8">
+      <StatCards
+        stats={[
+          { label: "Patients", value: String(totalPatients), color: "bg-cerulean", icon: Users },
+          { label: "RDV aujourd'hui", value: String(todayApptCount), color: "bg-mint", icon: CalendarDays },
+          { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber", icon: Sofa },
+          {
+            label: "Revenu global du jour",
+            value: formatCurrency(Number(todayRevenue) || 0),
+            color: "bg-teal",
+            icon: CircleDollarSign,
+          },
+        ]}
+      />
+    </div>
   );
 }
 
