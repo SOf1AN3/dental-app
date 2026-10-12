@@ -22,7 +22,10 @@ interface UserMenuProps {
 export function UserMenu({ name, email }: UserMenuProps) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="rounded-full p-2 text-cool-500 hover:bg-cool-100 dark:hover:bg-cool-800 transition-colors">
+      <DropdownMenuTrigger
+        aria-label="Menu utilisateur"
+        className="rounded-full p-2 text-cool-500 hover:bg-cool-100 dark:hover:bg-cool-800 transition-colors"
+      >
         <User className="h-5 w-5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
