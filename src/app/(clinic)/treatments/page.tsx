@@ -3,9 +3,13 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { db } from "@/lib/db/db";
 import { treatmentPlans, treatmentPlanItems, patients } from "@/lib/db/schema";
 import { eq, desc, count } from "drizzle-orm";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { TreatmentPlanStatusBadge } from "@/components/clinic/treatment-plan-status-badge";
 import Link from "next/link";
+import { Plus } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import {
+  TreatmentPlanTable,
+  type TreatmentPlanTableRow,
+} from "@/components/clinic/treatment-table";
 
 export default async function TreatmentsPage() {
   await requireAuth();
@@ -31,99 +35,39 @@ export default async function TreatmentsPage() {
     })
   );
 
+  // Seule la donnée plate traverse la frontière serveur/client :
+  // aucun composant, aucune fonction, aucun formatage calculé ici.
+  const rows: TreatmentPlanTableRow[] = plansWithCounts.map(
+    ({ plan, patient, itemsCount }) => ({
+      id: plan.id,
+      patientId: plan.patientId,
+      patientFirstName: patient.firstName,
+      patientLastName: patient.lastName,
+      title: plan.title,
+      status: plan.status,
+      itemsCount,
+      totalAmount: plan.totalAmount,
+      createdAt: plan.createdAt,
+    }),
+  );
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Traitements</h1>
-          <p className="text-sm text-cool-500">{plansWithCounts.length} plan{plansWithCounts.length !== 1 ? "s" : ""} de traitement</p>
-        </div>
-        <Link
-          href="/patients"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouveau plan de traitement
-        </Link>
-      </div>
+      <PageHeader
+        title="Traitements"
+        description={`${plansWithCounts.length} plan${plansWithCounts.length !== 1 ? "s" : ""} de traitement`}
+        actions={
+          <Link
+            href="/patients"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Nouveau plan de traitement
+          </Link>
+        }
+      />
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-cool-200 bg-cool-50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Patient
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Titre
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Statut
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Articles
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Montant
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Date
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {plansWithCounts.map(({ plan, patient, itemsCount }) => (
-              <tr
-                key={plan.id}
-                className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-              >
-                <td className="px-4 py-3 font-medium text-cool-900">
-                  <Link
-                    href={`/patients/${plan.patientId}/treatment-plan/${plan.id}`}
-                    className="text-cerulean hover:text-cerulean/80"
-                  >
-                    {patient.lastName} {patient.firstName}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 text-cool-700 max-w-xs truncate">
-                  {plan.title}
-                </td>
-                <td className="px-4 py-3">
-                  <TreatmentPlanStatusBadge status={plan.status} />
-                </td>
-                <td className="px-4 py-3 text-cool-600">
-                  {itemsCount}
-                </td>
-                <td className="px-4 py-3 text-cool-900 font-medium">
-                  {plan.totalAmount != null
-                    ? formatCurrency(plan.totalAmount)
-                    : "-"}
-                </td>
-                <td className="px-4 py-3 text-cool-600">
-                  {formatDate(plan.createdAt)}
-                </td>
-                <td className="px-4 py-3">
-                  <Link
-                    href={`/patients/${plan.patientId}/treatment-plan/${plan.id}`}
-                    className="text-sm text-cerulean hover:text-cerulean/80"
-                  >
-                    Détails
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {plansWithCounts.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-cool-400">
-                  Aucun plan de traitement
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <TreatmentPlanTable data={rows} />
     </div>
   );
 }

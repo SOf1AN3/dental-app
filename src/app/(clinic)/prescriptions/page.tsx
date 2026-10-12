@@ -1,9 +1,14 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
+
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getPrescriptions } from "@/lib/actions/prescription";
-import { formatDate } from "@/lib/utils";
-import { PrescriptionStatusBadge } from "@/components/clinic/prescription-status-badge";
-import Link from "next/link";
+import { PageHeader } from "@/components/ui/page-header";
+import {
+  PrescriptionTable,
+  type PrescriptionTableRow,
+} from "@/components/clinic/prescription-table";
 
 export default async function PrescriptionsPage() {
   await requireAuth();
@@ -11,88 +16,35 @@ export default async function PrescriptionsPage() {
 
   const prescriptionList = await getPrescriptions();
 
+  // Seule la donnée plate traverse la frontière serveur/client :
+  // aucun composant, aucune fonction, aucun `Date` manquant.
+  const rows: PrescriptionTableRow[] = prescriptionList.map((rx) => ({
+    id: rx.id,
+    date: rx.date,
+    status: rx.status,
+    notes: rx.notes,
+    patientId: rx.patient.id,
+    patientFirstName: rx.patient.firstName,
+    patientLastName: rx.patient.lastName,
+  }));
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Ordonnances</h1>
-          <p className="text-sm text-cool-500">{prescriptionList.length} ordonnance{prescriptionList.length !== 1 ? "s" : ""}</p>
-        </div>
-        <Link
-          href="/prescriptions/new"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouvelle ordonnance
-        </Link>
-      </div>
+      <PageHeader
+        title="Ordonnances"
+        description={`${rows.length} ordonnance${rows.length !== 1 ? "s" : ""}`}
+        actions={
+          <Link
+            href="/prescriptions/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Nouvelle ordonnance
+          </Link>
+        }
+      />
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-cool-200 bg-cool-50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Patient
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Date
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Statut
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Notes
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {prescriptionList.map((rx) => {
-              const patient = rx.patient;
-              return (
-                <tr
-                  key={rx.id}
-                  className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-cool-900">
-                    <Link
-                      href={`/prescriptions/${rx.id}`}
-                      className="text-cerulean hover:text-cerulean/80"
-                    >
-                      {patient ? `${patient.lastName} ${patient.firstName}` : "-"}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-cool-600">
-                    {formatDate(rx.date)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <PrescriptionStatusBadge status={rx.status} />
-                  </td>
-                  <td className="px-4 py-3 text-cool-600 max-w-xs truncate">
-                    {rx.notes || "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/prescriptions/${rx.id}`}
-                      className="text-sm text-cerulean hover:text-cerulean/80"
-                    >
-                      Détails
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-            {prescriptionList.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-12 text-center text-cool-400">
-                  Aucune ordonnance trouvée
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PrescriptionTable data={rows} />
     </div>
   );
 }
