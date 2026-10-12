@@ -29,22 +29,22 @@ export function SubscribeForm({
     <form action={action} className="mt-4">
       <input type="hidden" name="planId" value={planId} />
 
-      <div className="mb-3 rounded-lg border border-cool-200 bg-cool-50 p-3 text-sm">
-        <p className="font-medium text-cool-900">{planName}</p>
+      <div className="mb-3 rounded-lg border border-border-card bg-cool-50 p-3 text-sm">
+        <p className="font-medium text-foreground">{planName}</p>
         <p className="text-primary font-semibold">
-          {price.toFixed(2)} <span className="text-xs font-normal text-cool-500">DA / mois</span>
+          {price.toFixed(2)} <span className="text-xs font-normal text-muted-fg">DA / mois</span>
         </p>
       </div>
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+        className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
       >
         {pending ? "Souscription en cours…" : "Confirmer l'abonnement"}
       </button>
 
-      {errorMsg && <p className="mt-2 text-sm text-red-500">{errorMsg}</p>}
+      {errorMsg && <p className="mt-2 text-sm text-destructive">{errorMsg}</p>}
     </form>
   );
 }
@@ -63,23 +63,23 @@ export function CancelSubscriptionForm() {
 
   if (step === "warning") {
     return (
-      <div className="mt-6 rounded-xl border border-red-200 bg-red-50/50 p-6 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+      <div className="mt-6 rounded-xl border border-destructive bg-red-50/50 p-6 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20">
-            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            <AlertTriangle className="h-5 w-5 text-destructive dark:text-red-400" />
           </div>
           <div className="flex-1">
-              <h3 className="text-sm font-semibold text-red-800 dark:text-red-400">
+              <h3 className="text-sm font-semibold text-destructive dark:text-red-400">
                 Zone de danger
               </h3>
-            <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+            <p className="mt-1 text-sm text-destructive dark:text-red-400">
               Vous êtes sur le point de résilier votre abonnement actuel. Cette action est irréversible et entraînera la perte d&apos;accès aux fonctionnalités de votre formule.
             </p>
             <div className="flex justify-center">
               <button
                 type="button"
                 onClick={() => setStep("confirm")}
-                className="inline-flex items-center gap-2 rounded-lg border-2 border-red-200 bg-white px-5 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 hover:border-red-300 transition-colors dark:bg-cool-100 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                className="inline-flex items-center gap-2 rounded-lg border-2 border-destructive bg-white px-5 py-2.5 text-sm font-medium text-destructive hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 dark:bg-cool-100 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
               >
                 <Trash2 className="h-4 w-4" />
                 Résilier l&apos;abonnement
@@ -93,24 +93,24 @@ export function CancelSubscriptionForm() {
 
   return (
     <form action={action} className="mt-4">
-      <div className="rounded-xl border border-red-200 bg-red-50/50 p-6 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+      <div className="rounded-xl border border-destructive bg-red-50/50 p-6 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20">
-            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            <AlertTriangle className="h-5 w-5 text-destructive dark:text-red-400" />
           </div>
           <div className="flex-1 space-y-4">
             <div>
-              <h3 className="text-sm font-semibold text-red-800 dark:text-red-400">
+              <h3 className="text-sm font-semibold text-destructive dark:text-red-400">
                 Confirmer la résiliation
               </h3>
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+              <p className="mt-1 text-sm text-destructive dark:text-red-400">
                 Êtes-vous sûr de vouloir résilier ? Cette action est irréversible.
               </p>
             </div>
 
             <div>
-              <label htmlFor="confirmCancel" className="block text-sm font-medium text-red-700 mb-1.5 dark:text-red-400">
-                Tapez <span className="font-mono font-bold tracking-wider text-red-800 dark:text-red-400">CONFIRMER</span> pour confirmer
+              <label htmlFor="confirmCancel" className="block text-sm font-medium text-destructive mb-1.5 dark:text-red-400">
+                Tapez <span className="font-mono font-bold tracking-wider text-destructive dark:text-red-400">CONFIRMER</span> pour confirmer
               </label>
               <input
                 id="confirmCancel"
@@ -118,7 +118,7 @@ export function CancelSubscriptionForm() {
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
                 placeholder="CONFIRMER"
-                className="block w-full rounded-lg border border-red-300 bg-white px-3 py-2.5 text-sm placeholder:text-cool-300 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 dark:bg-cool-100 dark:border-red-500/40 dark:placeholder:text-cool-500"
+                className="block w-full rounded-lg border border-destructive bg-white px-3 py-2.5 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none dark:bg-cool-100 dark:border-red-500/40 dark:placeholder:text-muted-fg"
               />
             </div>
 
@@ -126,7 +126,7 @@ export function CancelSubscriptionForm() {
               <button
                 type="submit"
                 disabled={pending || confirmText !== "CONFIRMER"}
-                className="inline-flex items-center gap-2 rounded-lg border-2 border-red-200 bg-white px-5 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 hover:border-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-cool-100 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                className="inline-flex items-center gap-2 rounded-lg border-2 border-destructive bg-white px-5 py-2.5 text-sm font-medium text-destructive hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 dark:bg-cool-100 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
               >
                 <Trash2 className="h-4 w-4" />
                 {pending ? "Annulation en cours…" : "Confirmer la résiliation"}
@@ -134,7 +134,7 @@ export function CancelSubscriptionForm() {
               <button
                 type="button"
                 onClick={resetForm}
-                className="inline-flex items-center gap-2 rounded-lg border border-cool-200 px-5 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg border border-border-input px-5 py-2.5 text-sm font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Retour
@@ -144,7 +144,7 @@ export function CancelSubscriptionForm() {
         </div>
       </div>
 
-      {errorMsg && <p className="mt-2 text-sm text-red-500">{errorMsg}</p>}
+      {errorMsg && <p className="mt-2 text-sm text-destructive">{errorMsg}</p>}
     </form>
   );
 }

@@ -26,21 +26,21 @@ export default async function MembersSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Inviter un membre
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Ajoutez un dentiste, assistant ou réceptionniste à votre clinique.
         </p>
         <InviteMemberForm />
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Membres ({members.length})
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Gérez les niveaux d&apos;accès des membres de votre clinique.
         </p>
         <MemberList members={members} />

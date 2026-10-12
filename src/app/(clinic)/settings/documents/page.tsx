@@ -12,7 +12,7 @@ export default async function DocumentsSettingsPage() {
 
   if (!clinic) {
     return (
-      <p className="text-sm text-red-500">
+      <p className="text-sm text-destructive">
         Clinique introuvable.
       </p>
     );
@@ -25,11 +25,11 @@ export default async function DocumentsSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Logo et en-tête
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Logo, en-tête et mentions légales utilisés sur l&apos;ordonnance, la facture
           et le devis.
         </p>
@@ -42,11 +42,11 @@ export default async function DocumentsSettingsPage() {
         />
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Modèle des documents A5
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Choisissez le modèle, les couleurs, le sous-titre et le pied de page appliqués
           à l&apos;ordonnance, la facture et le devis.
         </p>

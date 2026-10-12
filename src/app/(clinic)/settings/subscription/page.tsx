@@ -10,7 +10,7 @@ const statusLabels: Record<string, { label: string; color: string }> = {
   trial: { label: "Essai", color: "bg-amber/10 text-amber-fg" },
   active: { label: "Actif", color: "bg-mint/10 text-mint" },
   cancelled: { label: "Annulé", color: "bg-red/10 text-danger" },
-  expired: { label: "Expiré", color: "bg-cool-100 text-cool-600" },
+  expired: { label: "Expiré", color: "bg-cool-100 text-muted-fg" },
 };
 
 export default async function SubscriptionSettingsPage() {
@@ -35,15 +35,15 @@ export default async function SubscriptionSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Abonnement actuel
         </h2>
 
         <div className="mt-4 flex items-center gap-3">
-          <span className="text-sm text-cool-500">Statut:</span>
+          <span className="text-sm text-muted-fg">Statut:</span>
           <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            statusLabels[clinic?.status || "trial"]?.color || "bg-cool-100 text-cool-600"
+            statusLabels[clinic?.status || "trial"]?.color || "bg-cool-100 text-muted-fg"
           }`}>
             {statusLabels[clinic?.status || "trial"]?.label || clinic?.status || "Essai"}
           </span>
@@ -51,12 +51,12 @@ export default async function SubscriptionSettingsPage() {
 
         {currentSub ? (
           <div className="mt-4 space-y-2 text-sm">
-            <p><span className="text-cool-500">Formule:</span> <span className="font-medium text-cool-900">{currentSub.plan?.name || "—"}</span></p>
-            <p><span className="text-cool-500">Début:</span> <span className="text-cool-900">{formatDate(currentSub.startDate)}</span></p>
+            <p><span className="text-muted-fg">Formule:</span> <span className="font-medium text-foreground">{currentSub.plan?.name || "—"}</span></p>
+            <p><span className="text-muted-fg">Début:</span> <span className="text-foreground">{formatDate(currentSub.startDate)}</span></p>
             {currentSub.endDate && (
-              <p><span className="text-cool-500">Fin:</span> <span className="text-cool-900">{formatDate(currentSub.endDate)}</span></p>
+              <p><span className="text-muted-fg">Fin:</span> <span className="text-foreground">{formatDate(currentSub.endDate)}</span></p>
             )}
-            <p><span className="text-cool-500">Prix:</span> <span className="text-cool-900">
+            <p><span className="text-muted-fg">Prix:</span> <span className="text-foreground">
               {currentSub.plan?.priceMonthly
                 ? `${currentSub.plan.priceMonthly.toFixed(2)} DA / mois`
                 : "—"}
@@ -64,11 +64,11 @@ export default async function SubscriptionSettingsPage() {
           </div>
         ) : (
           <div className="mt-4">
-            <p className="text-sm text-cool-500">
+            <p className="text-sm text-muted-fg">
               Vous êtes actuellement en période d&apos;essai. Choisissez une formule ci-dessous pour souscrire.
             </p>
             {clinic?.createdAt && (
-              <p className="mt-1 text-xs text-cool-400">
+              <p className="mt-1 text-xs text-muted-fg">
                 Clinique créée le {formatDate(clinic.createdAt)}
               </p>
             )}
@@ -77,8 +77,8 @@ export default async function SubscriptionSettingsPage() {
 
         {/* Cancel subscription section */}
         {hasActiveSubscription && (
-          <div className="mt-6 border-t border-cool-200 pt-4">
-            <h3 className="text-sm font-semibold text-cool-900">
+          <div className="mt-6 border-t border-border-card pt-4">
+            <h3 className="text-sm font-semibold text-foreground">
               Résilier l&apos;abonnement
             </h3>
             <CancelSubscriptionForm />
@@ -86,16 +86,16 @@ export default async function SubscriptionSettingsPage() {
         )}
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Formules disponibles
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Choisissez la formule qui correspond à vos besoins.
         </p>
 
         {allPlans.length === 0 ? (
-          <p className="text-sm text-cool-400 text-center py-8">
+          <p className="text-sm text-muted-fg text-center py-8">
             Aucune formule disponible pour le moment.
           </p>
         ) : (
@@ -103,23 +103,23 @@ export default async function SubscriptionSettingsPage() {
             {allPlans.map((plan) => (
               <div
                 key={plan.id}
-                className="rounded-lg border border-cool-200 p-5 hover:border-cerulean transition-colors"
+                className="rounded-lg border border-border-card p-5 hover:border-cerulean transition-colors"
               >
-                <h3 className="text-lg font-semibold text-cool-900">{plan.name}</h3>
+                <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
                 <p className="mt-1 text-2xl font-bold text-primary">
-                  {plan.priceMonthly.toFixed(2)} <span className="text-sm font-normal text-cool-500">DA/mois</span>
+                  {plan.priceMonthly.toFixed(2)} <span className="text-sm font-normal text-muted-fg">DA/mois</span>
                 </p>
                 {plan.description && (
-                  <p className="mt-2 text-sm text-cool-500">{plan.description}</p>
+                  <p className="mt-2 text-sm text-muted-fg">{plan.description}</p>
                 )}
                 <ul className="mt-4 space-y-1.5">
                   {plan.maxStaff && (
-                    <li className="text-sm text-cool-600">
+                    <li className="text-sm text-muted-fg">
                       Jusqu&apos;à {plan.maxStaff} membres
                     </li>
                   )}
                   {plan.maxPatients && (
-                    <li className="text-sm text-cool-600">
+                    <li className="text-sm text-muted-fg">
                       Jusqu&apos;à {plan.maxPatients} patients
                     </li>
                   )}

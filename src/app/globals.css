@@ -111,7 +111,11 @@ body {
   --color-border-input: #6b6f7a;
 
   --color-primary: #4a5fa8;
-  --color-primary-light: #5a7ac8;
+  /* Variant « survol » : en thème sombre elle doit s'ASSOMBRIR, pas
+     s'éclaircir — le texte posé dessus est blanc, et l'ancienne valeur
+     claire (#5a7ac8) ne donnait que 4.16:1 (sous le seuil AA de 4.5:1).
+     #3d4e8f : blanc à 7.82:1, et reste perceptible du repos (1.30:1). */
+  --color-primary-light: #3d4e8f;
   --color-cerulean: #60a5fa;
   --color-muted-fg: #94a3b8;
   --color-cool-50: #121419;

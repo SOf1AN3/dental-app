@@ -20,7 +20,7 @@ export function InviteMemberForm() {
     <form action={action} className="space-y-4">
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="email" className="block text-sm font-medium text-foreground">
             Email du membre
           </label>
           <input
@@ -29,23 +29,23 @@ export function InviteMemberForm() {
             type="email"
             required
             placeholder="email@exemple.fr"
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
           {fieldErrors?.email && (
-            <p className="mt-1 text-xs text-red-500">
+            <p className="mt-1 text-xs text-destructive">
               {Array.isArray(fieldErrors.email) ? fieldErrors.email[0] : fieldErrors.email}
             </p>
           )}
         </div>
         <div>
-          <label htmlFor="role" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="role" className="block text-sm font-medium text-foreground">
             Niveau d&apos;accès
           </label>
           <select
             id="role"
             name="role"
             required
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="dentist">Dentiste</option>
             <option value="assistant">Assistant</option>
@@ -57,7 +57,7 @@ export function InviteMemberForm() {
           <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending ? "Invitation..." : "Inviter"}
           </button>
@@ -65,7 +65,7 @@ export function InviteMemberForm() {
       </div>
 
       {errorMsg && (
-        <p className="text-sm text-red-500">{errorMsg}</p>
+        <p className="text-sm text-destructive">{errorMsg}</p>
       )}
     </form>
   );

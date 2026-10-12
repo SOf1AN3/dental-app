@@ -19,7 +19,7 @@ export function DrugCatalogActions({ item }: { item?: CatalogItem }) {
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           Nouveau médicament
         </button>
@@ -62,7 +62,7 @@ export function DrugCatalogActions({ item }: { item?: CatalogItem }) {
           <button
             type="button"
             onClick={() => setEditingItem(item)}
-            className="text-sm text-cerulean hover:text-cerulean-dark transition-colors"
+            className="text-sm text-cerulean hover:text-cerulean-dark transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Modifier
           </button>
@@ -80,7 +80,7 @@ export function DrugCatalogActions({ item }: { item?: CatalogItem }) {
           <button
             type="button"
             onClick={handleDelete}
-            className="text-sm text-red-500 hover:text-red-600 transition-colors"
+            className="text-sm text-destructive underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Supprimer
           </button>

@@ -35,7 +35,7 @@ export default async function ScheduleSettingsPage() {
 
   if (!clinic) {
     return (
-      <p className="text-sm text-red-500">
+      <p className="text-sm text-destructive">
         Clinique introuvable.
       </p>
     );

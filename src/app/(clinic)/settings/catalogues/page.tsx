@@ -24,9 +24,9 @@ export default async function CataloguesPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-cool-900">Catalogues</h2>
-        <p className="text-sm text-cool-500">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="text-lg font-semibold text-foreground">Catalogues</h2>
+        <p className="text-sm text-muted-fg">
           Gérez les catalogues de traitements et de médicaments de votre clinique.
         </p>
 
@@ -37,17 +37,17 @@ export default async function CataloguesPage() {
               <Link
                 key={cat.href}
                 href={cat.href}
-                className="group rounded-xl border border-cool-200 p-6 transition-colors hover:border-cerulean hover:bg-cool-50"
+                className="group rounded-xl border border-border-card p-6 transition-colors hover:border-cerulean hover:bg-cool-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
               >
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-cerulean/10 text-cerulean">
                     <Icon className="h-6 w-6" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-cool-900 group-hover:text-cerulean">
+                    <h3 className="font-semibold text-foreground group-hover:text-cerulean">
                       {cat.title}
                     </h3>
-                    <p className="mt-1 text-sm text-cool-500">{cat.description}</p>
+                    <p className="mt-1 text-sm text-muted-fg">{cat.description}</p>
                   </div>
                 </div>
               </Link>
