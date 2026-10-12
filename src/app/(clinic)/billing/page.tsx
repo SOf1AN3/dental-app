@@ -9,7 +9,9 @@ import { db } from "@/lib/db/db";
 import { patients } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import Link from "next/link";
+import { FilePlus2, FileSignature, HandCoins } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
 import { InvoiceStatusBadge } from "@/components/clinic/invoice-status-badge";
 
 export default async function BillingPage() {
@@ -52,50 +54,51 @@ export default async function BillingPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Facturation</h1>
-          <p className="text-sm text-cool-500">
-            Gérez les factures, devis et paiements
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/billing/payments/new"
-            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-          >
-            + Enregistrer un paiement
-          </Link>
-          <Link
-            href="/billing/quotes/new"
-            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-          >
-            + Nouveau devis
-          </Link>
-          <Link
-            href="/billing/invoices/new"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-          >
-            + Nouvelle facture
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Facturation"
+        description="Gérez les factures, devis et paiements"
+        actions={
+          <>
+            <Link
+              href="/billing/payments/new"
+              className="inline-flex items-center gap-2 rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <HandCoins className="h-4 w-4" aria-hidden="true" />
+              Enregistrer un paiement
+            </Link>
+            <Link
+              href="/billing/quotes/new"
+              className="inline-flex items-center gap-2 rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <FileSignature className="h-4 w-4" aria-hidden="true" />
+              Nouveau devis
+            </Link>
+            <Link
+              href="/billing/invoices/new"
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+              Nouvelle facture
+            </Link>
+          </>
+        }
+      />
 
       <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
-          <p className="text-sm text-cool-500">Total factures</p>
-          <p className="text-2xl font-bold text-cool-900 mt-1">
+        <div className="rounded-xl border border-border-card bg-card p-5">
+          <p className="text-sm text-muted-fg">Total factures</p>
+          <p className="text-2xl font-bold text-foreground mt-1">
             {summary.totalCount}
           </p>
         </div>
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
-          <p className="text-sm text-cool-500">Montant total</p>
-          <p className="text-2xl font-bold text-cool-900 mt-1">
+        <div className="rounded-xl border border-border-card bg-card p-5">
+          <p className="text-sm text-muted-fg">Montant total</p>
+          <p className="text-2xl font-bold text-foreground mt-1">
             {formatCurrency(summary.totalAmount)}
           </p>
         </div>
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5">
-          <p className="text-sm text-cool-500">En attente de paiement</p>
+        <div className="rounded-xl border border-border-card bg-card p-5">
+          <p className="text-sm text-muted-fg">En attente de paiement</p>
           <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
             {formatCurrency(summary.pendingAmount)}
           </p>
@@ -103,9 +106,9 @@ export default async function BillingPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
-            <h2 className="text-base font-semibold text-cool-900">
+        <div className="rounded-xl border border-border-card bg-card">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border-card">
+            <h2 className="text-base font-semibold text-foreground">
               Factures récentes
             </h2>
             <Link
@@ -117,7 +120,7 @@ export default async function BillingPage() {
           </div>
           <div>
             {recentInvoices.length === 0 ? (
-              <p className="px-6 py-8 text-sm text-cool-400 text-center">
+              <p className="px-6 py-8 text-sm text-muted-fg text-center">
                 Aucune facture
               </p>
             ) : (
@@ -127,20 +130,20 @@ export default async function BillingPage() {
                   <Link
                     key={invoice.id}
                     href={`/billing/invoices/${invoice.id}`}
-                    className="flex items-center justify-between px-6 py-3 hover:bg-cool-50 transition-colors border-b border-cool-100 last:border-b-0"
+                    className="flex items-center justify-between px-6 py-3 hover:bg-cool-50 transition-colors border-b border-border-card/60 last:border-b-0"
                   >
                     <div>
-                      <p className="text-sm font-medium text-cool-900">
+                      <p className="text-sm font-medium text-foreground">
                         {invoice.number}
                       </p>
-                      <p className="text-xs text-cool-500">
+                      <p className="text-xs text-muted-fg">
                         {patient
                           ? `${patient.lastName} ${patient.firstName}`
                           : "Patient inconnu"}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium text-cool-900">
+                      <p className="text-sm font-medium text-foreground">
                         {formatCurrency(invoice.total)}
                       </p>
                       <InvoiceStatusBadge status={invoice.status} />
@@ -152,9 +155,9 @@ export default async function BillingPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
-            <h2 className="text-base font-semibold text-cool-900">
+        <div className="rounded-xl border border-border-card bg-card">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border-card">
+            <h2 className="text-base font-semibold text-foreground">
               Devis récents
             </h2>
             <Link
@@ -166,7 +169,7 @@ export default async function BillingPage() {
           </div>
           <div>
             {recentQuotes.length === 0 ? (
-              <p className="px-6 py-8 text-sm text-cool-400 text-center">
+              <p className="px-6 py-8 text-sm text-muted-fg text-center">
                 Aucun devis
               </p>
             ) : (
@@ -176,23 +179,23 @@ export default async function BillingPage() {
                   <Link
                     key={quote.id}
                     href={`/billing/quotes/${quote.id}`}
-                    className="flex items-center justify-between px-6 py-3 hover:bg-cool-50 transition-colors border-b border-cool-100 last:border-b-0"
+                    className="flex items-center justify-between px-6 py-3 hover:bg-cool-50 transition-colors border-b border-border-card/60 last:border-b-0"
                   >
                     <div>
-                      <p className="text-sm font-medium text-cool-900">
+                      <p className="text-sm font-medium text-foreground">
                         {quote.number}
                       </p>
-                      <p className="text-xs text-cool-500">
+                      <p className="text-xs text-muted-fg">
                         {patient
                           ? `${patient.lastName} ${patient.firstName}`
                           : "Patient inconnu"}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium text-cool-900">
+                      <p className="text-sm font-medium text-foreground">
                         {formatCurrency(quote.total)}
                       </p>
-                      <p className="text-xs text-cool-500">
+                      <p className="text-xs text-muted-fg">
                         {formatDate(quote.date)}
                       </p>
                     </div>

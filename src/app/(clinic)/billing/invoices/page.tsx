@@ -5,8 +5,12 @@ import { db } from "@/lib/db/db";
 import { patients } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import Link from "next/link";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { InvoiceStatusBadge } from "@/components/clinic/invoice-status-badge";
+import { FilePlus2 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import {
+  InvoiceTable,
+  type InvoiceTableRow,
+} from "@/components/clinic/invoice-table";
 
 const statusTabs = [
   { label: "Toutes", value: "" },
@@ -42,22 +46,37 @@ export default async function InvoicesPage(props: {
 
   const patientMap = new Map(patientRows.map((p) => [p.id, p]));
 
+  // Données PLATES uniquement : le tableau est un Client Component, aucune
+  // fonction ni composant ne doit traverser la frontière serveur/client.
+  const rows: InvoiceTableRow[] = invoiceList.map((invoice) => {
+    const patient = patientMap.get(invoice.patientId);
+    return {
+      id: invoice.id,
+      number: invoice.number,
+      date: invoice.date,
+      dueDate: invoice.dueDate,
+      status: invoice.status,
+      total: invoice.total,
+      patientFirstName: patient?.firstName ?? null,
+      patientLastName: patient?.lastName ?? null,
+    };
+  });
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Factures</h1>
-          <p className="text-sm text-cool-500">
-            {invoiceList.length} facture{invoiceList.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-        <Link
-          href="/billing/invoices/new"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouvelle facture
-        </Link>
-      </div>
+      <PageHeader
+        title="Factures"
+        description={`${invoiceList.length} facture${invoiceList.length !== 1 ? "s" : ""}`}
+        actions={
+          <Link
+            href="/billing/invoices/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+            Nouvelle facture
+          </Link>
+        }
+      />
 
       <div className="flex items-center gap-1 mb-4 overflow-x-auto">
         {statusTabs.map((tab) => {
@@ -69,6 +88,7 @@ export default async function InvoicesPage(props: {
             <Link
               key={tab.value}
               href={href}
+              aria-current={isActive ? "page" : undefined}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap ${
                 isActive
                   ? "bg-primary text-white"
@@ -81,89 +101,7 @@ export default async function InvoicesPage(props: {
         })}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-cool-200 bg-cool-50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Numéro
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Patient
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Date
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Total
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Statut
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoiceList.map((invoice) => {
-              const patient = patientMap.get(invoice.patientId);
-              return (
-                <tr
-                  key={invoice.id}
-                  className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-cool-900">
-                    {invoice.number}
-                  </td>
-                  <td className="px-4 py-3 text-cool-600">
-                    {patient
-                      ? `${patient.lastName} ${patient.firstName}`
-                      : "-"}
-                  </td>
-                  <td className="px-4 py-3 text-cool-600">
-                    {formatDate(invoice.date)}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-cool-900">
-                    {formatCurrency(invoice.total)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <InvoiceStatusBadge status={invoice.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Link
-                        href={`/billing/invoices/${invoice.id}`}
-                        className="text-sm text-cerulean hover:text-cerulean/80"
-                      >
-                        Détails
-                      </Link>
-                      {invoice.status !== "paid" && invoice.status !== "cancelled" && (
-                        <Link
-                          href={`/billing/payments/new?invoiceId=${invoice.id}`}
-                          className="text-sm text-emerald-600 hover:text-emerald-500"
-                        >
-                          Paiement
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {invoiceList.length === 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-12 text-center text-cool-400"
-                >
-                  Aucune facture trouvée
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <InvoiceTable data={rows} />
     </div>
   );
 }
