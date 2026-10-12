@@ -19,7 +19,7 @@ interface Patient {
 }
 
 const inputClassName =
-  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+  "mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
 
 export function InvoiceForm({
   catalog,
@@ -126,20 +126,20 @@ export function InvoiceForm({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <form action={action} className="space-y-6">
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+        <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
           {generalErrors && generalErrors.length > 0 && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
               {generalErrors[0]}
             </div>
           )}
-          <h2 className="text-lg font-semibold text-cool-900">
+          <h2 className="text-lg font-semibold text-foreground">
             Nouvelle facture
           </h2>
 
           <div ref={containerRef} className="relative">
             <label
               htmlFor="patientSearch"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Patient *
             </label>
@@ -163,12 +163,12 @@ export function InvoiceForm({
             />
             <input id="patientId" name="patientId" type="hidden" />
             {open && results.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg">
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-border-card bg-card shadow-lg">
                 {results.map((patient) => (
                   <button
                     key={patient.id}
                     type="button"
-                    className="block w-full px-4 py-2 text-left text-sm hover:bg-cool-50 transition-colors"
+                    className="block w-full px-4 py-2 text-left text-sm hover:bg-muted transition-colors"
                     onClick={() => {
                       setSelectedPatient(patient);
                       setQuery("");
@@ -186,7 +186,7 @@ export function InvoiceForm({
               </div>
             )}
             {errors?.patientId && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {errors.patientId[0]}
               </p>
             )}
@@ -196,7 +196,7 @@ export function InvoiceForm({
             <div>
               <label
                 htmlFor="date"
-                className="block text-sm font-medium text-cool-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Date de la facture *
               </label>
@@ -210,7 +210,7 @@ export function InvoiceForm({
                 className={inputClassName}
               />
               {errors?.date && (
-                <p className="mt-1 text-xs text-red-500">
+                <p className="mt-1 text-xs text-destructive">
                   {errors.date[0]}
                 </p>
               )}
@@ -218,7 +218,7 @@ export function InvoiceForm({
             <div>
               <label
                 htmlFor="dueDate"
-                className="block text-sm font-medium text-cool-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Date d&apos;échéance
               </label>
@@ -234,7 +234,7 @@ export function InvoiceForm({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-cool-700 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Lignes de facture
             </label>
             <InvoiceLineItems
@@ -243,14 +243,14 @@ export function InvoiceForm({
               onItemsChange={setItems}
             />
             {itemErrors && itemErrors.length > 0 && (
-              <p className="mt-1 text-xs text-red-500">{itemErrors[0]}</p>
+              <p className="mt-1 text-xs text-destructive">{itemErrors[0]}</p>
             )}
           </div>
 
           <div>
             <label
               htmlFor="notes"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Notes
             </label>
@@ -269,13 +269,13 @@ export function InvoiceForm({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending ? "Création en cours..." : "Créer la facture"}
           </button>
           <Link
             href="/billing/invoices"
-            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Annuler
           </Link>
@@ -283,12 +283,12 @@ export function InvoiceForm({
       </form>
 
       <div className="hidden lg:block lg:sticky lg:top-24 self-start">
-        <p className="mb-2 text-xs font-medium text-cool-500 uppercase tracking-wider">
+        <p className="mb-2 text-xs font-medium text-muted-fg uppercase tracking-wider">
           Aperçu A5
         </p>
         <div ref={previewRef} className="w-full">
           <div
-            className="overflow-hidden rounded-lg border border-cool-200 shadow-lg"
+            className="overflow-hidden rounded-lg border border-border-card shadow-lg"
             style={{ width: A5_SHEET_WIDTH_PX * scale, height: A5_SHEET_HEIGHT_PX * scale }}
           >
             <div

@@ -28,7 +28,7 @@ export function StockTransactionForm({
       <input type="hidden" name="itemId" value={itemId} />
 
       <div>
-        <label htmlFor="type" className="block text-sm font-medium text-cool-700">
+        <label htmlFor="type" className="block text-sm font-medium text-foreground">
           Type de mouvement *
         </label>
         <select
@@ -36,19 +36,19 @@ export function StockTransactionForm({
           name="type"
           required
           defaultValue={defaultType}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         >
           <option value="in">Entrée</option>
           <option value="out">Sortie</option>
           <option value="adjustment">Ajustement</option>
         </select>
         {fieldErrors?.type && (
-          <p className="mt-1 text-xs text-red-500">{fieldErrors.type[0]}</p>
+          <p className="mt-1 text-xs text-destructive">{fieldErrors.type[0]}</p>
         )}
       </div>
 
       <div>
-        <label htmlFor="qty" className="block text-sm font-medium text-cool-700">
+        <label htmlFor="qty" className="block text-sm font-medium text-foreground">
           Quantité *
         </label>
         <input
@@ -57,15 +57,15 @@ export function StockTransactionForm({
           type="number"
           min="1"
           required
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
         {fieldErrors?.qty && (
-          <p className="mt-1 text-xs text-red-500">{fieldErrors.qty[0]}</p>
+          <p className="mt-1 text-xs text-destructive">{fieldErrors.qty[0]}</p>
         )}
       </div>
 
       <div>
-        <label htmlFor="unitPrice" className="block text-sm font-medium text-cool-700">
+        <label htmlFor="unitPrice" className="block text-sm font-medium text-foreground">
           Prix unitaire (DA)
         </label>
         <input
@@ -74,31 +74,31 @@ export function StockTransactionForm({
           type="number"
           min="0"
           step="0.01"
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
       </div>
 
       <div>
-        <label htmlFor="reference" className="block text-sm font-medium text-cool-700">
+        <label htmlFor="reference" className="block text-sm font-medium text-foreground">
           Référence
         </label>
         <input
           id="reference"
           name="reference"
           type="text"
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
       </div>
 
       <div>
-        <label htmlFor="notes" className="block text-sm font-medium text-cool-700">
+        <label htmlFor="notes" className="block text-sm font-medium text-foreground">
           Notes
         </label>
         <textarea
           id="notes"
           name="notes"
           rows={2}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
       </div>
 
@@ -106,7 +106,7 @@ export function StockTransactionForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Enregistrement en cours..." : "Enregistrer le mouvement"}
         </button>
@@ -114,7 +114,7 @@ export function StockTransactionForm({
           <button
             type="button"
             onClick={onSuccess}
-            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Annuler
           </button>

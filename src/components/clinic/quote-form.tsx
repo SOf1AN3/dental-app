@@ -19,7 +19,7 @@ interface PatientResult {
 }
 
 const inputClassName =
-  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+  "mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
 
 export function QuoteForm({
   catalog,
@@ -131,18 +131,18 @@ export function QuoteForm({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <form action={action} className="space-y-6">
-        <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4">
+        <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
           {generalErrors && generalErrors.length > 0 && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
               {generalErrors[0]}
             </div>
           )}
-          <h2 className="text-lg font-semibold text-cool-900">
+          <h2 className="text-lg font-semibold text-foreground">
             Informations du devis
           </h2>
 
           <div ref={containerRef} className="relative">
-            <label htmlFor="patientSearch" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="patientSearch" className="block text-sm font-medium text-foreground">
               Patient *
             </label>
             <input
@@ -156,10 +156,10 @@ export function QuoteForm({
             />
             <input type="hidden" name="patientId" value={selected?.id || ""} />
             {errors?.patientId && (
-              <p className="mt-1 text-xs text-red-500">{errors.patientId[0]}</p>
+              <p className="mt-1 text-xs text-destructive">{errors.patientId[0]}</p>
             )}
             {open && results.length > 0 && (
-              <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+              <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border-card bg-card shadow-lg max-h-48 overflow-y-auto">
                 {results.map((p) => (
                   <li
                     key={p.id}
@@ -175,7 +175,7 @@ export function QuoteForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label htmlFor="date" className="block text-sm font-medium text-cool-700">
+              <label htmlFor="date" className="block text-sm font-medium text-foreground">
                 Date *
               </label>
               <input
@@ -188,11 +188,11 @@ export function QuoteForm({
                 className={inputClassName}
               />
               {errors?.date && (
-                <p className="mt-1 text-xs text-red-500">{errors.date[0]}</p>
+                <p className="mt-1 text-xs text-destructive">{errors.date[0]}</p>
               )}
             </div>
             <div>
-              <label htmlFor="validUntil" className="block text-sm font-medium text-cool-700">
+              <label htmlFor="validUntil" className="block text-sm font-medium text-foreground">
                 Valide jusqu&apos;au
               </label>
               <input
@@ -207,7 +207,7 @@ export function QuoteForm({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-cool-700 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Lignes du devis
             </label>
             <QuoteLineItems
@@ -216,12 +216,12 @@ export function QuoteForm({
               onItemsChange={setItems}
             />
             {itemErrors && itemErrors.length > 0 && (
-              <p className="mt-1 text-xs text-red-500">{itemErrors[0]}</p>
+              <p className="mt-1 text-xs text-destructive">{itemErrors[0]}</p>
             )}
           </div>
 
           <div>
-            <label htmlFor="notes" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="notes" className="block text-sm font-medium text-foreground">
               Notes
             </label>
             <textarea
@@ -239,13 +239,13 @@ export function QuoteForm({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending ? "Création..." : "Créer le devis"}
           </button>
           <Link
             href="/billing/quotes"
-            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Annuler
           </Link>
@@ -253,12 +253,12 @@ export function QuoteForm({
       </form>
 
       <div className="hidden lg:block lg:sticky lg:top-24 self-start">
-        <p className="mb-2 text-xs font-medium text-cool-500 uppercase tracking-wider">
+        <p className="mb-2 text-xs font-medium text-muted-fg uppercase tracking-wider">
           Aperçu A5
         </p>
         <div ref={previewRef} className="w-full">
           <div
-            className="overflow-hidden rounded-lg border border-cool-200 shadow-lg"
+            className="overflow-hidden rounded-lg border border-border-card shadow-lg"
             style={{ width: A5_SHEET_WIDTH_PX * scale, height: A5_SHEET_HEIGHT_PX * scale }}
           >
             <div

@@ -70,12 +70,12 @@ function CloseSessionForm({ sessionId }: { sessionId: string }) {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Clôture en cours..." : "Clore la séance"}
         </button>
       </form>
-      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -116,7 +116,7 @@ function SessionStatusAction({
           {pending ? pendingLabel : label}
         </button>
       </form>
-      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -130,11 +130,11 @@ export function SessionInvoice({
 }: SessionInvoiceProps) {
   if (status === "in_progress" && !invoice) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-sm font-medium text-muted-fg uppercase tracking-wider">
           Facture
         </h2>
-        <p className="text-sm text-cool-600">
+        <p className="text-sm text-muted-fg">
           La facture sera générée lors de la clôture de la séance
         </p>
         <CloseSessionForm sessionId={sessionId} />
@@ -144,11 +144,11 @@ export function SessionInvoice({
 
   if (!invoice) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
+      <div className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="text-sm font-medium text-muted-fg uppercase tracking-wider mb-4">
           Facture
         </h2>
-        <p className="text-sm text-cool-400">Aucune facture pour cette séance</p>
+        <p className="text-sm text-muted-fg">Aucune facture pour cette séance</p>
       </div>
     );
   }
@@ -160,9 +160,9 @@ export function SessionInvoice({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-6">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-cool-900">
+          <h2 className="text-lg font-semibold text-foreground">
             Facture {invoice.number}
           </h2>
           <InvoiceStatusBadge status={invoice.status} />
@@ -179,7 +179,7 @@ export function SessionInvoice({
               href={`/prescriptions/${prescriptionId}/print`}
               target="_blank"
               rel="noreferrer"
-              className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+              className="rounded-lg border border-border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
             >
               Imprimer l&apos;ordonnance (A5)
             </Link>
@@ -187,30 +187,30 @@ export function SessionInvoice({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <div className="px-6 py-4 border-b border-cool-200">
-          <h2 className="text-base font-semibold text-cool-900">Articles</h2>
+      <div className="rounded-xl border border-border-card bg-card">
+        <div className="px-6 py-4 border-b border-border-card">
+          <h2 className="text-base font-semibold text-foreground">Articles</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-cool-200 bg-cool-50">
-                <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
+              <tr className="border-b border-border-card bg-muted">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-fg uppercase tracking-wider">
                   Description
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                   Qté
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                   Prix unitaire
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                   TVA
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                   Remise
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                   Total
                 </th>
               </tr>
@@ -220,27 +220,27 @@ export function SessionInvoice({
                 items.map((item) => (
                   <tr
                     key={item.id ?? item.description}
-                    className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
+                    className="border-b border-border hover:bg-muted transition-colors"
                   >
-                    <td className="px-4 py-3 text-cool-900">{item.description}</td>
-                    <td className="px-4 py-3 text-right text-cool-600">{item.quantity}</td>
-                    <td className="px-4 py-3 text-right text-cool-600">
+                    <td className="px-4 py-3 text-foreground">{item.description}</td>
+                    <td className="px-4 py-3 text-right text-muted-fg">{item.quantity}</td>
+                    <td className="px-4 py-3 text-right text-muted-fg">
                       {formatCurrency(item.unitPrice)}
                     </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
+                    <td className="px-4 py-3 text-right text-muted-fg">
                       {(item.taxRate ?? 0) > 0 ? `${item.taxRate}%` : "-"}
                     </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
+                    <td className="px-4 py-3 text-right text-muted-fg">
                       {(item.discount ?? 0) > 0 ? formatCurrency(item.discount ?? 0) : "-"}
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-cool-900">
+                    <td className="px-4 py-3 text-right font-medium text-foreground">
                       {formatCurrency(item.total)}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-cool-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-muted-fg">
                     Aucun article dans cette facture
                   </td>
                 </tr>
@@ -250,52 +250,52 @@ export function SessionInvoice({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
+      <div className="rounded-xl border border-border-card bg-card p-6">
         <div className="max-w-xs ml-auto space-y-2">
           <div className="flex justify-between">
-            <span className="text-sm text-cool-500">Sous-total</span>
-            <span className="text-sm text-cool-900">{formatCurrency(invoice.subtotal)}</span>
+            <span className="text-sm text-muted-fg">Sous-total</span>
+            <span className="text-sm text-foreground">{formatCurrency(invoice.subtotal)}</span>
           </div>
           {taxTotal > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">TVA</span>
-              <span className="text-sm text-cool-900">{formatCurrency(taxTotal)}</span>
+              <span className="text-sm text-muted-fg">TVA</span>
+              <span className="text-sm text-foreground">{formatCurrency(taxTotal)}</span>
             </div>
           )}
           {discountTotal > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">Remise</span>
-              <span className="text-sm text-red-600 dark:text-red-400">-{formatCurrency(discountTotal)}</span>
+              <span className="text-sm text-muted-fg">Remise</span>
+              <span className="text-sm text-destructive">-{formatCurrency(discountTotal)}</span>
             </div>
           )}
-          <div className="flex justify-between border-t border-cool-200 pt-2">
-            <span className="text-base font-semibold text-cool-900">Total</span>
-            <span className="text-base font-semibold text-cool-900">
+          <div className="flex justify-between border-t border-border-card pt-2">
+            <span className="text-base font-semibold text-foreground">Total</span>
+            <span className="text-base font-semibold text-foreground">
               {formatCurrency(invoice.total)}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <div className="px-6 py-4 border-b border-cool-200">
-          <h2 className="text-base font-semibold text-cool-900">Paiements</h2>
+      <div className="rounded-xl border border-border-card bg-card">
+        <div className="px-6 py-4 border-b border-border-card">
+          <h2 className="text-base font-semibold text-foreground">Paiements</h2>
         </div>
         {payments.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-cool-200 bg-cool-50">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
+                <tr className="border-b border-border-card bg-muted">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-fg uppercase tracking-wider">
                     Date
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-fg uppercase tracking-wider">
                     Méthode
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-fg uppercase tracking-wider">
                     Référence
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-right text-xs font-medium text-muted-fg uppercase tracking-wider">
                     Montant
                   </th>
                 </tr>
@@ -304,14 +304,14 @@ export function SessionInvoice({
                 {payments.map((payment) => (
                   <tr
                     key={payment.id ?? payment.reference}
-                    className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
+                    className="border-b border-border hover:bg-muted transition-colors"
                   >
-                    <td className="px-4 py-3 text-cool-600">{formatDate(payment.date)}</td>
-                    <td className="px-4 py-3 text-cool-600">
+                    <td className="px-4 py-3 text-muted-fg">{formatDate(payment.date)}</td>
+                    <td className="px-4 py-3 text-muted-fg">
                       {methodLabels[payment.method] || payment.method}
                     </td>
-                    <td className="px-4 py-3 text-cool-600">{payment.reference || "-"}</td>
-                    <td className="px-4 py-3 text-right font-medium text-cool-900">
+                    <td className="px-4 py-3 text-muted-fg">{payment.reference || "-"}</td>
+                    <td className="px-4 py-3 text-right font-medium text-foreground">
                       {formatCurrency(payment.amount)}
                     </td>
                   </tr>
@@ -320,7 +320,7 @@ export function SessionInvoice({
             </table>
           </div>
         ) : (
-          <p className="px-6 py-8 text-sm text-cool-400 text-center">
+          <p className="px-6 py-8 text-sm text-muted-fg text-center">
             Aucun paiement enregistré
           </p>
         )}
@@ -333,7 +333,7 @@ export function SessionInvoice({
             status="invoiced"
             label="Marquer facturée"
             pendingLabel="Enregistrement..."
-            buttonClassName="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            buttonClassName="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           />
         )}
         {status === "invoiced" && (
@@ -342,7 +342,7 @@ export function SessionInvoice({
             status="paid"
             label="Marquer payée"
             pendingLabel="Enregistrement..."
-            buttonClassName="rounded-lg bg-mint px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 transition-colors"
+            buttonClassName="rounded-lg bg-mint px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           />
         )}
       </div>

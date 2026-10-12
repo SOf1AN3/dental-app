@@ -32,14 +32,14 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
 
   return (
     <form action={formAction} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           {itemId ? "Modifier l'article" : "Nouvel article"}
         </h2>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <label htmlFor="name" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="name" className="block text-sm font-medium text-foreground">
               Nom *
             </label>
             <input
@@ -48,15 +48,15 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               type="text"
               required
               defaultValue={defaultValues?.name}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.name && (
-              <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>
+              <p className="mt-1 text-xs text-destructive">{fieldErrors.name[0]}</p>
             )}
           </div>
 
           <div>
-            <label htmlFor="category" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="category" className="block text-sm font-medium text-foreground">
               Catégorie
             </label>
             <input
@@ -64,12 +64,12 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               name="category"
               type="text"
               defaultValue={defaultValues?.category || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
 
           <div>
-            <label htmlFor="unit" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="unit" className="block text-sm font-medium text-foreground">
               Unité
             </label>
             <input
@@ -77,13 +77,13 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               name="unit"
               type="text"
               defaultValue={defaultValues?.unit || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
 
         <div>
-          <label htmlFor="description" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="description" className="block text-sm font-medium text-foreground">
             Description
           </label>
           <textarea
@@ -91,13 +91,13 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
             name="description"
             rows={3}
             defaultValue={defaultValues?.description || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label htmlFor="currentQty" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="currentQty" className="block text-sm font-medium text-foreground">
               Quantité actuelle
             </label>
             <input
@@ -106,12 +106,12 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               type="number"
               min="0"
               defaultValue={defaultValues?.currentQty ?? 0}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
 
           <div>
-            <label htmlFor="minQty" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="minQty" className="block text-sm font-medium text-foreground">
               Quantité minimale
             </label>
             <input
@@ -120,14 +120,14 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               type="number"
               min="0"
               defaultValue={defaultValues?.minQty ?? 0}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label htmlFor="purchasePrice" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="purchasePrice" className="block text-sm font-medium text-foreground">
               Prix d&apos;achat (DA)
             </label>
             <input
@@ -137,12 +137,12 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               min="0"
               step="0.01"
               defaultValue={defaultValues?.purchasePrice ?? ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
 
           <div>
-            <label htmlFor="sellingPrice" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="sellingPrice" className="block text-sm font-medium text-foreground">
               Prix de vente (DA)
             </label>
             <input
@@ -152,7 +152,7 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
               min="0"
               step="0.01"
               defaultValue={defaultValues?.sellingPrice ?? ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
@@ -162,7 +162,7 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending
             ? "Enregistrement en cours..."
@@ -172,7 +172,7 @@ export function StockItemForm({ itemId, defaultValues }: StockItemFormProps) {
         </button>
         <Link
           href="/stock"
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           Annuler
         </Link>
