@@ -1,7 +1,7 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getStockItems, getLowStockItems } from "@/lib/actions/inventory";
 import Link from "next/link";
-import { StockStatusBadge } from "@/components/clinic/stock-status-badge";
+import { StockTable, type StockTableRow } from "@/components/clinic/stock-table";
 
 export default async function StockPage() {
   await requireAuth();
@@ -10,6 +10,17 @@ export default async function StockPage() {
     getStockItems(),
     getLowStockItems(),
   ]);
+
+  // Aplatissement explicite côté serveur : seules des données plates
+  // (aucune fonction, aucun composant) traversent la frontière serveur/client.
+  const stockRows: StockTableRow[] = items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    currentQty: item.currentQty,
+    minQty: item.minQty,
+    unit: item.unit,
+  }));
 
   return (
     <div>
@@ -46,105 +57,7 @@ export default async function StockPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-cool-200 bg-cool-50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Nom
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Catégorie
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Qté
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Min
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Unité
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Statut
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              const isLow = item.currentQty < item.minQty;
-              return (
-                <tr
-                  key={item.id}
-                  className={`border-b border-cool-100 hover:bg-cool-50 transition-colors ${
-                    isLow ? "bg-red-50/30 dark:bg-red-500/10" : ""
-                  }`}
-                >
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/stock/${item.id}`}
-                      className="font-medium text-cerulean hover:text-cerulean/80"
-                    >
-                      {item.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-cool-600">
-                    {item.category || "-"}
-                  </td>
-                  <td className={`px-4 py-3 font-medium ${isLow ? "text-red-600 dark:text-red-400" : "text-cool-900"}`}>
-                    {item.currentQty}
-                  </td>
-                  <td className="px-4 py-3 text-cool-500">{item.minQty}</td>
-                  <td className="px-4 py-3 text-cool-600">
-                    {item.unit || "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StockStatusBadge
-                      currentQty={item.currentQty}
-                      minQty={item.minQty}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/stock/${item.id}?tx=in`}
-                        className="text-xs font-medium text-mint hover:text-mint/80"
-                      >
-                        Entrée
-                      </Link>
-                      <Link
-                        href={`/stock/${item.id}?tx=out`}
-                        className="text-xs font-medium text-red-600 hover:text-red-500"
-                      >
-                        Sortie
-                      </Link>
-                      <Link
-                        href={`/stock/${item.id}`}
-                        className="text-sm text-cerulean hover:text-cerulean/80"
-                      >
-                        Détails
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="px-4 py-12 text-center text-cool-400"
-                >
-                  Aucun article en stock
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <StockTable data={stockRows} />
     </div>
   );
 }
