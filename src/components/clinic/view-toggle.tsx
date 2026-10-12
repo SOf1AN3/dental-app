@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 type ViewOption = { label: string; value: string };
 
@@ -8,6 +9,11 @@ type ViewOption = { label: string; value: string };
  * Search-param-driven view toggle (RDV-1).
  * Renders two pill buttons that switch the `?view=` param without a full
  * page reload (shallow navigation via pushState).
+ *
+ * `role="group"` + `aria-label` : les boutons pilotent une seule et même
+ * zone (la vue affichée), pas des actions indépendantes. Le groupe permet
+ * au lecteur d'écran d'annoncer le contexte (« Choisir la vue, groupe »)
+ * puis l'état de chaque bascule via `aria-pressed`.
  */
 export function ViewToggle({
   options,
@@ -32,18 +38,26 @@ export function ViewToggle({
   }
 
   return (
-    <div className="mb-4 flex items-center gap-1 rounded-lg border border-cool-200 bg-cool-50 p-0.5">
+    <div
+      role="group"
+      aria-label="Choisir la vue"
+      className="mb-4 flex items-center gap-1 rounded-lg border border-border-card bg-cool-50 p-0.5"
+    >
       {options.map((opt) => {
         const active = current === opt.value;
         return (
           <button
             key={opt.value}
+            type="button"
+            aria-pressed={active}
             onClick={() => switchView(opt.value)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               active
-                ? "bg-white text-cool-900 shadow-sm dark:bg-cool-300"
-                : "text-cool-500 hover:text-cool-700"
-            }`}
+                ? "bg-card text-cool-900 shadow-sm"
+                : "text-muted-fg hover:text-cool-900"
+            )}
           >
             {opt.label}
           </button>
