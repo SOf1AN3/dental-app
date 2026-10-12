@@ -14,6 +14,7 @@ import { SessionTreatments } from "@/components/clinic/session-treatments";
 import { SessionPrescription } from "@/components/clinic/session-prescription";
 import { SessionInvoice, type InvoiceData } from "@/components/clinic/session-invoice";
 import { DeleteSessionButton } from "@/components/clinic/delete-session-button";
+import { PageHeader } from "@/components/ui/page-header";
 
 const TABS = [
   { key: "traitements", label: "Traitements" },
@@ -59,37 +60,39 @@ export default async function SessionDetailPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
+      <div>
         <div className="flex items-center gap-3 mb-1">
           <Link
             href={`/patients/${id}`}
-            className="text-sm text-cerulean hover:text-cerulean/80 inline-block"
+            className="text-sm text-cerulean hover:text-cerulean/80 inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             ← Retour au dossier
           </Link>
-          <span className="text-sm text-cool-300">•</span>
+          <span className="text-sm text-muted-fg" aria-hidden="true">
+            •
+          </span>
           <Link
             href={`/patients/${id}/sessions`}
-            className="text-sm text-cerulean hover:text-cerulean/80 inline-block"
+            className="text-sm text-cerulean hover:text-cerulean/80 inline-block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             Historique des séances
           </Link>
         </div>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-cool-900">
-              {session.patient.firstName} {session.patient.lastName}
-            </h1>
-            <SessionStatusBadge status={session.status} />
-          </div>
-          {canDelete && <DeleteSessionButton sessionId={sessionId} patientId={id} />}
-        </div>
-        <p className="mt-1 text-sm text-cool-500">
-          {formatDate(session.startedAt ?? session.createdAt)}
-        </p>
+        <PageHeader
+          title={`${session.patient.firstName} ${session.patient.lastName}`}
+          description={formatDate(session.startedAt ?? session.createdAt)}
+          actions={
+            <div className="flex items-center gap-3">
+              <SessionStatusBadge status={session.status} />
+              {canDelete && (
+                <DeleteSessionButton sessionId={sessionId} patientId={id} />
+              )}
+            </div>
+          }
+        />
       </div>
 
-      <div className="mb-6 border-b border-cool-200">
+      <div className="mb-6 border-b border-border-card">
         <nav className="flex items-center gap-6">
           {TABS.map((t) => (
             <Link
@@ -98,8 +101,8 @@ export default async function SessionDetailPage(props: {
               className={cn(
                 "pb-3 text-sm transition-colors",
                 activeTab === t.key
-                  ? "border-b-2 border-cerulean font-medium text-cool-900"
-                  : "text-cool-500 hover:text-cool-700",
+                  ? "border-b-2 border-cerulean font-medium text-foreground"
+                  : "text-muted-fg hover:text-foreground",
               )}
             >
               {t.label}

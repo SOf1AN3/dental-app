@@ -5,6 +5,7 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { requireAuth } from "@/lib/auth-utils";
 import { notFound } from "next/navigation";
 import { PatientEditForm } from "@/components/clinic/patient-edit-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function EditPatientPage(props: {
   params: Promise<{ id: string }>;
@@ -21,12 +22,10 @@ export default async function EditPatientPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Modifier le patient</h1>
-        <p className="text-sm text-cool-500">
-          {patient.lastName} {patient.firstName}
-        </p>
-      </div>
+      <PageHeader
+        title="Modifier le patient"
+        description={`${patient.lastName} ${patient.firstName}`}
+      />
       <PatientEditForm patient={patient} />
     </div>
   );
