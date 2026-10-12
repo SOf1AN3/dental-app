@@ -241,7 +241,7 @@ export function OrderForm() {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors"
         >
           {pending ? "Création..." : "Créer la commande"}
         </button>
