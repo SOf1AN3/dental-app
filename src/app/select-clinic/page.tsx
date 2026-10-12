@@ -1,8 +1,11 @@
+import { Building2 } from "lucide-react";
+
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/db";
 import { clinicMemberships, clinics, platformOwners } from "@/lib/db/schema";
 import { eq, and, or, isNull, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { EmptyState } from "@/components/ui/empty-state";
 import { CreateClinicDialog } from "./create-clinic-dialog";
 import { ClinicCard } from "./clinic-card";
 import { PendingInvitations } from "./pending-invitations";
@@ -58,15 +61,17 @@ export default async function SelectClinicPage() {
     <div className="flex min-h-full flex-1 items-center justify-center p-8">
       <div className="w-full max-w-2xl space-y-8">
         <div className="text-center">
+          {/* Hero de sélection de clinique : titre de marque centré (text-primary),
+              volontairement distinct d'un PageHeader applicatif standard. */}
           <h1 className="text-3xl font-bold text-primary">DentalCare</h1>
-          <p className="mt-2 text-cool-500">
+          <p className="mt-2 text-muted-fg">
             Sélectionnez une clinique ou créez-en une nouvelle
           </p>
         </div>
 
         {pendingInvites.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider">
+            <h2 className="text-sm font-medium text-muted-fg uppercase tracking-wider">
               Invitations en attente
             </h2>
             <PendingInvitations invites={pendingInvites} />
@@ -75,7 +80,7 @@ export default async function SelectClinicPage() {
 
         {memberships.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider">
+            <h2 className="text-sm font-medium text-muted-fg uppercase tracking-wider">
               Mes cliniques
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -91,14 +96,12 @@ export default async function SelectClinicPage() {
         )}
 
         {memberships.length === 0 && pendingInvites.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
-            <p className="text-lg font-medium text-cool-600">
-              Vous n&apos;avez aucune clinique
-            </p>
-            <p className="mt-1 text-sm text-cool-400">
-              Créez votre première clinique pour commencer
-            </p>
-          </div>
+          <EmptyState
+            icon={Building2}
+            title="Vous n'avez aucune clinique"
+            description="Créez votre première clinique pour commencer"
+            className="rounded-xl border-2 border-dashed border-border-card"
+          />
         )}
 
         <div className="flex justify-center">

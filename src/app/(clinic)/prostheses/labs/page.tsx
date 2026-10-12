@@ -1,7 +1,11 @@
+import { FlaskConical, Plus } from "lucide-react";
+
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getLabs } from "@/lib/actions/prosthesis";
 import Link from "next/link";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function LabsPage() {
   await requireAuth();
@@ -11,64 +15,71 @@ export default async function LabsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Laboratoires</h1>
-          <p className="text-sm text-cool-500">{labs.length} laboratoires</p>
-        </div>
-        <Link
-          href="/prostheses/labs/new"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouveau laboratoire
-        </Link>
-      </div>
+      <PageHeader
+        title="Laboratoires"
+        description={`${labs.length} laboratoires`}
+        actions={
+          <Link
+            href="/prostheses/labs/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nouveau laboratoire
+          </Link>
+        }
+      />
 
       {labs.length === 0 ? (
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 px-6 py-12 text-center text-cool-400">
-          <p className="text-lg mb-1">Aucun laboratoire</p>
-          <p className="text-sm">
-            Ajoutez un{" "}
-            <Link href="/prostheses/labs/new" className="text-cerulean hover:text-cerulean/80">
-              nouveau laboratoire
-            </Link>{" "}
-            pour commencer.
-          </p>
-        </div>
+        <EmptyState
+          icon={FlaskConical}
+          title="Aucun laboratoire"
+          description={
+            <>
+              Ajoutez un{" "}
+              <Link
+                href="/prostheses/labs/new"
+                className="text-cerulean hover:text-cerulean/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                nouveau laboratoire
+              </Link>{" "}
+              pour commencer.
+            </>
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {labs.map((lab) => (
             <Link
               key={lab.id}
               href={`/prostheses/labs/${lab.id}`}
-              className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 hover:border-cerulean hover:shadow-sm transition-all"
+              className="rounded-xl border border-border-card bg-card p-6 hover:border-cerulean hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
-              <h3 className="text-lg font-semibold text-cool-900">{lab.name}</h3>
+              <h3 className="text-lg font-semibold text-foreground">{lab.name}</h3>
               {lab.contactPerson && (
-                <p className="mt-1 text-sm text-cool-500">{lab.contactPerson}</p>
+                <p className="mt-1 text-sm text-muted-fg">{lab.contactPerson}</p>
               )}
-              <div className="mt-4 space-y-1 text-sm text-cool-600">
+              <div className="mt-4 space-y-1 text-sm text-muted-fg">
                 {lab.phone && (
                   <p>
-                    <span className="text-cool-400">Tél: </span>
+                    <span className="text-muted-fg">Tél: </span>
                     {lab.phone}
                   </p>
                 )}
                 {lab.email && (
                   <p>
-                    <span className="text-cool-400">Email: </span>
+                    <span className="text-muted-fg">Email: </span>
                     {lab.email}
                   </p>
                 )}
                 {lab.address && (
                   <p>
-                    <span className="text-cool-400">Adresse: </span>
+                    <span className="text-muted-fg">Adresse: </span>
                     {lab.address}
                   </p>
                 )}
               </div>
               {!lab.phone && !lab.email && !lab.address && (
-                <p className="mt-2 text-sm text-cool-400">Aucune information de contact</p>
+                <p className="mt-2 text-sm text-muted-fg">Aucune information de contact</p>
               )}
             </Link>
           ))}

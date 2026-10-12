@@ -6,18 +6,21 @@ import { patients } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
 import { InvoiceStatusBadge } from "@/components/clinic/invoice-status-badge";
 import { ConfirmMarkPaidButton } from "@/components/clinic/confirm-mark-paid-button";
 import { BackButton } from "@/components/clinic/back-button";
+import {
+  BillingItemsTable,
+  type BillingItemTableRow,
+} from "@/components/clinic/billing-items-table";
+import {
+  InvoicePaymentsTable,
+  type PaymentTableRow,
+} from "@/components/clinic/invoice-payments-table";
 import type { invoiceItems as invoiceItemSchema, payments as paymentSchema } from "@/lib/db/schema";
-
-const methodLabels: Record<string, string> = {
-  cash: "Espèces",
-  check: "Chèque",
-  card: "Carte bancaire",
-  transfer: "Virement",
-};
 
 async function handleSendStatus(formData: FormData) {
   "use server";
@@ -60,6 +63,28 @@ export default async function InvoiceDetailPage(props: {
   const invoiceItems = invoiceWithRelations.items;
   const invoicePayments = invoiceWithRelations.payments;
 
+  // Aplatissement explicite côté serveur : seules des données plates
+  // (aucune fonction, aucun composant) traversent la frontière serveur/client.
+  const itemRows: BillingItemTableRow[] = (invoiceItems ?? []).map((item) => ({
+    id: item.id,
+    description: item.description,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    taxRate: item.taxRate,
+    discount: item.discount,
+    total: item.total,
+  }));
+
+  const paymentRows: PaymentTableRow[] = (invoicePayments ?? []).map(
+    (payment) => ({
+      id: payment.id,
+      amount: payment.amount,
+      method: payment.method,
+      reference: payment.reference,
+      date: payment.date,
+    })
+  );
+
   const taxTotal = invoice.taxTotal ?? 0;
   const discountTotal = invoice.discountTotal ?? 0;
 
@@ -67,66 +92,66 @@ export default async function InvoiceDetailPage(props: {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <BackButton fallback="/billing/invoices" label="← Retour aux factures" />
-          <h1 className="text-2xl font-bold text-cool-900">
-            Facture {invoice.number}
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href={`/billing/invoices/${invoice.id}/print`}
-            target="_blank"
-            className="rounded-lg border border-cool-200 px-3 py-1.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-          >
-            Imprimer
-          </Link>
-          <InvoiceStatusBadge status={invoice.status} className="text-sm px-3 py-1" />
-        </div>
+      <div>
+        <BackButton fallback="/billing/invoices" label="← Retour aux factures" />
+        <PageHeader
+          title={`Facture ${invoice.number}`}
+          actions={
+            <>
+              <Link
+                href={`/billing/invoices/${invoice.id}/print`}
+                target="_blank"
+                className="rounded-lg border border-border-input bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                Imprimer
+              </Link>
+              <InvoiceStatusBadge status={invoice.status} className="text-sm px-3 py-1" />
+            </>
+          }
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-6">
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider">
+        <div className="rounded-xl border border-border-card bg-card p-6 space-y-3">
+          <h2 className="text-sm font-semibold text-muted-fg uppercase tracking-wider">
             Informations
           </h2>
           <div className="space-y-2">
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">Date</span>
-              <span className="text-sm font-medium text-cool-900">
+              <span className="text-sm text-muted-fg">Date</span>
+              <span className="text-sm font-medium text-foreground">
                 {formatDate(invoice.date)}
               </span>
             </div>
             {invoice.dueDate && (
               <div className="flex justify-between">
-                <span className="text-sm text-cool-500">Échéance</span>
-                <span className="text-sm font-medium text-cool-900">
+                <span className="text-sm text-muted-fg">Échéance</span>
+                <span className="text-sm font-medium text-foreground">
                   {formatDate(invoice.dueDate)}
                 </span>
               </div>
             )}
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">Statut</span>
+              <span className="text-sm text-muted-fg">Statut</span>
               <InvoiceStatusBadge status={invoice.status} />
             </div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-3">
-          <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider">
+        <div className="rounded-xl border border-border-card bg-card p-6 space-y-3">
+          <h2 className="text-sm font-semibold text-muted-fg uppercase tracking-wider">
             Patient
           </h2>
           {patient ? (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-cool-900">
+              <p className="text-sm font-medium text-foreground">
                 {patient.lastName} {patient.firstName}
               </p>
               {patient.phone && (
-                <p className="text-sm text-cool-500">{patient.phone}</p>
+                <p className="text-sm text-muted-fg">{patient.phone}</p>
               )}
               {patient.email && (
-                <p className="text-sm text-cool-500">{patient.email}</p>
+                <p className="text-sm text-muted-fg">{patient.email}</p>
               )}
               <Link
                 href={`/patients/${patient.id}`}
@@ -136,181 +161,78 @@ export default async function InvoiceDetailPage(props: {
               </Link>
             </div>
           ) : (
-            <p className="text-sm text-cool-400">Patient inconnu</p>
+            <p className="text-sm text-muted-fg">Patient inconnu</p>
           )}
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <div className="px-6 py-4 border-b border-cool-200">
-          <h2 className="text-base font-semibold text-cool-900">Articles</h2>
+      <div className="rounded-xl border border-border-card bg-card">
+        <div className="px-6 py-4 border-b border-border-card">
+          <h2 className="text-base font-semibold text-foreground">Articles</h2>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-cool-200 bg-cool-50">
-                <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  Description
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  Qté
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  Prix unitaire
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  TVA
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  Remise
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                  Total
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoiceItems && invoiceItems.length > 0 ? (
-                invoiceItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-cool-900">
-                      {item.description}
-                    </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
-                      {item.quantity}
-                    </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
-                      {formatCurrency(item.unitPrice)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
-                      {(item.taxRate ?? 0) > 0 ? `${item.taxRate}%` : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-right text-cool-600">
-                      {(item.discount ?? 0) > 0 ? formatCurrency(item.discount ?? 0) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium text-cool-900">
-                      {formatCurrency(item.total)}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-8 text-center text-cool-400"
-                  >
-                    Aucun article dans cette facture
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <BillingItemsTable
+          data={itemRows}
+          emptyTitle="Aucun article dans cette facture"
+          className="rounded-none border-0 bg-transparent"
+        />
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
+      <div className="rounded-xl border border-border-card bg-card p-6">
         <div className="max-w-xs ml-auto space-y-2">
           <div className="flex justify-between">
-            <span className="text-sm text-cool-500">Sous-total</span>
-            <span className="text-sm text-cool-900">
+            <span className="text-sm text-muted-fg">Sous-total</span>
+            <span className="text-sm text-foreground">
               {formatCurrency(invoice.subtotal)}
             </span>
           </div>
           {taxTotal > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">TVA</span>
-              <span className="text-sm text-cool-900">
+              <span className="text-sm text-muted-fg">TVA</span>
+              <span className="text-sm text-foreground">
                 {formatCurrency(taxTotal)}
               </span>
             </div>
           )}
           {discountTotal > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-cool-500">Remise</span>
-              <span className="text-sm text-red-600 dark:text-red-400">
+              <span className="text-sm text-muted-fg">Remise</span>
+              <span className="text-sm text-destructive">
                 -{formatCurrency(discountTotal)}
               </span>
             </div>
           )}
-          <div className="flex justify-between border-t border-cool-200 pt-2">
-            <span className="text-base font-semibold text-cool-900">Total</span>
-            <span className="text-base font-semibold text-cool-900">
+          <div className="flex justify-between border-t border-border-card pt-2">
+            <span className="text-base font-semibold text-foreground">Total</span>
+            <span className="text-base font-semibold text-foreground">
               {formatCurrency(invoice.total)}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-cool-200">
-          <h2 className="text-base font-semibold text-cool-900">Paiements</h2>
+      <div className="rounded-xl border border-border-card bg-card">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border-card">
+          <h2 className="text-base font-semibold text-foreground">Paiements</h2>
           <Link
             href={`/billing/payments/new?patientId=${invoice.patientId}&invoiceId=${invoice.id}`}
-            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-light transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            + Nouveau paiement
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            Nouveau paiement
           </Link>
         </div>
-        <div>
-          {invoicePayments && invoicePayments.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-cool-200 bg-cool-50">
-                    <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                      Méthode
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                      Référence
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                      Montant
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoicePayments.map((payment) => (
-                    <tr
-                      key={payment.id}
-                      className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-                    >
-                      <td className="px-4 py-3 text-cool-600">
-                        {formatDate(payment.date)}
-                      </td>
-                      <td className="px-4 py-3 text-cool-600">
-                        {methodLabels[payment.method] || payment.method}
-                      </td>
-                      <td className="px-4 py-3 text-cool-600">
-                        {payment.reference || "-"}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-cool-900">
-                        {formatCurrency(payment.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="px-6 py-8 text-sm text-cool-400 text-center">
-              Aucun paiement enregistré
-            </p>
-          )}
-        </div>
+        <InvoicePaymentsTable
+          data={paymentRows}
+          className="rounded-none border-0 bg-transparent"
+        />
       </div>
 
       {invoice.notes && (
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-          <h2 className="text-sm font-semibold text-cool-500 uppercase tracking-wider mb-2">
+        <div className="rounded-xl border border-border-card bg-card p-6">
+          <h2 className="text-sm font-semibold text-muted-fg uppercase tracking-wider mb-2">
             Notes
           </h2>
-          <p className="text-sm text-cool-700 whitespace-pre-wrap">
+          <p className="text-sm text-foreground whitespace-pre-wrap">
             {invoice.notes}
           </p>
         </div>
@@ -324,7 +246,7 @@ export default async function InvoiceDetailPage(props: {
               <input type="hidden" name="status" value="sent" />
               <button
                 type="submit"
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
               >
                 Envoyer
               </button>
@@ -345,7 +267,7 @@ export default async function InvoiceDetailPage(props: {
             <input type="hidden" name="status" value="cancelled" />
             <button
               type="submit"
-              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+              className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               Annuler
             </button>

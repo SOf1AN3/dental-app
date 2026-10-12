@@ -47,17 +47,17 @@ export function AgendaNav() {
       {/* Previous week */}
       <Link
         href={`/appointments/agenda?week=${localDateString(prevMonday)}`}
-        className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 p-2 text-cool-600 hover:bg-cool-50 transition-colors"
+        className="rounded-lg border border-border-input bg-card p-2 text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-label="Semaine précédente"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
       </Link>
 
       {/* "Cette semaine" – only shown when not on current week */}
       {!isCurrentWeek && (
         <Link
           href="/appointments/agenda"
-          className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 px-3 py-2 text-xs font-medium text-cool-600 hover:bg-cool-50 transition-colors whitespace-nowrap"
+          className="rounded-lg border border-border-input bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-cool-50 transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           Cette semaine
         </Link>
@@ -66,10 +66,10 @@ export function AgendaNav() {
       {/* Next week */}
       <Link
         href={`/appointments/agenda?week=${localDateString(nextMonday)}`}
-        className="rounded-lg border border-cool-200 bg-white dark:bg-cool-100 p-2 text-cool-600 hover:bg-cool-50 transition-colors"
+        className="rounded-lg border border-border-input bg-card p-2 text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-label="Semaine suivante"
       >
-        <ChevronRight className="h-4 w-4" />
+        <ChevronRight className="h-4 w-4" aria-hidden="true" />
       </Link>
     </div>
   );

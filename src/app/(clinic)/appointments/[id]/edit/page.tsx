@@ -7,6 +7,7 @@ import { PRACTITIONER_ROLES } from "@/lib/constants";
 import { getClinicScheduleDays } from "@/lib/clinic-schedule";
 import { redirect } from "next/navigation";
 import { AppointmentForm } from "@/components/clinic/appointment-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function EditAppointmentPage(props: {
   params: Promise<{ id: string }>;
@@ -47,10 +48,10 @@ export default async function EditAppointmentPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Modifier le rendez-vous</h1>
-        <p className="text-sm text-cool-500">Mettre à jour les informations du rendez-vous</p>
-      </div>
+      <PageHeader
+        title="Modifier le rendez-vous"
+        description="Mettre à jour les informations du rendez-vous"
+      />
       <AppointmentForm
         patients={patientList}
         dentists={dentists}

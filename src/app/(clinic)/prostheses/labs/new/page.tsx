@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { LabForm } from "@/components/clinic/lab-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function NewLabPage() {
   await requireAuth();
@@ -8,7 +9,7 @@ export default async function NewLabPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold text-cool-900">Nouveau laboratoire</h1>
+      <PageHeader title="Nouveau laboratoire" />
       <LabForm />
     </div>
   );

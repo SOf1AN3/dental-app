@@ -28,7 +28,7 @@ const categoryTints = {
   broadcast: "bg-cerulean/10 text-cerulean",
   maintenance: "bg-amber/10 text-amber-fg",
   subscription_reminder: "bg-mint/10 text-mint",
-  system: "bg-cool-100 text-cool-600",
+  system: "bg-cool-100 text-muted-fg",
 } as const;
 
 export function NotificationBell({ clinicId }: { clinicId: string }) {
@@ -91,9 +91,9 @@ export function NotificationBell({ clinicId }: { clinicId: string }) {
         type="button"
         onClick={handleToggle}
         aria-label="Notifications"
-        className="relative rounded-full p-2 text-cool-500 hover:bg-cool-100 dark:hover:bg-cool-800"
+        className="relative rounded-full p-2 text-muted-fg hover:bg-cool-100 dark:hover:bg-cool-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        <Bell className="h-5 w-5" />
+        <Bell className="h-5 w-5" aria-hidden="true" />
         {unreadCount > 0 && (
           <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
             {unreadCount}
@@ -101,11 +101,11 @@ export function NotificationBell({ clinicId }: { clinicId: string }) {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 shadow-lg">
-          <div className="border-b border-cool-100 px-4 py-3 font-medium text-cool-900">Notifications</div>
+        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-border-card bg-card shadow-lg">
+          <div className="border-b border-border-card px-4 py-3 font-medium text-foreground">Notifications</div>
           <div className="max-h-80 overflow-y-auto">
             {items.length === 0 ? (
-              <div className="px-4 py-10 text-center text-cool-400">Aucune notification</div>
+              <div className="px-4 py-10 text-center text-muted-fg">Aucune notification</div>
             ) : (
               items.map((item) => {
                 const Icon = categoryIcons[item.category] ?? Info;
@@ -115,21 +115,21 @@ export function NotificationBell({ clinicId }: { clinicId: string }) {
                     type="button"
                     onClick={() => handleItemClick(item)}
                     className={[
-                      "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-cool-50",
+                      "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-cool-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",
                       item.readAt ? "" : "bg-cerulean/5",
                     ].join(" ")}
                   >
                     <span
                       className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                        categoryTints[item.category] ?? "bg-cool-100 text-cool-600"
+                        categoryTints[item.category] ?? "bg-cool-100 text-muted-fg"
                       }`}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="text-sm font-medium text-cool-900">{item.title}</span>
-                      <span className="line-clamp-2 text-xs text-cool-500">{item.message}</span>
-                      <span className="mt-0.5 text-[11px] text-cool-400">
+                      <span className="text-sm font-medium text-foreground">{item.title}</span>
+                      <span className="line-clamp-2 text-xs text-muted-fg">{item.message}</span>
+                      <span className="mt-0.5 text-[11px] text-muted-fg">
                         {formatDistanceToNow(new Date(item.createdAt), { locale: fr, addSuffix: true })}
                       </span>
                     </span>

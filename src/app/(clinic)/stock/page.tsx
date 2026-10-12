@@ -1,6 +1,9 @@
+import { Plus } from "lucide-react";
+
 import { requireAuth } from "@/lib/auth-utils";
 import { getStockItems, getLowStockItems } from "@/lib/actions/inventory";
 import Link from "next/link";
+import { PageHeader } from "@/components/ui/page-header";
 import { StockTable, type StockTableRow } from "@/components/clinic/stock-table";
 
 export default async function StockPage() {
@@ -24,18 +27,19 @@ export default async function StockPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Stock</h1>
-          <p className="text-sm text-cool-500">{items.length} articles</p>
-        </div>
-        <Link
-          href="/stock/new"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
-        >
-          + Nouvel article
-        </Link>
-      </div>
+      <PageHeader
+        title="Stock"
+        description={`${items.length} articles`}
+        actions={
+          <Link
+            href="/stock/new"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nouvel article
+          </Link>
+        }
+      />
 
       {lowStockItems.length > 0 && (
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-400">

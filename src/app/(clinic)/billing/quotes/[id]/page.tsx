@@ -7,6 +7,11 @@ import { ConvertQuoteButton } from "@/components/clinic/convert-quote-button";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { BackButton } from "@/components/clinic/back-button";
+import { PageHeader } from "@/components/ui/page-header";
+import {
+  BillingItemsTable,
+  type BillingItemTableRow,
+} from "@/components/clinic/billing-items-table";
 
 /**
  * Totals are read from the stored document columns (authoritative, computed
@@ -30,48 +35,56 @@ export default async function QuoteDetailPage(props: {
   const discountTotal = quote.discountTotal ?? 0;
   const total = quote.total;
 
+  // Aplatissement explicite côté serveur : seules des données plates
+  // (aucune fonction, aucun composant) traversent la frontière serveur/client.
+  const itemRows: BillingItemTableRow[] = items.map((item) => ({
+    id: item.id,
+    description: item.description,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    taxRate: item.taxRate,
+    discount: item.discount,
+    total: item.total,
+  }));
+
   return (
     <div>
-      <div className="mb-6">
-        <BackButton fallback="/billing/quotes" label="← Retour aux devis" />
-      </div>
+      <BackButton fallback="/billing/quotes" label="← Retour aux devis" />
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 mb-6">
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold text-cool-900">
-                Devis {quote.number}
-              </h1>
-              <QuoteStatusBadge status={quote.status} />
-              <Link
-                href={`/billing/quotes/${quote.id}/print`}
-                target="_blank"
-                className="rounded-lg border border-cool-200 px-3 py-1.5 text-xs font-medium text-cool-600 hover:bg-cool-50 transition-colors"
-              >
-                Imprimer
-              </Link>
-            </div>
-            <p className="text-sm text-cool-500">
-              Date: {formatDate(quote.date)}
-              {quote.validUntil && (
-                <> · Valide jusqu&apos;au: {formatDate(quote.validUntil)}</>
-              )}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-bold text-cool-900">
+      <PageHeader
+        title={`Devis ${quote.number}`}
+        description={
+          <>
+            Date: {formatDate(quote.date)}
+            {quote.validUntil && (
+              <> · Valide jusqu&apos;au: {formatDate(quote.validUntil)}</>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <QuoteStatusBadge status={quote.status} />
+            <Link
+              href={`/billing/quotes/${quote.id}/print`}
+              target="_blank"
+              className="rounded-lg border border-border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              Imprimer
+            </Link>
+            <p className="text-2xl font-bold text-foreground">
               {formatCurrency(total)}
             </p>
-          </div>
-        </div>
+          </>
+        }
+      />
 
+      <div className="rounded-xl border border-border-card bg-card p-6 mb-6">
         {quote.patient && (
           <div className="rounded-lg bg-cool-50 p-4 mb-4">
-            <p className="text-xs text-cool-400 uppercase tracking-wider mb-1">
+            <p className="text-xs text-muted-fg uppercase tracking-wider mb-1">
               Patient
             </p>
-            <p className="font-medium text-cool-900">
+            <p className="font-medium text-foreground">
               {quote.patient.lastName} {quote.patient.firstName}
             </p>
           </div>
@@ -79,91 +92,39 @@ export default async function QuoteDetailPage(props: {
 
         {quote.notes && (
           <div className="rounded-lg bg-cool-50 p-4 mb-4">
-            <p className="text-xs text-cool-400 uppercase tracking-wider mb-1">
+            <p className="text-xs text-muted-fg uppercase tracking-wider mb-1">
               Notes
             </p>
-            <p className="text-sm text-cool-700 whitespace-pre-wrap">
+            <p className="text-sm text-foreground whitespace-pre-wrap">
               {quote.notes}
             </p>
           </div>
         )}
 
-        {items.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-cool-200">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-cool-200 bg-cool-50">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    Description
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    Qté
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    Prix unitaire
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    TVA
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    Remise
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-cool-500 uppercase tracking-wider">
-                    Total
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => {
-                  return (
-                    <tr
-                      key={item.id}
-                      className="border-b border-cool-100 hover:bg-cool-50 transition-colors"
-                    >
-                      <td className="px-4 py-3 text-cool-900">
-                        {item.description}
-                      </td>
-                      <td className="px-4 py-3 text-right text-cool-600">
-                        {item.quantity}
-                      </td>
-                      <td className="px-4 py-3 text-right text-cool-600">
-                        {formatCurrency(item.unitPrice)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-cool-600">
-                        {(item.taxRate ?? 0) > 0 ? `${item.taxRate}%` : "-"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-cool-600">
-                        {(item.discount ?? 0) > 0 ? formatCurrency(item.discount ?? 0) : "-"}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-cool-900">
-                        {formatCurrency(item.total)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <BillingItemsTable
+          data={itemRows}
+          emptyTitle="Aucun article dans ce devis"
+          className="rounded-lg border border-border-card bg-transparent"
+        />
 
-        <div className="mt-4 space-y-1 text-sm border-t border-cool-200 pt-4">
-          <div className="flex justify-between text-cool-500">
+        <div className="mt-4 space-y-1 text-sm border-t border-border-card pt-4">
+          <div className="flex justify-between text-muted-fg">
             <span>Sous-total</span>
             <span>{formatCurrency(subtotal)}</span>
           </div>
           {taxTotal > 0 && (
-            <div className="flex justify-between text-cool-500">
+            <div className="flex justify-between text-muted-fg">
               <span>Total TVA</span>
               <span>{formatCurrency(taxTotal)}</span>
             </div>
           )}
           {discountTotal > 0 && (
-            <div className="flex justify-between text-cool-500">
+            <div className="flex justify-between text-muted-fg">
               <span>Total remises</span>
               <span>-{formatCurrency(discountTotal)}</span>
             </div>
           )}
-          <div className="flex justify-between font-bold text-cool-900 text-base pt-2 border-t border-cool-200">
+          <div className="flex justify-between font-bold text-foreground text-base pt-2 border-t border-border-card">
             <span>Total</span>
             <span>{formatCurrency(total)}</span>
           </div>
@@ -177,7 +138,7 @@ export default async function QuoteDetailPage(props: {
           >
             <button
               type="submit"
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
             >
               Envoyer
             </button>
@@ -188,7 +149,7 @@ export default async function QuoteDetailPage(props: {
             <form action={updateQuoteStatus.bind(null, id, "accepted")}>
               <button
                 type="submit"
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light transition-colors"
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
               >
                 Accepter
               </button>
@@ -196,7 +157,7 @@ export default async function QuoteDetailPage(props: {
             <form action={updateQuoteStatus.bind(null, id, "rejected")}>
               <button
                 type="submit"
-                className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+                className="rounded-lg border border-border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
                 Refuser
               </button>
@@ -209,7 +170,7 @@ export default async function QuoteDetailPage(props: {
         {quote.convertedInvoiceId && (
           <Link
             href={`/billing/invoices/${quote.convertedInvoiceId}`}
-            className="rounded-lg border border-cerulean px-4 py-2 text-sm font-medium text-cerulean hover:bg-cerulean/5 transition-colors"
+            className="rounded-lg border border-cerulean px-4 py-2 text-sm font-medium text-cerulean hover:bg-cerulean/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             Voir la facture liée
           </Link>

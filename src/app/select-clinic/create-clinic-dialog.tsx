@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useActionState } from "react";
+import { Plus, X } from "lucide-react";
 import { createClinic } from "@/lib/actions/clinic";
 
 export function CreateClinicDialog() {
@@ -22,30 +23,34 @@ export function CreateClinicDialog() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 rounded-lg border-2 border-dashed border-cool-300 bg-white dark:bg-cool-100 px-6 py-3 text-sm font-medium text-cool-600 transition-colors hover:border-cerulean hover:text-cerulean"
+        className="inline-flex items-center gap-2 rounded-lg border-2 border-dashed border-input bg-card px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-cerulean hover:text-cerulean focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        <span className="text-lg">+</span>
+        <Plus className="h-4 w-4" aria-hidden="true" />
         Créer une clinique
       </button>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-lg rounded-xl bg-white dark:bg-cool-100 p-8 shadow-xl">
+          <div className="w-full max-w-lg rounded-xl bg-card p-8 shadow-xl">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-cool-900">
+              <h2 className="text-xl font-semibold text-foreground">
                 Nouvelle clinique
               </h2>
               <button
                 onClick={() => setOpen(false)}
-                className="text-cool-400 hover:text-cool-600"
+                aria-label="Fermer"
+                className="text-muted-fg hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                ✕
+                <X className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
 
             <form action={action} className="space-y-4">
               {generalError && (
-                <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+                <div
+                  role="alert"
+                  className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+                >
                   {generalError}
                 </div>
               )}
@@ -63,7 +68,7 @@ export function CreateClinicDialog() {
                   placeholder="Cabinet Dentaire ..."
                 />
                 {fieldErrors?.name && (
-                  <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>
+                  <p className="mt-1 text-xs text-destructive">{fieldErrors.name[0]}</p>
                 )}
               </div>
 
@@ -79,11 +84,11 @@ export function CreateClinicDialog() {
                   className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm font-mono focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   placeholder="cabinet-dentaire-..."
                 />
-                <p className="mt-1 text-xs text-cool-400">
+                <p className="mt-1 text-xs text-muted-fg">
                   Utilisé dans l&apos;URL : lettres minuscules, chiffres et tirets
                 </p>
                 {fieldErrors?.slug && (
-                  <p className="mt-1 text-xs text-red-500">{fieldErrors.slug[0]}</p>
+                  <p className="mt-1 text-xs text-destructive">{fieldErrors.slug[0]}</p>
                 )}
               </div>
 
@@ -129,14 +134,14 @@ export function CreateClinicDialog() {
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="flex-1 rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+                  className="flex-1 rounded-lg border border-border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={pending}
-                  className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+                  className="flex-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
                 >
                   {pending ? "Création..." : "Créer la clinique"}
                 </button>

@@ -3,14 +3,16 @@ import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { db } from "@/lib/db/db";
 import { clinicSubscriptions, subscriptionPlans, clinics } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
+import { CreditCard } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SubscribeForm, CancelSubscriptionForm } from "./subscribe-form";
 
 const statusLabels: Record<string, { label: string; color: string }> = {
   trial: { label: "Essai", color: "bg-amber/10 text-amber-fg" },
   active: { label: "Actif", color: "bg-mint/10 text-mint" },
-  cancelled: { label: "Annulé", color: "bg-red/10 text-danger" },
-  expired: { label: "Expiré", color: "bg-cool-100 text-muted-fg" },
+  cancelled: { label: "Annulé", color: "bg-danger/10 text-danger" },
+  expired: { label: "Expiré", color: "bg-cool-100 text-cool-700 dark:text-muted-fg" },
 };
 
 export default async function SubscriptionSettingsPage() {
@@ -94,10 +96,13 @@ export default async function SubscriptionSettingsPage() {
           Choisissez la formule qui correspond à vos besoins.
         </p>
 
+        {/* Le titre « Paramètres » est rendu par `settings/layout.tsx`
+            (PageHeader) : pas de PageHeader ici pour éviter le doublon. */}
         {allPlans.length === 0 ? (
-          <p className="text-sm text-muted-fg text-center py-8">
-            Aucune formule disponible pour le moment.
-          </p>
+          <EmptyState
+            icon={CreditCard}
+            title="Aucune formule disponible pour le moment."
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {allPlans.map((plan) => (

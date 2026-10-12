@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth-utils";
 import { PRACTITIONER_ROLES } from "@/lib/constants";
 import { getClinicScheduleDays } from "@/lib/clinic-schedule";
 import { AppointmentForm } from "@/components/clinic/appointment-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function NewAppointmentPage(props: {
   searchParams: Promise<{ patientId?: string }>;
@@ -38,10 +39,10 @@ export default async function NewAppointmentPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Nouveau rendez-vous</h1>
-        <p className="text-sm text-cool-500">Planifier un nouveau rendez-vous</p>
-      </div>
+      <PageHeader
+        title="Nouveau rendez-vous"
+        description="Planifier un nouveau rendez-vous"
+      />
       <AppointmentForm
         patients={patientList}
         dentists={dentists}

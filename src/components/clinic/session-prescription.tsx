@@ -33,14 +33,14 @@ export function SessionPrescription({
 }: SessionPrescriptionProps) {
   if (disabled) {
     return (
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="text-sm font-medium text-cool-500 uppercase tracking-wider mb-4">
+      <div className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="text-sm font-medium text-muted-fg uppercase tracking-wider mb-4">
           Ordonnance
         </h2>
         {prescription ? (
           <div className="space-y-2">
-            <p className="text-sm text-cool-700">N° {prescription.rxNumber}</p>
-            <p className="text-sm text-cool-500">
+            <p className="text-sm text-foreground">N° {prescription.rxNumber}</p>
+            <p className="text-sm text-muted-fg">
               {prescription.items.length} article
               {prescription.items.length > 1 ? "s" : ""}
             </p>
@@ -54,7 +54,7 @@ export function SessionPrescription({
             </Link>
           </div>
         ) : (
-          <p className="text-sm text-cool-400">Aucune ordonnance</p>
+          <p className="text-sm text-muted-fg">Aucune ordonnance</p>
         )}
       </div>
     );
@@ -68,7 +68,7 @@ export function SessionPrescription({
             href={`/prescriptions/${prescription.id}/print`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            className="rounded-lg border border-border-input bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-cool-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             Imprimer l&apos;ordonnance (A5)
           </Link>
