@@ -3,6 +3,8 @@ import { db } from "@/lib/db/db";
 import { sql } from "drizzle-orm";
 import { HeartPulse } from "lucide-react";
 
+import { PageHeader } from "@/components/ui/page-header";
+
 export default async function OwnerHealthPage() {
   await requirePlatformOwner();
 
@@ -12,24 +14,24 @@ export default async function OwnerHealthPage() {
     await db.execute(sql`SELECT 1`);
   } catch (err) {
     dbStatus = "ERROR";
-    dbError = (err as Error).message;
+    dbError = err instanceof Error ? err.message : "Erreur inconnue";
   }
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Monitoring</h1>
-        <p className="text-sm text-cool-500">État de la plateforme</p>
-      </div>
+      <PageHeader title="Monitoring" description="État de la plateforme" />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
+        <div className="rounded-xl border border-border-card bg-card p-6">
           <div className="flex items-center gap-3">
             <div className={`rounded-lg p-3 ${dbStatus === "OK" ? "bg-mint/10" : "bg-danger/10"}`}>
-              <HeartPulse className={`h-6 w-6 ${dbStatus === "OK" ? "text-mint" : "text-danger"}`} />
+              <HeartPulse
+                aria-hidden="true"
+                className={`h-6 w-6 ${dbStatus === "OK" ? "text-mint" : "text-danger"}`}
+              />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-cool-900">Base de données</h2>
+              <h2 className="text-lg font-semibold text-foreground">Base de données</h2>
               <p className={`text-sm ${dbStatus === "OK" ? "text-mint" : "text-danger"}`}>
                 {dbStatus === "OK" ? "Connecté" : `Erreur: ${dbError}`}
               </p>
@@ -37,9 +39,9 @@ export default async function OwnerHealthPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-          <h2 className="text-lg font-semibold text-cool-900">Version</h2>
-          <p className="mt-2 text-sm text-cool-500">
+        <div className="rounded-xl border border-border-card bg-card p-6">
+          <h2 className="text-lg font-semibold text-foreground">Version</h2>
+          <p className="mt-2 text-sm text-muted-fg">
             DentalCare v0.1.0 · Next.js 16 · PostgreSQL
           </p>
         </div>

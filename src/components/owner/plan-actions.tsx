@@ -25,19 +25,19 @@ export function PlanActions({ plan }: { plan: Plan }) {
       <button
         type="button"
         onClick={() => setShowEdit(true)}
-        className="rounded-lg p-1.5 text-cool-500 hover:bg-cool-100 hover:text-cerulean transition-colors"
+        className="rounded-lg p-1.5 text-muted-fg hover:bg-cool-100 hover:text-cerulean transition-colors"
         title="Modifier"
       >
-        <Pencil className="h-4 w-4" />
+        <Pencil className="h-4 w-4" aria-hidden="true" />
       </button>
 
       <button
         type="button"
         onClick={() => setShowDeleteConfirm(true)}
-        className="rounded-lg p-1.5 text-cool-500 hover:bg-cool-100 hover:text-danger transition-colors"
+        className="rounded-lg p-1.5 text-muted-fg hover:bg-cool-100 hover:text-danger transition-colors"
         title="Supprimer"
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
       </button>
 
       {!showToggleConfirm ? (
@@ -91,7 +91,7 @@ function ToggleConfirm({ planId, isActive, onCancel }: { planId: string; isActiv
       <button
         type="button"
         onClick={onCancel}
-        className="rounded px-1.5 py-1 text-xs font-medium text-cool-500 hover:bg-cool-100 transition-colors"
+        className="rounded px-1.5 py-1 text-xs font-medium text-muted-fg hover:bg-cool-100 transition-colors"
       >
         Non
       </button>
@@ -115,54 +115,54 @@ function EditPlanDialog({ plan, onClose }: { plan: Plan; onClose: () => void }) 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl bg-white dark:bg-cool-100 p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-xl bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-cool-900">Modifier le plan</h3>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-cool-500 hover:bg-cool-100 transition-colors">
-            <X className="h-5 w-5" />
+          <h3 className="text-lg font-semibold text-foreground">Modifier le plan</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-muted-fg hover:bg-cool-100 transition-colors">
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
         <form action={action} className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <label htmlFor="edit-name" className="block text-sm font-medium text-cool-700">Nom</label>
+            <label htmlFor="edit-name" className="block text-sm font-medium text-foreground">Nom</label>
             <input id="edit-name" name="name" type="text" required defaultValue={plan.name}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
-            {fieldErrors?.name && <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>}
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
+            {fieldErrors?.name && <p className="mt-1 text-xs text-destructive">{fieldErrors.name[0]}</p>}
           </div>
           <div>
-            <label htmlFor="edit-code" className="block text-sm font-medium text-cool-700">Code</label>
+            <label htmlFor="edit-code" className="block text-sm font-medium text-foreground">Code</label>
             <input id="edit-code" name="code" type="text" required defaultValue={plan.code}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
-            {fieldErrors?.code && <p className="mt-1 text-xs text-red-500">{fieldErrors.code[0]}</p>}
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
+            {fieldErrors?.code && <p className="mt-1 text-xs text-destructive">{fieldErrors.code[0]}</p>}
           </div>
           <div>
-            <label htmlFor="edit-priceMonthly" className="block text-sm font-medium text-cool-700">Prix mensuel (DA)</label>
+            <label htmlFor="edit-priceMonthly" className="block text-sm font-medium text-foreground">Prix mensuel (DA)</label>
             <input id="edit-priceMonthly" name="priceMonthly" type="number" required step="0.01" defaultValue={plan.priceMonthly}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
-            {fieldErrors?.priceMonthly && <p className="mt-1 text-xs text-red-500">{fieldErrors.priceMonthly[0]}</p>}
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
+            {fieldErrors?.priceMonthly && <p className="mt-1 text-xs text-destructive">{fieldErrors.priceMonthly[0]}</p>}
           </div>
           <div>
-            <label htmlFor="edit-priceYearly" className="block text-sm font-medium text-cool-700">Prix annuel (DA)</label>
+            <label htmlFor="edit-priceYearly" className="block text-sm font-medium text-foreground">Prix annuel (DA)</label>
             <input id="edit-priceYearly" name="priceYearly" type="number" step="0.01" defaultValue={plan.priceYearly ?? ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
           </div>
           <div>
-            <label htmlFor="edit-maxStaff" className="block text-sm font-medium text-cool-700">Max personnel</label>
+            <label htmlFor="edit-maxStaff" className="block text-sm font-medium text-foreground">Max personnel</label>
             <input id="edit-maxStaff" name="maxStaff" type="number" defaultValue={plan.maxStaff ?? ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
           </div>
           <div>
-            <label htmlFor="edit-maxPatients" className="block text-sm font-medium text-cool-700">Max patients</label>
+            <label htmlFor="edit-maxPatients" className="block text-sm font-medium text-foreground">Max patients</label>
             <input id="edit-maxPatients" name="maxPatients" type="number" defaultValue={plan.maxPatients ?? ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean" />
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50" />
           </div>
           <div className="col-span-2 flex items-center gap-3 pt-2">
             <button type="submit" disabled={pending}
-              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors">
+              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2">
               {pending ? "Enregistrement..." : "Enregistrer"}
             </button>
             <button type="button" onClick={onClose}
-              className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors">
+              className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-cool-50">
               Annuler
             </button>
           </div>
@@ -190,28 +190,28 @@ function DeletePlanDialog({ plan, onClose }: { plan: Plan; onClose: () => void }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl bg-white dark:bg-cool-100 p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-xl bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20">
-            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-cool-900">Supprimer le plan</h3>
-            <p className="text-sm text-cool-500">Cette action est irréversible</p>
+            <h3 className="text-lg font-semibold text-foreground">Supprimer le plan</h3>
+            <p className="text-sm text-muted-fg">Cette action est irréversible</p>
           </div>
         </div>
-        <p className="text-sm text-cool-600 mb-6">
+        <p className="text-sm text-muted-fg mb-6">
           Êtes-vous sûr de vouloir supprimer le plan <strong>{plan.name}</strong> ({plan.code})&nbsp;?
         </p>
-        {error && <p className="mb-4 text-sm text-red-500">{error}</p>}
+        {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
         <div className="flex items-center gap-3 justify-end">
           <button type="button" onClick={onClose}
-            className="rounded-lg border border-cool-200 px-4 py-2 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors">
+            className="rounded-lg border border-border-input px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-cool-50">
             Annuler
           </button>
           <button type="button" onClick={handleDelete} disabled={pending}
-            className="inline-flex items-center gap-2 rounded-lg bg-red px-4 py-2 text-sm font-medium text-white hover:bg-red/90 disabled:opacity-50 transition-colors">
-            <Trash2 className="h-4 w-4" />
+            className="inline-flex items-center gap-2 rounded-lg bg-danger px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-danger/90 disabled:opacity-50">
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
             {pending ? "Suppression..." : "Supprimer"}
           </button>
         </div>

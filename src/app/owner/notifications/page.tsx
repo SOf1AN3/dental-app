@@ -2,6 +2,8 @@ import { requirePlatformOwner } from "@/lib/auth-utils";
 import { db } from "@/lib/db/db";
 import { clinics } from "@/lib/db/schema";
 import { asc, isNull } from "drizzle-orm";
+
+import { PageHeader } from "@/components/ui/page-header";
 import { NotificationForm } from "./notification-form";
 
 export default async function OwnerNotificationsPage() {
@@ -20,13 +22,15 @@ export default async function OwnerNotificationsPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Notifications</h1>
-        <p className="text-sm text-cool-500">Envoyer une notification aux cliniques</p>
-      </div>
+      <PageHeader
+        title="Notifications"
+        description="Envoyer une notification aux cliniques"
+      />
 
-      <div className="mb-8 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="text-lg font-semibold text-cool-900 mb-4">Nouvelle notification</h2>
+      <div className="mb-8 rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-4 text-lg font-semibold text-foreground">
+          Nouvelle notification
+        </h2>
         <NotificationForm clinics={clinicList} />
       </div>
     </div>
