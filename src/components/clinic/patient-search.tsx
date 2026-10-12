@@ -33,7 +33,7 @@ export function PatientSearch() {
       placeholder="Rechercher un patient..."
       defaultValue={searchParams.get("q") || ""}
       onChange={(e) => handleSearch(e.target.value)}
-      className="w-full max-w-md rounded-lg border border-cool-200 bg-white dark:bg-cool-100 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+      className="w-full max-w-md rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
     />
   );
 }

@@ -87,9 +87,9 @@ export function ScheduleDatePicker({
           setViewDate(value ? new Date(value + "T12:00:00") : new Date())
           setOpen(true)
         }}
-        className="flex w-full items-center justify-between rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+        className="flex w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
       >
-        <span className={value ? "text-cool-700" : "text-cool-400"}>
+        <span className={value ? "text-foreground" : "text-muted-fg"}>
           {value
             ? capitalize(format(new Date(value + "T12:00:00"), "EEE d MMM yyyy", { locale: fr }))
             : "Sélectionner une date"}
@@ -97,7 +97,7 @@ export function ScheduleDatePicker({
         <CalendarIcon className="h-4 w-4 text-cool-400" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-3 shadow-lg">
+        <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-xl border border-border-card bg-card p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"

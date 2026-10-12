@@ -140,7 +140,7 @@ export function DocumentLineItems({
                     onValueChange={(t) => updateItem(item.id, "description", t)}
                     onSelectOption={(opt) => selectCatalogItem(item.id, opt)}
                     placeholder="Description"
-                    className="w-full rounded border border-cool-200 px-2 py-1 text-sm focus:border-cerulean focus:outline-none"
+                    className="w-full rounded border border-input px-2 py-1 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -149,7 +149,7 @@ export function DocumentLineItems({
                     min={1}
                     value={item.quantity}
                     onChange={(e) => updateItem(item.id, "quantity", Number(e.target.value))}
-                    className="w-16 rounded border border-cool-200 px-2 py-1 text-right text-sm focus:border-cerulean focus:outline-none"
+                    className="w-16 rounded border border-input px-2 py-1 text-right text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -159,7 +159,7 @@ export function DocumentLineItems({
                     step="0.01"
                     value={item.unitPrice}
                     onChange={(e) => updateItem(item.id, "unitPrice", Number(e.target.value))}
-                    className="w-24 rounded border border-cool-200 px-2 py-1 text-right text-sm focus:border-cerulean focus:outline-none"
+                    className="w-24 rounded border border-input px-2 py-1 text-right text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -169,7 +169,7 @@ export function DocumentLineItems({
                     max={100}
                     value={item.taxRate}
                     onChange={(e) => updateItem(item.id, "taxRate", Number(e.target.value))}
-                    className="w-16 rounded border border-cool-200 px-2 py-1 text-right text-sm focus:border-cerulean focus:outline-none"
+                    className="w-16 rounded border border-input px-2 py-1 text-right text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -179,7 +179,7 @@ export function DocumentLineItems({
                     step="0.01"
                     value={item.discount}
                     onChange={(e) => updateItem(item.id, "discount", Number(e.target.value))}
-                    className="w-20 rounded border border-cool-200 px-2 py-1 text-right text-sm focus:border-cerulean focus:outline-none"
+                    className="w-20 rounded border border-input px-2 py-1 text-right text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </td>
                 <td className="px-3 py-2 text-right font-medium text-cool-900">

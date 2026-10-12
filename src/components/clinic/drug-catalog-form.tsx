@@ -7,7 +7,7 @@ import type { drugCatalog } from "@/lib/db/schema";
 type CatalogItem = typeof drugCatalog.$inferSelect;
 
 const inputClassName =
-  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+  "mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
 
 export function DrugCatalogForm({
   item,
@@ -31,7 +31,7 @@ export function DrugCatalogForm({
     <form action={formAction} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
-          <label htmlFor="name" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="name" className="block text-sm font-medium text-foreground">
             Nom du médicament *
           </label>
           <input
@@ -49,7 +49,7 @@ export function DrugCatalogForm({
         </div>
 
         <div>
-          <label htmlFor="dosage" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="dosage" className="block text-sm font-medium text-foreground">
             Dosage
           </label>
           <input
@@ -63,7 +63,7 @@ export function DrugCatalogForm({
         </div>
 
         <div>
-          <label htmlFor="form" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="form" className="block text-sm font-medium text-foreground">
             Forme
           </label>
           <input
@@ -77,7 +77,7 @@ export function DrugCatalogForm({
         </div>
 
         <div className="col-span-2">
-          <label htmlFor="category" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="category" className="block text-sm font-medium text-foreground">
             Catégorie
           </label>
           <input
@@ -91,7 +91,7 @@ export function DrugCatalogForm({
         </div>
 
         <div className="col-span-2">
-          <label htmlFor="frequency" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="frequency" className="block text-sm font-medium text-foreground">
             Fréquence suggérée
           </label>
           <input
@@ -105,7 +105,7 @@ export function DrugCatalogForm({
         </div>
 
         <div className="col-span-2">
-          <label htmlFor="instructions" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="instructions" className="block text-sm font-medium text-foreground">
             Instructions par défaut
           </label>
           <textarea
@@ -127,7 +127,7 @@ export function DrugCatalogForm({
           defaultChecked={item?.isActive ?? true}
           className="h-4 w-4 rounded border-cool-300 text-cerulean focus:ring-cerulean"
         />
-        <label htmlFor="isActive" className="text-sm font-medium text-cool-700">
+        <label htmlFor="isActive" className="text-sm font-medium text-foreground">
           Médicament actif
         </label>
       </div>
@@ -178,7 +178,7 @@ export function DrugCatalogInlineForm({
   onClose?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-cool-200 bg-white p-6">
+    <div className="rounded-xl border border-border-card bg-card p-6">
       <h3 className="mb-4 text-base font-semibold text-cool-900">
         {item ? "Modifier le médicament" : "Ajouter un médicament"}
       </h3>

@@ -17,7 +17,7 @@ export function ClinicExportPicker({
       <div className="flex-1">
         <label
           htmlFor="clinic-export-select"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Clinique
         </label>
@@ -25,7 +25,7 @@ export function ClinicExportPicker({
           id="clinic-export-select"
           value={clinicId}
           onChange={(e) => setClinicId(e.target.value)}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm text-cool-900 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         >
           <option value="">Sélectionner une clinique…</option>
           {clinics.map((clinic) => (

@@ -51,7 +51,7 @@ export function CreateClinicDialog() {
               )}
 
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-cool-700">
+                <label htmlFor="name" className="block text-sm font-medium text-foreground">
                   Nom de la clinique *
                 </label>
                 <input
@@ -59,7 +59,7 @@ export function CreateClinicDialog() {
                   name="name"
                   type="text"
                   required
-                  className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                  className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   placeholder="Cabinet Dentaire ..."
                 />
                 {fieldErrors?.name && (
@@ -68,7 +68,7 @@ export function CreateClinicDialog() {
               </div>
 
               <div>
-                <label htmlFor="slug" className="block text-sm font-medium text-cool-700">
+                <label htmlFor="slug" className="block text-sm font-medium text-foreground">
                   Slug (identifiant unique) *
                 </label>
                 <input
@@ -76,7 +76,7 @@ export function CreateClinicDialog() {
                   name="slug"
                   type="text"
                   required
-                  className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm font-mono focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                  className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm font-mono focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   placeholder="cabinet-dentaire-..."
                 />
                 <p className="mt-1 text-xs text-cool-400">
@@ -89,39 +89,39 @@ export function CreateClinicDialog() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-cool-700">
+                  <label htmlFor="email" className="block text-sm font-medium text-foreground">
                     Email
                   </label>
                   <input
                     id="email"
                     name="email"
                     type="email"
-                    className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                    className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   />
                 </div>
                 <div>
-                  <label htmlFor="phone" className="block text-sm font-medium text-cool-700">
+                  <label htmlFor="phone" className="block text-sm font-medium text-foreground">
                     Téléphone
                   </label>
                   <input
                     id="phone"
                     name="phone"
                     type="tel"
-                    className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                    className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                     placeholder="+213 5XX XX XX XX"
                   />
                 </div>
               </div>
 
               <div>
-                <label htmlFor="address" className="block text-sm font-medium text-cool-700">
+                <label htmlFor="address" className="block text-sm font-medium text-foreground">
                   Adresse
                 </label>
                 <input
                   id="address"
                   name="address"
                   type="text"
-                  className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                  className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                 />
               </div>
 

@@ -110,7 +110,7 @@ export function ClinicSettingsForm({
           id="wilayaCode"
           name="wilayaCode"
           defaultValue={defaultValues.wilayaCode ?? ""}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         >
           <option value="">Sélectionner une wilaya</option>
           {WILAYAS.map((w) => (

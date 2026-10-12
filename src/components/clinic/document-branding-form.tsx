@@ -34,7 +34,7 @@ export function DocumentBrandingForm({
   return (
     <form action={action} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-cool-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           Logo de la clinique
         </label>
         {logoPreview && (
@@ -58,7 +58,7 @@ export function DocumentBrandingForm({
               setLogoPreview(URL.createObjectURL(file));
             }
           }}
-          className="mt-1 block w-full text-sm text-cool-700 file:mr-3 file:rounded-lg file:border-0 file:bg-cerulean/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cerulean hover:file:bg-cerulean/20"
+          className="mt-1 block w-full text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-cerulean/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cerulean hover:file:bg-cerulean/20"
         />
         <p className="mt-1 text-xs text-cool-400">
           Formats acceptés : JPG, PNG, WebP. Taille max : 10 Mo.
@@ -66,7 +66,7 @@ export function DocumentBrandingForm({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-cool-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           En-tête des documents
         </label>
         {headerPreview && (
@@ -90,7 +90,7 @@ export function DocumentBrandingForm({
               setHeaderPreview(URL.createObjectURL(file));
             }
           }}
-          className="mt-1 block w-full text-sm text-cool-700 file:mr-3 file:rounded-lg file:border-0 file:bg-cerulean/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cerulean hover:file:bg-cerulean/20"
+          className="mt-1 block w-full text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-cerulean/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-cerulean hover:file:bg-cerulean/20"
         />
         <p className="mt-1 text-xs text-cool-400">
           Formats acceptés : JPG, PNG, WebP. Taille max : 10 Mo.
@@ -100,7 +100,7 @@ export function DocumentBrandingForm({
       <div>
         <label
           htmlFor="legalInfo"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Mentions légales
         </label>
@@ -110,7 +110,7 @@ export function DocumentBrandingForm({
           rows={4}
           defaultValue={defaultValues.legalInfo ?? ""}
           placeholder="SIRET, RC, NIF, numéro d'agrément..."
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean resize-y"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none resize-y"
         />
         <p className="mt-1 text-xs text-cool-400">
           Ces informations apparaîtront sur les documents (devis, factures, etc.).

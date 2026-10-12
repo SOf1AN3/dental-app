@@ -60,7 +60,7 @@ export function MemberList({ members }: { members: Member[] }) {
                   <select
                     defaultValue={member.role}
                     onChange={(e) => handleRoleChange(member.id, e.target.value)}
-                    className="rounded-lg border border-cool-200 bg-cool-50 px-2 py-1 text-xs focus:border-cerulean focus:outline-none"
+                    className="rounded-lg border border-input bg-transparent px-2 py-1 text-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
                   >
                     <option value="dentist">Dentiste</option>
                     <option value="assistant">Assistant</option>

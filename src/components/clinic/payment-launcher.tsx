@@ -105,9 +105,9 @@ export function PaymentLauncher({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white p-6 space-y-4 max-w-2xl">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4 max-w-2xl">
         <div>
-          <label className="block text-sm font-medium text-cool-700">Patient *</label>
+          <label className="block text-sm font-medium text-foreground">Patient *</label>
           {patient ? (
             <div className="mt-1 flex items-center justify-between rounded-lg border border-cool-200 bg-cool-100 px-3 py-2">
               <span className="text-sm text-cool-700">
@@ -137,7 +137,7 @@ export function PaymentLauncher({
                 onFocus={() => {
                   if (results.length > 0) setOpen(true);
                 }}
-                className="block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+                className="block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               />
               {open && results.length > 0 && (
                 <div className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg">
@@ -158,7 +158,7 @@ export function PaymentLauncher({
         </div>
 
         <div>
-          <label htmlFor="invoiceSelect" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="invoiceSelect" className="block text-sm font-medium text-foreground">
             Facture *
           </label>
           <select
@@ -166,7 +166,7 @@ export function PaymentLauncher({
             value={invoiceId}
             disabled={!patient || loadingInvoices}
             onChange={(e) => setInvoiceId(e.target.value)}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean disabled:opacity-60"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none disabled:opacity-60"
           >
             <option value="">
               {!patient

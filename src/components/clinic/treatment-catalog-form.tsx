@@ -30,7 +30,7 @@ export function TreatmentCatalogForm({
         <div className="col-span-2">
           <label
             htmlFor="name"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Nom du traitement *
           </label>
@@ -40,7 +40,7 @@ export function TreatmentCatalogForm({
             type="text"
             required
             defaultValue={item?.name ?? ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
           {fieldErrors?.name && (
             <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>
@@ -50,7 +50,7 @@ export function TreatmentCatalogForm({
         <div>
           <label
             htmlFor="code"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Code
           </label>
@@ -60,14 +60,14 @@ export function TreatmentCatalogForm({
             type="text"
             defaultValue={item?.code ?? ""}
             placeholder="Ex: TRT001"
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
 
         <div>
           <label
             htmlFor="category"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Catégorie
           </label>
@@ -77,7 +77,7 @@ export function TreatmentCatalogForm({
             type="text"
             defaultValue={item?.category ?? ""}
             placeholder="Ex: Soins, Prothèse, Orthodontie"
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
       </div>
@@ -85,7 +85,7 @@ export function TreatmentCatalogForm({
       <div>
         <label
           htmlFor="price"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Prix (DA) *
         </label>
@@ -97,7 +97,7 @@ export function TreatmentCatalogForm({
           min={0}
           step="0.01"
           defaultValue={item?.price ?? 0}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
         {fieldErrors?.price && (
           <p className="mt-1 text-xs text-red-500">{fieldErrors.price[0]}</p>
@@ -107,7 +107,7 @@ export function TreatmentCatalogForm({
       <div>
         <label
           htmlFor="description"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Description
         </label>
@@ -117,7 +117,7 @@ export function TreatmentCatalogForm({
           rows={3}
           defaultValue={item?.description ?? ""}
           placeholder="Description optionnelle du traitement..."
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean resize-y"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none resize-y"
         />
       </div>
 
@@ -129,7 +129,7 @@ export function TreatmentCatalogForm({
           defaultChecked={item?.isActive ?? true}
           className="h-4 w-4 rounded border-cool-300 text-cerulean focus:ring-cerulean"
         />
-        <label htmlFor="isActive" className="text-sm font-medium text-cool-700">
+        <label htmlFor="isActive" className="text-sm font-medium text-foreground">
           Traitement actif
         </label>
       </div>
@@ -180,7 +180,7 @@ export function TreatmentCatalogInlineForm({
   onClose?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
+    <div className="rounded-xl border border-border-card bg-card p-6">
       <h3 className="mb-4 text-base font-semibold text-cool-900">
         {item ? "Modifier le traitement" : "Ajouter un traitement"}
       </h3>
