@@ -280,7 +280,7 @@ export function A5TemplateSettings({ defaultValues }: A5TemplateSettingsProps) {
             name="watermarkEnabled"
             checked={watermark}
             onChange={(e) => setWatermark(e.target.checked)}
-            className="h-4 w-4 rounded border-cool-300 text-cerulean focus:ring-cerulean"
+            className="h-4 w-4 rounded border-input text-cerulean focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <span className="text-sm font-medium text-cool-700">
             Afficher le logo en filigrane sur les documents

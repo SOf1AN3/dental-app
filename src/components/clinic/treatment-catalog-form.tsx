@@ -127,7 +127,7 @@ export function TreatmentCatalogForm({
           name="isActive"
           type="checkbox"
           defaultChecked={item?.isActive ?? true}
-          className="h-4 w-4 rounded border-cool-300 text-cerulean focus:ring-cerulean"
+          className="h-4 w-4 rounded border-input text-cerulean focus-visible:ring-3 focus-visible:ring-ring/50"
         />
         <label htmlFor="isActive" className="text-sm font-medium text-foreground">
           Traitement actif
