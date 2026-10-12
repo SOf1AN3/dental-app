@@ -1,34 +1,49 @@
 import { requirePlatformOwner } from "@/lib/auth-utils";
 import { getOwnerStats } from "@/lib/actions/owner";
-import { LayoutDashboard } from "lucide-react";
+import { Building2, CircleDollarSign, ClipboardList, Ticket } from "lucide-react";
+
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCards } from "@/components/clinic/dashboard/stat-cards";
 
 export default async function OwnerDashboard() {
   await requirePlatformOwner();
   const stats = await getOwnerStats();
 
-  const statCards = [
-    { label: "Cliniques actives", value: String(stats.activeClinics), color: "bg-cerulean" },
-    { label: "Revenu mensuel", value: `${stats.monthlyRevenue.toLocaleString("fr-DZ")} DZD`, color: "bg-mint" },
-    { label: "Abonnements actifs", value: String(stats.activeSubscriptions), color: "bg-teal" },
-    { label: "Tickets ouverts", value: String(stats.openTickets), color: "bg-amber" },
-  ];
-
   return (
     <div>
-      <h1 className="text-2xl font-bold text-cool-900">Console propriétaire</h1>
-      <p className="mt-1 text-cool-500">Gérez votre plateforme DentalCare.</p>
+      <PageHeader
+        title="Console propriétaire"
+        description="Gérez votre plateforme DentalCare."
+      />
 
-      <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((stat) => (
-          <div key={stat.label} className="rounded-xl bg-white dark:bg-cool-100 p-6 shadow-sm border border-cool-100">
-            <div className={`inline-flex rounded-lg ${stat.color} p-3 text-white`}>
-              <LayoutDashboard className="h-6 w-6" />
-            </div>
-            <p className="mt-4 text-2xl font-bold text-cool-900">{stat.value}</p>
-            <p className="text-sm text-cool-500">{stat.label}</p>
-          </div>
-        ))}
-      </div>
+      <StatCards
+        stats={[
+          {
+            label: "Cliniques actives",
+            value: String(stats.activeClinics),
+            color: "bg-cerulean",
+            icon: Building2,
+          },
+          {
+            label: "Revenu mensuel",
+            value: `${stats.monthlyRevenue.toLocaleString("fr-DZ")} DZD`,
+            color: "bg-mint",
+            icon: CircleDollarSign,
+          },
+          {
+            label: "Abonnements actifs",
+            value: String(stats.activeSubscriptions),
+            color: "bg-teal",
+            icon: ClipboardList,
+          },
+          {
+            label: "Tickets ouverts",
+            value: String(stats.openTickets),
+            color: "bg-amber",
+            icon: Ticket,
+          },
+        ]}
+      />
     </div>
   );
 }
