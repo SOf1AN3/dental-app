@@ -15,12 +15,12 @@ function ResetPasswordForm() {
     return (
       <div className="space-y-6">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-cool-900">Réinitialiser le mot de passe</h2>
+          <h2 className="text-xl font-semibold text-foreground">Réinitialiser le mot de passe</h2>
         </div>
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+        <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
           Lien invalide ou expiré
         </div>
-        <p className="text-center text-sm text-cool-500">
+        <p className="text-center text-sm text-muted-fg">
           <a href="/forgot-password" className="font-medium text-cerulean hover:text-cerulean/80">
             Demander un nouveau lien
           </a>
@@ -32,8 +32,8 @@ function ResetPasswordForm() {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-cool-900">Réinitialiser le mot de passe</h2>
-        <p className="mt-1 text-sm text-cool-500">
+        <h2 className="text-xl font-semibold text-foreground">Réinitialiser le mot de passe</h2>
+        <p className="mt-1 text-sm text-muted-fg">
           Choisissez un nouveau mot de passe
         </p>
       </div>
@@ -61,7 +61,7 @@ function ResetPasswordForm() {
           <input type="hidden" name="token" value={token} />
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="password" className="block text-sm font-medium text-foreground">
               Nouveau mot de passe
             </label>
             <input
@@ -71,13 +71,13 @@ function ResetPasswordForm() {
               autoComplete="new-password"
               required
               minLength={6}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               placeholder="••••••••"
             />
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground">
               Confirmer le mot de passe
             </label>
             <input
@@ -86,19 +86,19 @@ function ResetPasswordForm() {
               type="password"
               autoComplete="new-password"
               required
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               placeholder="••••••••"
             />
           </div>
 
           {matchError && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+            <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
               {matchError}
             </div>
           )}
 
           {state?.error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+            <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
               {state.error}
             </div>
           )}
@@ -106,14 +106,14 @@ function ResetPasswordForm() {
           <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending ? "Enregistrement..." : "Réinitialiser le mot de passe"}
           </button>
         </form>
       )}
 
-      <p className="text-center text-sm text-cool-500">
+      <p className="text-center text-sm text-muted-fg">
         <a href="/login" className="font-medium text-cerulean hover:text-cerulean/80">
           Retour à la connexion
         </a>
@@ -124,7 +124,7 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="text-sm text-cool-500">Chargement...</div>}>
+    <Suspense fallback={<div className="text-sm text-muted-fg">Chargement...</div>}>
       <ResetPasswordForm />
     </Suspense>
   );

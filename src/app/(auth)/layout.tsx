@@ -8,11 +8,11 @@ export default function AuthLayout({
       <div className="w-full max-w-md space-y-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-primary">DentalCare</h1>
-          <p className="mt-2 text-sm text-cool-500">
+          <p className="mt-2 text-sm text-muted-fg">
             Gestion de cabinet dentaire
           </p>
         </div>
-        <div className="rounded-xl bg-white dark:bg-cool-100 px-8 py-10 shadow-sm border border-cool-100">
+        <div className="rounded-xl bg-card px-8 py-10 shadow-sm border border-border-card">
           {children}
         </div>
       </div>

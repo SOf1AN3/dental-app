@@ -33,15 +33,15 @@ export default function LoginPage() {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-cool-900">Connexion</h2>
-        <p className="mt-1 text-sm text-cool-500">
+        <h2 className="text-xl font-semibold text-foreground">Connexion</h2>
+        <p className="mt-1 text-sm text-muted-fg">
           Connectez-vous à votre compte
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="email" className="block text-sm font-medium text-foreground">
             Email
           </label>
           <input
@@ -50,13 +50,13 @@ export default function LoginPage() {
             type="email"
             autoComplete="email"
             required
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             placeholder="vous@exemple.fr"
           />
         </div>
 
         <div>
-          <label htmlFor="password" className="block text-sm font-medium text-cool-700">
+          <label htmlFor="password" className="block text-sm font-medium text-foreground">
             Mot de passe
           </label>
           <input
@@ -65,13 +65,13 @@ export default function LoginPage() {
             type="password"
             autoComplete="current-password"
             required
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             placeholder="••••••••"
           />
         </div>
 
         {error && (
-          <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
+          <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}
@@ -79,7 +79,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {loading ? "Connexion..." : "Se connecter"}
         </button>
@@ -91,7 +91,7 @@ export default function LoginPage() {
         </a>
       </div>
 
-      <p className="text-center text-sm text-cool-500">
+      <p className="text-center text-sm text-muted-fg">
         Pas encore de compte?{" "}
         <a href="/register" className="font-medium text-cerulean hover:text-cerulean/80">
           S&apos;inscrire

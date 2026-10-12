@@ -9,8 +9,8 @@ export default function ForgotPasswordPage() {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-cool-900">Mot de passe oublié</h2>
-        <p className="mt-1 text-sm text-cool-500">
+        <h2 className="text-xl font-semibold text-foreground">Mot de passe oublié</h2>
+        <p className="mt-1 text-sm text-muted-fg">
           Entrez votre email pour recevoir un lien de réinitialisation
         </p>
       </div>
@@ -22,7 +22,7 @@ export default function ForgotPasswordPage() {
       ) : (
         <form action={formAction} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="email" className="block text-sm font-medium text-foreground">
               Email
             </label>
             <input
@@ -31,13 +31,13 @@ export default function ForgotPasswordPage() {
               type="email"
               autoComplete="email"
               required
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm placeholder-cool-400 focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-fg focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               placeholder="vous@exemple.fr"
             />
           </div>
 
           {state?.error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+            <div className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
               {state.error}
             </div>
           )}
@@ -45,14 +45,14 @@ export default function ForgotPasswordPage() {
           <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending ? "Envoi..." : "Envoyer le lien"}
           </button>
         </form>
       )}
 
-      <p className="text-center text-sm text-cool-500">
+      <p className="text-center text-sm text-muted-fg">
         <a href="/login" className="font-medium text-cerulean hover:text-cerulean/80">
           Retour à la connexion
         </a>
