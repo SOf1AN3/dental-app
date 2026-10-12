@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { SubscribeForm, CancelSubscriptionForm } from "./subscribe-form";
 
 const statusLabels: Record<string, { label: string; color: string }> = {
-  trial: { label: "Essai", color: "bg-amber/10 text-amber" },
+  trial: { label: "Essai", color: "bg-amber/10 text-amber-fg" },
   active: { label: "Actif", color: "bg-mint/10 text-mint" },
   cancelled: { label: "Annulé", color: "bg-red/10 text-danger" },
   expired: { label: "Expiré", color: "bg-cool-100 text-cool-600" },

@@ -11,7 +11,7 @@ const statusLabels: Record<string, string> = {
 
 const priorityColors: Record<string, string> = {
   low: "bg-cool-100 text-cool-500",
-  medium: "bg-amber/10 text-amber",
+  medium: "bg-amber/10 text-amber-fg",
   high: "bg-danger/10 text-danger",
   urgent: "bg-danger/20 text-danger",
 };

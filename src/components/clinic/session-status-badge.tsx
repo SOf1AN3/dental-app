@@ -16,7 +16,7 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  pending: "bg-amber/10 text-amber",
+  pending: "bg-amber/10 text-amber-fg",
   in_progress: "bg-cerulean/10 text-cerulean",
   completed: "bg-cool-100 text-cool-600",
   invoiced: "bg-primary/10 text-primary",

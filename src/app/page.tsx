@@ -307,7 +307,7 @@ export default function LandingPage() {
                       Disponible
                     </span>
                   ) : (
-                    <span className="rounded-full bg-amber/10 px-2 py-0.5 text-xs font-medium text-amber">
+                    <span className="rounded-full bg-amber/10 px-2 py-0.5 text-xs font-medium text-amber-fg">
                       Bientôt disponible
                     </span>
                   )}

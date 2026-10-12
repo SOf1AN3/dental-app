@@ -52,7 +52,7 @@ const HOURLY_HEIGHT = 60; // px per hour
 const STATUS_BG: Record<string, string> = {
   scheduled: "bg-cerulean/15 text-cerulean border-cerulean/25",
   confirmed: "bg-mint/15 text-mint border-mint/25",
-  in_progress: "bg-amber/15 text-amber border-amber/25",
+  in_progress: "bg-amber/15 text-amber-fg border-amber/25",
   completed: "bg-cool-200 text-cool-500 border-cool-300",
   cancelled: "bg-danger/15 text-danger border-danger/25",
   no_show: "bg-danger/15 text-danger border-danger/25",

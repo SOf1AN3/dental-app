@@ -42,7 +42,7 @@ export default async function OwnerClinicsPage() {
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                     clinic.status === "active" ? "bg-mint/10 text-mint" :
                     clinic.status === "suspended" ? "bg-danger/10 text-danger" :
-                    "bg-amber/10 text-amber"
+                    "bg-amber/10 text-amber-fg"
                   }`}>
                     {clinic.status === "active" ? "Actif" : clinic.status === "suspended" ? "Suspendu" : "Essai"}
                   </span>

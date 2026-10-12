@@ -26,7 +26,7 @@ const categoryIcons = {
 
 const categoryTints = {
   broadcast: "bg-cerulean/10 text-cerulean",
-  maintenance: "bg-amber/10 text-amber",
+  maintenance: "bg-amber/10 text-amber-fg",
   subscription_reminder: "bg-mint/10 text-mint",
   system: "bg-cool-100 text-cool-600",
 } as const;

@@ -12,6 +12,10 @@
   --color-mint: #047857;
   --color-teal: #0f766e;
   --color-amber: #b45309;
+  /* Version « texte » de l'ambre : `--color-amber` sert aussi de fond plein
+     avec texte blanc (5.02:1), on ne peut donc pas l'assombrir. Ce jeton
+     sert exclusivement le texte posé sur `bg-amber/10`. */
+  --color-amber-fg: #92400e;
   --color-danger: #dc2626;
   --color-cool-50: #f8f9fb;
   --color-cool-100: #eef0f4;
@@ -116,6 +120,7 @@ body {
   --color-cool-700: #a3a7b2;
   --color-cool-800: #c1c4cd;
   --color-cool-900: #e1e3e8;
+  --color-amber-fg: #fbbf24;
 }
 
 @layer base {

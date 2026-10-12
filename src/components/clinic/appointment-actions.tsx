@@ -82,7 +82,7 @@ export function AppointmentActions({ appointment }: AppointmentActionsProps) {
             onClick={handleAddToWaiting}
             disabled={isPending || !isToday}
             title={isToday ? undefined : "Le patient ne peut être marqué arrivé que le jour du rendez-vous"}
-            className="rounded bg-amber/10 px-2 py-1 text-xs font-medium text-amber hover:bg-amber/20 disabled:opacity-50"
+            className="rounded bg-amber/10 px-2 py-1 text-xs font-medium text-amber-fg hover:bg-amber/20 disabled:opacity-50"
           >
             Arrivé
           </button>

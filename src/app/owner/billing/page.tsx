@@ -34,7 +34,7 @@ export default async function OwnerBillingPage() {
                 <td className="px-4 py-3">
                   <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                     item.status === "active" ? "bg-mint/10 text-mint" :
-                    item.status === "trial" ? "bg-amber/10 text-amber" :
+                    item.status === "trial" ? "bg-amber/10 text-amber-fg" :
                     "bg-cool-100 text-cool-500"
                   }`}>
                     {item.status === "active" ? "Actif" : item.status === "trial" ? "Essai" : item.status}

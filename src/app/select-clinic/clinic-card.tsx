@@ -25,7 +25,7 @@ export function ClinicCard({ clinic, role }: ClinicCardProps) {
             {role === "owner" ? "Propriétaire" : role === "dentist" ? "Dentiste" : role === "assistant" ? "Assistant" : "Membre"}
           </span>
           {clinic.status === "trial" && (
-            <span className="inline-flex items-center rounded-full bg-amber/10 px-2.5 py-0.5 text-xs font-medium text-amber">
+            <span className="inline-flex items-center rounded-full bg-amber/10 px-2.5 py-0.5 text-xs font-medium text-amber-fg">
               Essai
             </span>
           )}

@@ -33,7 +33,7 @@ interface WaitingRoomClientProps {
  * savoir dans quel état il est.
  */
 const WAITING_STATUS_BADGES: Record<string, { label: string; className: string }> = {
-  waiting: { label: "En attente", className: "bg-amber/10 text-amber" },
+  waiting: { label: "En attente", className: "bg-amber/10 text-amber-fg" },
   called: { label: "Appelé", className: "bg-cerulean/10 text-cerulean" },
   in_treatment: { label: "En soin", className: "bg-teal/10 text-teal" },
 };
