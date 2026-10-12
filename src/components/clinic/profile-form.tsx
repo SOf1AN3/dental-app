@@ -24,7 +24,7 @@ export function ProfileForm({
       <div>
         <label
           htmlFor="name"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Nom *
         </label>
@@ -34,17 +34,17 @@ export function ProfileForm({
           type="text"
           required
           defaultValue={defaultValues.name}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
         {fieldErrors?.name && (
-          <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>
+          <p className="mt-1 text-xs text-destructive">{fieldErrors.name[0]}</p>
         )}
       </div>
 
       <div>
         <label
           htmlFor="email"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Email *
         </label>
@@ -54,10 +54,10 @@ export function ProfileForm({
           type="email"
           required
           defaultValue={defaultValues.email}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
         {fieldErrors?.email && (
-          <p className="mt-1 text-xs text-red-500">{fieldErrors.email[0]}</p>
+          <p className="mt-1 text-xs text-destructive">{fieldErrors.email[0]}</p>
         )}
       </div>
 
@@ -69,7 +69,7 @@ export function ProfileForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Enregistrement..." : "Enregistrer"}
         </button>

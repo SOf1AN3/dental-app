@@ -30,7 +30,7 @@ export function ClinicSettingsForm({
       <div>
         <label
           htmlFor="name"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Nom de la clinique *
         </label>
@@ -40,10 +40,10 @@ export function ClinicSettingsForm({
           type="text"
           required
           defaultValue={defaultValues.name}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
         {fieldErrors?.name && (
-          <p className="mt-1 text-xs text-red-500">{fieldErrors.name[0]}</p>
+          <p className="mt-1 text-xs text-destructive">{fieldErrors.name[0]}</p>
         )}
       </div>
 
@@ -51,7 +51,7 @@ export function ClinicSettingsForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Email
           </label>
@@ -60,16 +60,16 @@ export function ClinicSettingsForm({
             name="email"
             type="email"
             defaultValue={defaultValues.email ?? ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
           {fieldErrors?.email && (
-            <p className="mt-1 text-xs text-red-500">{fieldErrors.email[0]}</p>
+            <p className="mt-1 text-xs text-destructive">{fieldErrors.email[0]}</p>
           )}
         </div>
         <div>
           <label
             htmlFor="phone"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Téléphone
           </label>
@@ -78,7 +78,7 @@ export function ClinicSettingsForm({
             name="phone"
             type="tel"
             defaultValue={defaultValues.phone ?? ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
       </div>
@@ -86,7 +86,7 @@ export function ClinicSettingsForm({
       <div>
         <label
           htmlFor="address"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Adresse
         </label>
@@ -95,14 +95,14 @@ export function ClinicSettingsForm({
           name="address"
           type="text"
           defaultValue={defaultValues.address ?? ""}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
       </div>
 
       <div>
         <label
           htmlFor="wilayaCode"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Wilaya
         </label>
@@ -124,7 +124,7 @@ export function ClinicSettingsForm({
       <div>
         <label
           htmlFor="timezone"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           Fuseau horaire
         </label>
@@ -133,14 +133,14 @@ export function ClinicSettingsForm({
           name="timezone"
           type="text"
           defaultValue={defaultValues.timezone ?? "Africa/Algiers"}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
       </div>
 
       <div>
         <label
           htmlFor="defaultTaxRate"
-          className="block text-sm font-medium text-cool-700"
+          className="block text-sm font-medium text-foreground"
         >
           TVA par défaut (%)
         </label>
@@ -151,9 +151,9 @@ export function ClinicSettingsForm({
           min={0}
           max={100}
           defaultValue={defaultValues.defaultTaxRate ?? 19}
-          className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+          className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
         />
-        <p className="mt-1 text-xs text-cool-400">
+        <p className="mt-1 text-xs text-muted-fg">
           Appliquée par défaut sur les nouvelles lignes de facture et devis.
         </p>
       </div>
@@ -168,7 +168,7 @@ export function ClinicSettingsForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Enregistrement..." : "Enregistrer"}
         </button>

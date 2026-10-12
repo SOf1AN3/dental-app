@@ -14,7 +14,7 @@ export default async function GeneralSettingsPage() {
 
   if (!clinic) {
     return (
-      <p className="text-sm text-red-500">
+      <p className="text-sm text-destructive">
         Clinique introuvable.
       </p>
     );
@@ -22,7 +22,7 @@ export default async function GeneralSettingsPage() {
 
   if (!profile) {
     return (
-      <p className="text-sm text-red-500">
+      <p className="text-sm text-destructive">
         Profil introuvable.
       </p>
     );
@@ -30,11 +30,11 @@ export default async function GeneralSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Informations de la clinique
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Ces informations apparaissent sur les documents et communications.
         </p>
         <ClinicSettingsForm
@@ -50,11 +50,11 @@ export default async function GeneralSettingsPage() {
         />
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Votre profil
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Mettez à jour votre nom et votre adresse email.
         </p>
         <ProfileForm
@@ -65,11 +65,11 @@ export default async function GeneralSettingsPage() {
         />
       </section>
 
-      <section className="rounded-xl border border-cool-200 bg-white p-6">
-        <h2 className="mb-1 text-lg font-semibold text-cool-900">
+      <section className="rounded-xl border border-border-card bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
           Changer le mot de passe
         </h2>
-        <p className="mb-6 text-sm text-cool-500">
+        <p className="mb-6 text-sm text-muted-fg">
           Vérifiez votre mot de passe actuel, puis entrez le nouveau.
         </p>
         <PasswordChangeForm />
