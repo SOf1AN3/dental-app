@@ -108,7 +108,7 @@ export default async function ClinicLayout({
         burger fixé en haut à gauche, sinon il recouvre le champ de recherche.
       */}
       <div className="ml-0 flex flex-1 flex-col md:ml-16 xl:ml-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-cool-200 bg-white pl-14 pr-8 dark:bg-cool-100 md:pl-8">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-border-card bg-card pl-14 pr-8 md:pl-8">
           <div className="flex-1">
             <SearchInput />
           </div>
