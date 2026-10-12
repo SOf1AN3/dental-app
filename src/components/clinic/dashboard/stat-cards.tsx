@@ -24,7 +24,7 @@ export function StatCards({ stats }: { stats: StatCardData[] }) {
             >
               <Icon className="size-5" aria-hidden="true" />
             </div>
-            <p className="mt-4 text-2xl font-bold text-cool-900">{stat.value}</p>
+            <p className="mt-4 text-2xl font-bold text-foreground">{stat.value}</p>
             <p className="text-sm text-muted-fg">{stat.label}</p>
           </div>
         );

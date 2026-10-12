@@ -9,6 +9,7 @@ import { resolveStoredUrl } from "@/lib/storage";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function EditPrescriptionPage(props: {
   params: Promise<{ id: string }>;
@@ -45,17 +46,13 @@ export default async function EditPrescriptionPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link
-          href={`/prescriptions/${id}`}
-          className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
-        >
-          ← Retour à l&apos;ordonnance
-        </Link>
-        <h1 className="text-2xl font-bold text-cool-900">
-          Modifier l&apos;ordonnance
-        </h1>
-      </div>
+      <Link
+        href={`/prescriptions/${id}`}
+        className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
+      >
+        ← Retour à l&apos;ordonnance
+      </Link>
+      <PageHeader title="Modifier l'ordonnance" />
       {rx.warnings.length > 0 && (
         <aside
           aria-label="Alerte d'allergie possible"

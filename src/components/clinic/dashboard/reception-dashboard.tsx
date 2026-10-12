@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { CalendarDays, FileText, HandCoins, Sofa, UserPlus } from "lucide-react";
 import { StatCards } from "./stat-cards";
 import { TodayAgenda, getTodayAgenda } from "./today-agenda";
+import { PageHeader } from "@/components/ui/page-header";
 
 /**
  * DB-2 — Receptionist dashboard: all-dentist agenda, quick "new patient",
@@ -20,19 +21,19 @@ export async function ReceptionDashboard({ clinicId }: { clinicId: string }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Accueil réception</h1>
-          <p className="mt-1 text-cool-500">Vue du jour — tous praticiens.</p>
-        </div>
-        <Link
-          href="/patients/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-        >
-          <UserPlus className="h-4 w-4" aria-hidden="true" />
-          Nouveau patient
-        </Link>
-      </div>
+      <PageHeader
+        title="Accueil réception"
+        description="Vue du jour — tous praticiens."
+        actions={
+          <Link
+            href="/patients/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            Nouveau patient
+          </Link>
+        }
+      />
 
       <Suspense fallback={<StatsSkeleton />}>
         <ReceptionStats
@@ -111,8 +112,8 @@ async function ReceptionStats({
 async function ReceptionAgenda({ clinicId }: { clinicId: string }) {
   const agenda = await getTodayAgenda(clinicId);
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-900">Agenda du jour — tous dentistes</h2>
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-foreground">Agenda du jour — tous dentistes</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist />
     </div>
   );
@@ -134,26 +135,26 @@ async function LatestPrescriptions({ clinicId }: { clinicId: string }) {
     .limit(5);
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-cool-900">Dernières ordonnances</h2>
+        <h2 className="text-lg font-semibold text-foreground">Dernières ordonnances</h2>
         <Link href="/prescriptions" className="text-xs text-cerulean hover:text-cerulean/80">
           Tout voir
         </Link>
       </div>
       {rows.length === 0 ? (
-        <p className="mt-4 text-cool-400">Aucune ordonnance.</p>
+        <p className="mt-4 text-muted-fg">Aucune ordonnance.</p>
       ) : (
         <ul className="mt-4 divide-y divide-cool-100">
           {rows.map((p) => (
             <li key={p.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
               <div>
-                <p className="text-sm font-medium text-cool-900">
+                <p className="text-sm font-medium text-foreground">
                   {p.patientLast} {p.patientFirst}
                 </p>
-                <p className="text-xs text-cool-500">{formatDate(p.date)}</p>
+                <p className="text-xs text-muted-fg">{formatDate(p.date)}</p>
               </div>
-              <span className="text-xs text-cool-500">{p.status}</span>
+              <span className="text-xs text-muted-fg">{p.status}</span>
             </li>
           ))}
         </ul>
@@ -185,15 +186,15 @@ async function OpenInvoices({ clinicId }: { clinicId: string }) {
     .limit(5);
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-cool-900">Factures ouvertes</h2>
+        <h2 className="text-lg font-semibold text-foreground">Factures ouvertes</h2>
         <Link href="/billing/invoices" className="text-xs text-cerulean hover:text-cerulean/80">
           Tout voir
         </Link>
       </div>
       {rows.length === 0 ? (
-        <p className="mt-4 text-cool-400">Aucune facture ouverte.</p>
+        <p className="mt-4 text-muted-fg">Aucune facture ouverte.</p>
       ) : (
         <ul className="mt-4 divide-y divide-cool-100">
           {rows.map((inv) => (
@@ -201,15 +202,15 @@ async function OpenInvoices({ clinicId }: { clinicId: string }) {
               <div>
                 <Link
                   href={`/billing/invoices/${inv.id}`}
-                  className="text-sm font-medium text-cool-900 hover:text-cerulean"
+                  className="text-sm font-medium text-foreground hover:text-cerulean"
                 >
                   {inv.number}
                 </Link>
-                <p className="text-xs text-cool-500">
+                <p className="text-xs text-muted-fg">
                   {inv.patientLast} {inv.patientFirst} · {formatDate(inv.date)}
                 </p>
               </div>
-              <span className="text-sm font-medium text-cool-900">{formatCurrency(inv.total)}</span>
+              <span className="text-sm font-medium text-foreground">{formatCurrency(inv.total)}</span>
             </li>
           ))}
         </ul>
@@ -230,8 +231,8 @@ function StatsSkeleton() {
 
 function CardSkeleton({ title }: { title: string }) {
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-400">{title}</h2>
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-muted-fg">{title}</h2>
       <div className="mt-4 h-24 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" />
     </div>
   );

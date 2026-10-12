@@ -29,7 +29,7 @@ export function EmptyState({ icon: Icon, title, description, action, className }
         <Icon className="size-6" aria-hidden="true" />
       </div>
       <div className="flex flex-col items-center gap-1">
-        <p className="text-sm font-medium text-cool-900 dark:text-cool-900">{title}</p>
+        <p className="text-sm font-medium text-foreground">{title}</p>
         {description ? (
           <p className="max-w-sm text-sm text-muted-fg">{description}</p>
         ) : null}

@@ -8,6 +8,8 @@ import { StatCards } from "./stat-cards";
 import { TodayAgenda, getTodayAgenda } from "./today-agenda";
 import { TrendsChart } from "@/components/clinic/trends-chart";
 import { getMonthlyTrends } from "@/lib/actions/reports";
+import { PageHeader } from "@/components/ui/page-header";
+import { WeekRecapTable } from "./week-recap-table";
 
 /**
  * DB-3 — Dentist dashboard: ONLY their own appointments and their own
@@ -31,8 +33,7 @@ export async function DentistDashboard({
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-cool-900">Mon tableau de bord</h1>
-      <p className="mt-1 text-cool-500">Votre activité du jour.</p>
+      <PageHeader title="Mon tableau de bord" description="Votre activité du jour." />
 
       <Suspense fallback={<div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-cool-100" />)}</div>}>
         <DentistStats
@@ -45,11 +46,11 @@ export async function DentistDashboard({
         />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-24 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card"><div className="h-24 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <MyAgenda clinicId={clinicId} dentistUserId={dentistUserId} />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-64 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card"><div className="h-64 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <MyRecap clinicId={clinicId} dentistUserId={dentistUserId} showRevenue={showRevenue} />
       </Suspense>
     </div>
@@ -121,8 +122,8 @@ async function MyAgenda({ clinicId, dentistUserId }: { clinicId: string; dentist
   // dentist so the legend is hidden.
   const agenda = await getTodayAgenda(clinicId, dentistUserId);
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-900">Mes rendez-vous du jour</h2>
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-foreground">Mes rendez-vous du jour</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist={false} />
     </div>
   );
@@ -141,8 +142,8 @@ async function MyRecap({
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-        <h2 className="text-lg font-semibold text-cool-900">Mon activité (6 mois)</h2>
+      <div className="rounded-xl bg-card p-6 shadow-sm border border-border-card">
+        <h2 className="text-lg font-semibold text-foreground">Mon activité (6 mois)</h2>
         <div className="mt-4">
           <TrendsChart data={trends} />
         </div>
@@ -214,26 +215,9 @@ async function RecapTable({
   }
 
   return (
-    <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-900">Récapitulatif des 4 dernières semaines</h2>
-      <table className="mt-4 w-full text-sm">
-        <thead>
-          <tr className="border-b border-cool-200">
-            <th className="py-2 text-left font-medium text-cool-500">Semaine</th>
-            <th className="py-2 text-right font-medium text-cool-500">RDV</th>
-            {showRevenue && <th className="py-2 text-right font-medium text-cool-500">Encaissé</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {weeks.map((w) => (
-            <tr key={w.label} className="border-b border-cool-100 last:border-0 dark:border-cool-200">
-              <td className="py-2 text-cool-700">{w.label}</td>
-              <td className="py-2 text-right text-cool-900">{w.appointments}</td>
-              {showRevenue && <td className="py-2 text-right text-cool-900">{formatCurrency(w.revenue)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-foreground">Récapitulatif des 4 dernières semaines</h2>
+      <WeekRecapTable weeks={weeks} showRevenue={showRevenue} />
     </div>
   );
 }

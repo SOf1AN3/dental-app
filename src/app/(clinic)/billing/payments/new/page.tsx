@@ -4,6 +4,7 @@ import { getInvoice, getUnpaidInvoicesForPatient } from "@/lib/actions/financial
 import { requirePatientOwnership } from "@/lib/guards";
 import { PaymentLauncher } from "@/components/clinic/payment-launcher";
 import { BackButton } from "@/components/clinic/back-button";
+import { PageHeader } from "@/components/ui/page-header";
 
 /**
  * Payment entry page (FACT-6). Replaces the dead `/billing/payments/new`
@@ -66,10 +67,8 @@ export default async function NewPaymentPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
-        <BackButton fallback="/billing/invoices" label="← Retour aux factures" />
-        <h1 className="text-2xl font-bold text-cool-900">Nouveau paiement</h1>
-      </div>
+      <BackButton fallback="/billing/invoices" label="← Retour aux factures" />
+      <PageHeader title="Nouveau paiement" />
 
       {warning && (
         <div className="mb-6 max-w-2xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">

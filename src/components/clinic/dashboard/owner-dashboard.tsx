@@ -10,6 +10,7 @@ import { TrendsChart } from "@/components/clinic/trends-chart";
 import { getMonthlyTrends, getRevenueData, getOccupancyRate } from "@/lib/actions/reports";
 import { StatCards } from "./stat-cards";
 import { TodayAgenda, AgendaLegend, getTodayAgenda } from "./today-agenda";
+import { PageHeader } from "@/components/ui/page-header";
 
 /**
  * DB-4 — Owner/admin dashboard: KPI counters first, then the all-dentist
@@ -23,19 +24,19 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-cool-900">Tableau de bord</h1>
-          <p className="mt-1 text-cool-500">Vue globale de la clinique.</p>
-        </div>
-        <Link
-          href="/patients/new"
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-        >
-          <UserPlus className="h-4 w-4" aria-hidden="true" />
-          Nouveau patient
-        </Link>
-      </div>
+      <PageHeader
+        title="Tableau de bord"
+        description="Vue globale de la clinique."
+        actions={
+          <Link
+            href="/patients/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            Nouveau patient
+          </Link>
+        }
+      />
 
       {/* KPI first: the numbers a practitioner comes to check */}
       <Suspense fallback={<div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-cool-100" />)}</div>}>
@@ -47,7 +48,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
       </Suspense>
 
       {/* All-dentist agenda (DB-1) */}
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-48 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card"><div className="h-48 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <AllAgenda clinicId={clinicId} />
       </Suspense>
 
@@ -55,7 +56,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
         <OwnerCharts />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-16 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card"><div className="h-16 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <OccupancyBlock />
       </Suspense>
     </div>
@@ -65,8 +66,8 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
 async function AllAgenda({ clinicId }: { clinicId: string }) {
   const agenda = await getTodayAgenda(clinicId);
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-900">Agenda du jour — tous dentistes</h2>
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-foreground">Agenda du jour — tous dentistes</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist />
       <AgendaLegend colorByDentist={agenda.colorByDentist} nameByDentist={agenda.nameByDentist} />
     </div>
@@ -133,14 +134,14 @@ async function OwnerCharts() {
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-        <h2 className="text-lg font-semibold text-cool-900">Production (6 mois)</h2>
+      <div className="rounded-xl bg-card p-6 shadow-sm border border-border-card">
+        <h2 className="text-lg font-semibold text-foreground">Production (6 mois)</h2>
         <div className="mt-4">
           <RevenueChart data={revenueData.monthlyRevenue} />
         </div>
       </div>
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-        <h2 className="text-lg font-semibold text-cool-900">Tendance encaissé (6 mois)</h2>
+      <div className="rounded-xl bg-card p-6 shadow-sm border border-border-card">
+        <h2 className="text-lg font-semibold text-foreground">Tendance encaissé (6 mois)</h2>
         <div className="mt-4">
           <TrendsChart data={monthlyTrends} />
         </div>
@@ -153,17 +154,17 @@ async function OccupancyBlock() {
   const occupancy = await getOccupancyRate();
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
-      <h2 className="text-lg font-semibold text-cool-900">Taux d&apos;occupation</h2>
+    <div className="mt-6 rounded-xl bg-card p-6 shadow-sm border border-border-card">
+      <h2 className="text-lg font-semibold text-foreground">Taux d&apos;occupation</h2>
       <div className="mt-4 flex flex-wrap items-center gap-6">
         <div className="flex flex-col items-center">
           <span className="text-3xl font-bold text-cerulean">{occupancy.rate}%</span>
-          <span className="text-xs text-cool-500">Ce mois</span>
+          <span className="text-xs text-muted-fg">Ce mois</span>
         </div>
-        <div className="flex flex-wrap gap-8 text-sm text-cool-600">
-          <div><span className="font-semibold text-cool-900">{occupancy.thisMonth}</span> RDV ce mois</div>
-          <div><span className="font-semibold text-cool-900">{occupancy.lastMonth}</span> RDV mois dernier</div>
-          <div><span className="font-semibold text-cool-900">{occupancy.estimatedMonthlySlots}</span> Créneaux estimés</div>
+        <div className="flex flex-wrap gap-8 text-sm text-muted-fg">
+          <div><span className="font-semibold text-foreground">{occupancy.thisMonth}</span> RDV ce mois</div>
+          <div><span className="font-semibold text-foreground">{occupancy.lastMonth}</span> RDV mois dernier</div>
+          <div><span className="font-semibold text-foreground">{occupancy.estimatedMonthlySlots}</span> Créneaux estimés</div>
         </div>
       </div>
     </div>

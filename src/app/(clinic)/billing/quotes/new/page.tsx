@@ -4,6 +4,7 @@ import { getCurrentClinic } from "@/lib/actions/settings";
 import { buildA5Template } from "@/lib/document-branding";
 import { resolveStoredUrl } from "@/lib/storage";
 import { QuoteForm } from "@/components/clinic/quote-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function NewQuotePage() {
   await requireAuth();
@@ -21,12 +22,10 @@ export default async function NewQuotePage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Nouveau devis</h1>
-        <p className="text-sm text-cool-500">
-          Créer un nouveau devis pour un patient
-        </p>
-      </div>
+      <PageHeader
+        title="Nouveau devis"
+        description="Créer un nouveau devis pour un patient"
+      />
       <QuoteForm
         catalog={catalog}
         defaultTaxRate={clinic?.defaultTaxRate ?? 19}

@@ -5,6 +5,7 @@ import { PrescriptionEditor } from "@/components/clinic/prescription-editor";
 import { buildA5Template } from "@/lib/document-branding";
 import { resolveStoredUrl } from "@/lib/storage";
 import Link from "next/link";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function NewPrescriptionPage() {
   await requireAuth();
@@ -24,15 +25,13 @@ export default async function NewPrescriptionPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link
-          href="/prescriptions"
-          className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
-        >
-          ← Retour aux ordonnances
-        </Link>
-        <h1 className="text-2xl font-bold text-cool-900">Nouvelle ordonnance</h1>
-      </div>
+      <Link
+        href="/prescriptions"
+        className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
+      >
+        ← Retour aux ordonnances
+      </Link>
+      <PageHeader title="Nouvelle ordonnance" />
       <PrescriptionEditor
         clinicTemplate={clinicTemplate}
         dentistName={profile?.name ?? null}

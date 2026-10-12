@@ -4,6 +4,7 @@ import { getCurrentClinic } from "@/lib/actions/settings";
 import { buildA5Template } from "@/lib/document-branding";
 import { resolveStoredUrl } from "@/lib/storage";
 import { InvoiceForm } from "@/components/clinic/invoice-form";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default async function NewInvoicePage() {
   await requireAuth();
@@ -21,12 +22,10 @@ export default async function NewInvoicePage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-cool-900">Nouvelle facture</h1>
-        <p className="text-sm text-cool-500">
-          Créer une nouvelle facture pour un patient
-        </p>
-      </div>
+      <PageHeader
+        title="Nouvelle facture"
+        description="Créer une nouvelle facture pour un patient"
+      />
       <InvoiceForm
         catalog={catalog}
         defaultTaxRate={clinic?.defaultTaxRate ?? 19}
