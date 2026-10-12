@@ -4,7 +4,7 @@ import { db } from "@/lib/db/db";
 import { appointments, patients, invoices, waitingRoomEntries } from "@/lib/db/schema";
 import { eq, and, gte, lt, count, sum, inArray } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
-import { UserPlus } from "lucide-react";
+import { CalendarDays, CircleDollarSign, Sofa, UserPlus, Users } from "lucide-react";
 import { RevenueChart } from "@/components/clinic/revenue-chart";
 import { TrendsChart } from "@/components/clinic/trends-chart";
 import { getMonthlyTrends, getRevenueData, getOccupancyRate } from "@/lib/actions/reports";
@@ -108,13 +108,14 @@ async function OwnerStats({
   return (
     <StatCards
       stats={[
-        { label: "Patients", value: String(totalPatients), color: "bg-cerulean" },
-        { label: "RDV aujourd'hui", value: String(todayApptCount), color: "bg-mint" },
-        { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber" },
+        { label: "Patients", value: String(totalPatients), color: "bg-cerulean", icon: Users },
+        { label: "RDV aujourd'hui", value: String(todayApptCount), color: "bg-mint", icon: CalendarDays },
+        { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber", icon: Sofa },
         {
           label: "Revenu global du jour",
           value: formatCurrency(Number(todayRevenue) || 0),
           color: "bg-teal",
+          icon: CircleDollarSign,
         },
       ]}
     />

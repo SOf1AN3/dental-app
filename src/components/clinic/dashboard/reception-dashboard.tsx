@@ -4,7 +4,7 @@ import { db } from "@/lib/db/db";
 import { appointments, invoices, prescriptions, patients, waitingRoomEntries } from "@/lib/db/schema";
 import { eq, and, gte, lt, count, sum, desc, inArray } from "drizzle-orm";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { UserPlus } from "lucide-react";
+import { CalendarDays, FileText, HandCoins, Sofa, UserPlus } from "lucide-react";
 import { StatCards } from "./stat-cards";
 import { TodayAgenda, getTodayAgenda } from "./today-agenda";
 
@@ -93,13 +93,14 @@ async function ReceptionStats({
     <div className="mt-8">
       <StatCards
         stats={[
-          { label: "RDV aujourd'hui", value: String(apptCount), color: "bg-mint" },
-          { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber" },
-          { label: "Factures ouvertes", value: String(unpaid?.count ?? 0), color: "bg-cerulean" },
+          { label: "RDV aujourd'hui", value: String(apptCount), color: "bg-mint", icon: CalendarDays },
+          { label: "Présents en salle d'attente", value: String(presentCount), color: "bg-amber", icon: Sofa },
+          { label: "Factures ouvertes", value: String(unpaid?.count ?? 0), color: "bg-cerulean", icon: FileText },
           {
             label: "Montant à recouvrer",
             value: formatCurrency(Number(unpaid?.total) || 0),
             color: "bg-teal",
+            icon: HandCoins,
           },
         ]}
       />

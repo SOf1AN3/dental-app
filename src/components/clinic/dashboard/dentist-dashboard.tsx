@@ -3,6 +3,7 @@ import { db } from "@/lib/db/db";
 import { appointments, clinicalSessions, payments } from "@/lib/db/schema";
 import { eq, and, gte, lt, count, sum } from "drizzle-orm";
 import { formatCurrency } from "@/lib/utils";
+import { CalendarCheck, TrendingUp } from "lucide-react";
 import { StatCards } from "./stat-cards";
 import { TodayAgenda, getTodayAgenda } from "./today-agenda";
 import { TrendsChart } from "@/components/clinic/trends-chart";
@@ -98,13 +99,14 @@ async function DentistStats({
     <div className="mt-8">
       <StatCards
         stats={[
-          { label: "Mes RDV aujourd'hui", value: String(myTodayCount), color: "bg-cerulean" },
+          { label: "Mes RDV aujourd'hui", value: String(myTodayCount), color: "bg-cerulean", icon: CalendarCheck },
           ...(showRevenue
             ? [
                 {
                   label: "Ma production ce mois",
                   value: formatCurrency(Number(production?.total) || 0),
                   color: "bg-teal",
+                  icon: TrendingUp,
                 },
               ]
             : []),
