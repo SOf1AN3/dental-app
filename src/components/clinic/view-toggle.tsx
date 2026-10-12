@@ -41,7 +41,7 @@ export function ViewToggle({
             onClick={() => switchView(opt.value)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               active
-                ? "bg-white text-cool-900 shadow-sm"
+                ? "bg-white text-cool-900 shadow-sm dark:bg-cool-300"
                 : "text-cool-500 hover:text-cool-700"
             }`}
           >

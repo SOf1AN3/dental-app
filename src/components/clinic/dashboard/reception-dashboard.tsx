@@ -110,7 +110,7 @@ async function ReceptionStats({
 async function ReceptionAgenda({ clinicId }: { clinicId: string }) {
   const agenda = await getTodayAgenda(clinicId);
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Agenda du jour — tous dentistes</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist />
     </div>
@@ -133,7 +133,7 @@ async function LatestPrescriptions({ clinicId }: { clinicId: string }) {
     .limit(5);
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-cool-900">Dernières ordonnances</h2>
         <Link href="/prescriptions" className="text-xs text-cerulean hover:text-cerulean/80">
@@ -184,7 +184,7 @@ async function OpenInvoices({ clinicId }: { clinicId: string }) {
     .limit(5);
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-cool-900">Factures ouvertes</h2>
         <Link href="/billing/invoices" className="text-xs text-cerulean hover:text-cerulean/80">
@@ -229,9 +229,9 @@ function StatsSkeleton() {
 
 function CardSkeleton({ title }: { title: string }) {
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-400">{title}</h2>
-      <div className="mt-4 h-24 animate-pulse rounded-lg bg-cool-100" />
+      <div className="mt-4 h-24 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" />
     </div>
   );
 }

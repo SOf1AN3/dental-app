@@ -62,12 +62,12 @@ export function UrgenceAdmission() {
   }
 
   return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+    <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950">
       <div className="flex items-center gap-3 mb-3">
-        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700 uppercase tracking-wider">
+        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700 uppercase tracking-wider dark:bg-red-900 dark:text-red-300">
           Urgence
         </span>
-        <p className="text-sm text-red-700">Admettre un patient sans rendez-vous</p>
+        <p className="text-sm text-red-700 dark:text-red-300">Admettre un patient sans rendez-vous</p>
       </div>
 
       <div ref={containerRef} className="relative">
@@ -81,10 +81,10 @@ export function UrgenceAdmission() {
             setError(null);
           }}
           onFocus={() => { if (results.length > 0) setOpen(true); }}
-          className="block w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+          className="block w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-sm focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400 dark:border-red-900 dark:bg-cool-100"
         />
         {open && results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+          <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white shadow-lg max-h-48 overflow-y-auto dark:bg-cool-100">
             {results.map((p) => (
               <li key={p.id}>
                 <button
@@ -101,7 +101,7 @@ export function UrgenceAdmission() {
       </div>
 
       {error && (
-        <p className="mt-2 text-xs text-red-600">{error}</p>
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
       )}
 
       <button

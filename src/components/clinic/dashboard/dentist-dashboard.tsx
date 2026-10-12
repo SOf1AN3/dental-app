@@ -44,11 +44,11 @@ export async function DentistDashboard({
         />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100"><div className="h-24 animate-pulse rounded-lg bg-cool-100" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-24 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <MyAgenda clinicId={clinicId} dentistUserId={dentistUserId} />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100"><div className="h-64 animate-pulse rounded-lg bg-cool-100" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-64 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <MyRecap clinicId={clinicId} dentistUserId={dentistUserId} showRevenue={showRevenue} />
       </Suspense>
     </div>
@@ -119,7 +119,7 @@ async function MyAgenda({ clinicId, dentistUserId }: { clinicId: string; dentist
   // dentist so the legend is hidden.
   const agenda = await getTodayAgenda(clinicId, dentistUserId);
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Mes rendez-vous du jour</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist={false} />
     </div>
@@ -139,7 +139,7 @@ async function MyRecap({
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
         <h2 className="text-lg font-semibold text-cool-900">Mon activité (6 mois)</h2>
         <div className="mt-4">
           <TrendsChart data={trends} />
@@ -212,7 +212,7 @@ async function RecapTable({
   }
 
   return (
-    <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Récapitulatif des 4 dernières semaines</h2>
       <table className="mt-4 w-full text-sm">
         <thead>
@@ -224,7 +224,7 @@ async function RecapTable({
         </thead>
         <tbody>
           {weeks.map((w) => (
-            <tr key={w.label} className="border-b border-cool-100 last:border-0">
+            <tr key={w.label} className="border-b border-cool-100 last:border-0 dark:border-cool-200">
               <td className="py-2 text-cool-700">{w.label}</td>
               <td className="py-2 text-right text-cool-900">{w.appointments}</td>
               {showRevenue && <td className="py-2 text-right text-cool-900">{formatCurrency(w.revenue)}</td>}

@@ -38,7 +38,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
       </div>
 
       {/* Main block: all-dentist agenda (DB-1) */}
-      <Suspense fallback={<div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100"><div className="h-48 animate-pulse rounded-lg bg-cool-100" /></div>}>
+      <Suspense fallback={<div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-48 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <AllAgenda clinicId={clinicId} />
       </Suspense>
 
@@ -54,7 +54,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
         <OwnerCharts />
       </Suspense>
 
-      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100"><div className="h-16 animate-pulse rounded-lg bg-cool-100" /></div>}>
+      <Suspense fallback={<div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200"><div className="h-16 animate-pulse rounded-lg bg-cool-100 dark:bg-cool-200" /></div>}>
         <OccupancyBlock />
       </Suspense>
     </div>
@@ -64,7 +64,7 @@ export async function OwnerDashboard({ clinicId }: { clinicId: string }) {
 async function AllAgenda({ clinicId }: { clinicId: string }) {
   const agenda = await getTodayAgenda(clinicId);
   return (
-    <div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-8 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Agenda du jour — tous dentistes</h2>
       <TodayAgenda entries={agenda.entries} colorByDentist={agenda.colorByDentist} showDentist />
       <AgendaLegend colorByDentist={agenda.colorByDentist} nameByDentist={agenda.nameByDentist} />
@@ -129,13 +129,13 @@ async function OwnerCharts() {
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
         <h2 className="text-lg font-semibold text-cool-900">Production (6 mois)</h2>
         <div className="mt-4">
           <RevenueChart data={revenueData.monthlyRevenue} />
         </div>
       </div>
-      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+      <div className="rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
         <h2 className="text-lg font-semibold text-cool-900">Tendance encaissé (6 mois)</h2>
         <div className="mt-4">
           <TrendsChart data={monthlyTrends} />
@@ -149,7 +149,7 @@ async function OccupancyBlock() {
   const occupancy = await getOccupancyRate();
 
   return (
-    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100">
+    <div className="mt-6 rounded-xl bg-white p-6 shadow-sm border border-cool-100 dark:bg-cool-100 dark:border-cool-200">
       <h2 className="text-lg font-semibold text-cool-900">Taux d&apos;occupation</h2>
       <div className="mt-4 flex flex-wrap items-center gap-6">
         <div className="flex flex-col items-center">
