@@ -8,25 +8,29 @@
   --color-primary: #1e2a5a;
   --color-primary-light: #2a3f8a;
   --color-sidebar: #1e2a5a;
-  --color-cerulean: #0088cc;
-  --color-mint: #10b981;
-  --color-teal: #0d9488;
-  --color-amber: #f59e0b;
-  --color-danger: #ef4444;
+  --color-cerulean: #0369a1;
+  --color-mint: #047857;
+  --color-teal: #0f766e;
+  --color-amber: #b45309;
+  --color-danger: #dc2626;
   --color-cool-50: #f8f9fb;
   --color-cool-100: #eef0f4;
   --color-cool-200: #dde0e8;
   --color-cool-300: #c4c9d5;
-  --color-cool-400: #a5abbc;
-  --color-cool-500: #858b9e;
+  --color-cool-400: #6b7280;
+  --color-cool-500: #64748b;
   --color-cool-600: #6b7185;
   --color-cool-700: #585d6e;
   --color-cool-800: #4a4e5c;
   --color-cool-900: #3f424e;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+  --color-border-card: #c3c9d6;
+  --color-border-input: #7f8798;
+  --color-muted-fg: #64748b;
+  --font-heading: var(--font-sans);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -59,7 +63,6 @@ body {
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -75,13 +78,12 @@ body {
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: #121419;
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: #1b1d22;
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: #1b1d22;
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
@@ -90,14 +92,21 @@ body {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: #6b6f7a;
+  --input: #6b6f7a;
   --ring: oklch(0.556 0 0);
+
+  /* Bordures de cartes/inputs : variante sombre obligatoire, sinon les tokens
+     clairs (#c3c9d6 / #7f8798) appliqués sur fond sombre (#1b1d22) créent un
+     effet « néon » à ~11:1 de contraste. */
+  --color-border-card: #3d4048;
+  --color-border-input: #6b6f7a;
 
   --color-primary: #4a5fa8;
   --color-primary-light: #5a7ac8;
-  --color-cerulean: #33aadd;
-  --color-cool-50: #1a1b1e;
+  --color-cerulean: #60a5fa;
+  --color-muted-fg: #94a3b8;
+  --color-cool-50: #121419;
   --color-cool-100: #232529;
   --color-cool-200: #2d2f35;
   --color-cool-300: #3d4048;
