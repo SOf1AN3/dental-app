@@ -1,11 +1,13 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getOdontogramState } from "@/lib/actions/odontogram";
 import { db } from "@/lib/db/db";
 import { patients } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import Link from "next/link";
+import { PageHeader } from "@/components/ui/page-header";
 import OdontogramEditor from "@/components/clinic/odontogram-editor";
 
 export default async function DentalChartPage(props: {
@@ -25,16 +27,16 @@ export default async function DentalChartPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
+      <div>
         <Link
           href={`/patients/${id}`}
           className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
         >
           ← Retour au dossier
         </Link>
-        <h1 className="text-2xl font-bold text-cool-900">
-          Odontogramme — {patient.lastName} {patient.firstName}
-        </h1>
+        <PageHeader
+          title={`Odontogramme — ${patient.lastName} ${patient.firstName}`}
+        />
       </div>
 
       <OdontogramEditor

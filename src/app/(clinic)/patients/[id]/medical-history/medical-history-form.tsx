@@ -15,15 +15,15 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
 
   return (
     <form action={action} className="space-y-4">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           Ajouter un antécédent
         </h2>
 
         <div>
           <label
             htmlFor="condition"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Condition *
           </label>
@@ -32,10 +32,10 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
             name="condition"
             type="text"
             placeholder="Ex: Diabète, Hypertension, Allergie..."
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           {state?.error?.condition && (
-            <p className="mt-1 text-xs text-red-500">
+            <p className="mt-1 text-xs text-destructive">
               {state.error.condition[0]}
             </p>
           )}
@@ -44,7 +44,7 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
         <div>
           <label
             htmlFor="diagnosisDate"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Date de diagnostic
           </label>
@@ -52,10 +52,10 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
             id="diagnosisDate"
             name="diagnosisDate"
             type="date"
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           {state?.error?.diagnosisDate && (
-            <p className="mt-1 text-xs text-red-500">
+            <p className="mt-1 text-xs text-destructive">
               {state.error.diagnosisDate[0]}
             </p>
           )}
@@ -64,7 +64,7 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
         <div>
           <label
             htmlFor="notes"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Notes
           </label>
@@ -73,10 +73,10 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
             name="notes"
             rows={3}
             placeholder="Informations complémentaires..."
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           {state?.error?.notes && (
-            <p className="mt-1 text-xs text-red-500">
+            <p className="mt-1 text-xs text-destructive">
               {state.error.notes[0]}
             </p>
           )}
@@ -88,16 +88,16 @@ export function MedicalHistoryForm({ patientId }: MedicalHistoryFormProps) {
             name="isActive"
             type="checkbox"
             defaultChecked
-            className="h-4 w-4 rounded border-cool-300 text-cerulean focus:ring-cerulean"
+            className="h-4 w-4 rounded border-input text-primary focus-visible:ring-ring/50 focus-visible:ring-3 focus-visible:outline-none"
           />
-          <span className="text-sm font-medium text-cool-700">Actif</span>
+          <span className="text-sm font-medium text-foreground">Actif</span>
         </label>
       </div>
 
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+        className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
       >
         {pending ? "Ajout en cours..." : "Ajouter"}
       </button>

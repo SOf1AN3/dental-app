@@ -1,16 +1,18 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { FileX, Download } from "lucide-react";
+
 import { requireAuth } from "@/lib/auth-utils";
 import { getCurrentClinicId } from "@/lib/multi-tenant";
 import { getRadiographs } from "@/lib/actions/clinical";
 import { db } from "@/lib/db/db";
 import { patients } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/page-header";
 import { RadiographForm } from "@/components/clinic/radiograph-form";
 import { RadiographDeleteButton } from "./radiograph-delete-button";
 import { resolveStoredUrl } from "@/lib/storage";
-import { FileX, Download } from "lucide-react";
 
 function isImageKey(key: string): boolean {
   return /\.(jpe?g|png|webp)$/i.test(key);
@@ -40,16 +42,16 @@ export default async function RadiographsPage(props: {
 
   return (
     <div>
-      <div className="mb-6">
+      <div>
         <Link
           href={`/patients/${id}`}
           className="text-sm text-cerulean hover:text-cerulean/80 mb-1 inline-block"
         >
           ← Retour au dossier
         </Link>
-        <h1 className="text-2xl font-bold text-cool-900">
-          Radiographies — {patient.lastName} {patient.firstName}
-        </h1>
+        <PageHeader
+          title={`Radiographies — ${patient.lastName} ${patient.firstName}`}
+        />
       </div>
 
       <div className="space-y-6">
@@ -58,18 +60,18 @@ export default async function RadiographsPage(props: {
         </div>
 
         {items.length === 0 ? (
-          <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-12 text-center">
-            <p className="text-sm text-cool-400">Aucune radiographie</p>
+          <div className="rounded-xl border border-border-card bg-card p-12 text-center">
+            <p className="text-sm text-muted-fg">Aucune radiographie</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {items.map((radio) => (
               <div
                 key={radio.id}
-                className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-5"
+                className="rounded-xl border border-border-card bg-card p-5"
               >
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-lg">📷</span>
+                  <span className="text-lg" aria-hidden="true">📷</span>
                   {radio.url ? (
                     isImageKey(radio.fileKey) ? (
                       <a
@@ -82,7 +84,7 @@ export default async function RadiographsPage(props: {
                         <img
                           src={radio.url}
                           alt="Radiographie"
-                          className="h-24 w-full rounded-lg border border-cool-200 bg-cool-50 object-contain"
+                          className="h-24 w-full rounded-lg border border-border-card bg-muted object-contain"
                         />
                       </a>
                     ) : (
@@ -90,15 +92,15 @@ export default async function RadiographsPage(props: {
                         href={radio.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-cerulean/10 px-3 py-1.5 text-sm font-medium text-cerulean hover:bg-cerulean/20 transition-colors"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-cerulean/10 px-3 py-1.5 text-sm font-medium text-cerulean hover:bg-cerulean/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                       >
-                        <Download className="h-4 w-4" />
+                        <Download className="h-4 w-4" aria-hidden="true" />
                         Voir le fichier
                       </a>
                     )
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 text-sm text-cool-400">
-                      <FileX className="h-4 w-4" />
+                    <span className="inline-flex items-center gap-1.5 text-sm text-muted-fg">
+                      <FileX className="h-4 w-4" aria-hidden="true" />
                       Fichier introuvable
                     </span>
                   )}
@@ -106,46 +108,46 @@ export default async function RadiographsPage(props: {
                 <dl className="space-y-1.5 text-sm">
                   {radio.fileType && (
                     <div className="flex justify-between">
-                      <dt className="text-cool-400">Type</dt>
-                      <dd className="text-cool-700">{radio.fileType}</dd>
+                      <dt className="text-muted-fg">Type</dt>
+                      <dd className="text-foreground">{radio.fileType}</dd>
                     </div>
                   )}
                   {radio.toothNumber != null && (
                     <div className="flex justify-between">
-                      <dt className="text-cool-400">Dent</dt>
-                      <dd className="text-cool-700">{radio.toothNumber}</dd>
+                      <dt className="text-muted-fg">Dent</dt>
+                      <dd className="text-foreground">{radio.toothNumber}</dd>
                     </div>
                   )}
                   {radio.region && (
                     <div className="flex justify-between">
-                      <dt className="text-cool-400">Région</dt>
-                      <dd className="text-cool-700">{radio.region}</dd>
+                      <dt className="text-muted-fg">Région</dt>
+                      <dd className="text-foreground">{radio.region}</dd>
                     </div>
                   )}
                   {radio.notes && (
                     <div className="flex justify-between">
-                      <dt className="text-cool-400">Notes</dt>
-                      <dd className="text-cool-700 text-right max-w-[60%]">
+                      <dt className="text-muted-fg">Notes</dt>
+                      <dd className="text-foreground text-right max-w-[60%]">
                         {radio.notes}
                       </dd>
                     </div>
                   )}
                   {radio.takenAt && (
                     <div className="flex justify-between">
-                      <dt className="text-cool-400">Pris le</dt>
-                      <dd className="text-cool-700">
+                      <dt className="text-muted-fg">Pris le</dt>
+                      <dd className="text-foreground">
                         {formatDate(radio.takenAt)}
                       </dd>
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <dt className="text-cool-400">Ajouté le</dt>
-                    <dd className="text-cool-700">
+                    <dt className="text-muted-fg">Ajouté le</dt>
+                    <dd className="text-foreground">
                       {formatDate(radio.createdAt)}
                     </dd>
                   </div>
                 </dl>
-                <div className="mt-3 flex justify-end border-t border-cool-100 pt-3">
+                <div className="mt-3 flex justify-end border-t border-border-card pt-3">
                   <RadiographDeleteButton radiographId={radio.id} />
                 </div>
               </div>
