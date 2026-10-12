@@ -14,8 +14,8 @@ export function PatientForm() {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           Informations personnelles
         </h2>
 
@@ -23,7 +23,7 @@ export function PatientForm() {
           <div>
             <label
               htmlFor="firstName"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Prénom *
             </label>
@@ -32,10 +32,10 @@ export function PatientForm() {
               name="firstName"
               type="text"
               required
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.firstName && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.firstName[0]}
               </p>
             )}
@@ -43,7 +43,7 @@ export function PatientForm() {
           <div>
             <label
               htmlFor="lastName"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Nom *
             </label>
@@ -52,10 +52,10 @@ export function PatientForm() {
               name="lastName"
               type="text"
               required
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.lastName && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.lastName[0]}
               </p>
             )}
@@ -66,7 +66,7 @@ export function PatientForm() {
           <div>
             <label
               htmlFor="dateOfBirth"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Date de naissance
             </label>
@@ -74,10 +74,10 @@ export function PatientForm() {
               id="dateOfBirth"
               name="dateOfBirth"
               type="date"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.dateOfBirth && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.dateOfBirth[0]}
               </p>
             )}
@@ -85,7 +85,7 @@ export function PatientForm() {
           <div>
             <label
               htmlFor="gender"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Genre
             </label>
@@ -93,7 +93,7 @@ export function PatientForm() {
               id="gender"
               name="gender"
               defaultValue=""
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             >
               <option value="">Non spécifié</option>
               <option value="Homme">Homme</option>
@@ -106,7 +106,7 @@ export function PatientForm() {
           <div>
             <label
               htmlFor="phone"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Téléphone
             </label>
@@ -114,14 +114,14 @@ export function PatientForm() {
               id="phone"
               name="phone"
               type="tel"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               placeholder="+213 5XX XX XX XX"
             />
           </div>
           <div>
             <label
               htmlFor="email"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Email
             </label>
@@ -129,10 +129,10 @@ export function PatientForm() {
               id="email"
               name="email"
               type="email"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.email && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.email[0]}
               </p>
             )}
@@ -142,7 +142,7 @@ export function PatientForm() {
         <div>
           <label
             htmlFor="address"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Adresse
           </label>
@@ -150,14 +150,14 @@ export function PatientForm() {
             id="address"
             name="address"
             type="text"
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
 
         <div>
           <label
             htmlFor="wilayaCode"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Wilaya
           </label>
@@ -165,7 +165,7 @@ export function PatientForm() {
             id="wilayaCode"
             name="wilayaCode"
             defaultValue=""
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="">Sélectionner une wilaya</option>
             {WILAYAS.map((w) => (
@@ -177,15 +177,15 @@ export function PatientForm() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           Contact d&apos;urgence
         </h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label
               htmlFor="emergencyContact"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Contact
             </label>
@@ -193,13 +193,13 @@ export function PatientForm() {
               id="emergencyContact"
               name="emergencyContact"
               type="text"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
           <div>
             <label
               htmlFor="emergencyPhone"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Téléphone
             </label>
@@ -207,19 +207,19 @@ export function PatientForm() {
               id="emergencyPhone"
               name="emergencyPhone"
               type="tel"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">Assurance</h2>
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Assurance</h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label
               htmlFor="insuranceProvider"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Mutuelle
             </label>
@@ -227,13 +227,13 @@ export function PatientForm() {
               id="insuranceProvider"
               name="insuranceProvider"
               type="text"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
           <div>
             <label
               htmlFor="insuranceNumber"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               N° d&apos;adhérent
             </label>
@@ -241,20 +241,20 @@ export function PatientForm() {
               id="insuranceNumber"
               name="insuranceNumber"
               type="text"
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">Notes</h2>
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Notes</h2>
         <div>
           <textarea
             id="notes"
             name="notes"
             rows={3}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
       </div>
@@ -263,13 +263,13 @@ export function PatientForm() {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Enregistrement..." : "Enregistrer"}
         </button>
         <Link
           href="/patients"
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           Annuler
         </Link>

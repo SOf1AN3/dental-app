@@ -35,8 +35,8 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
 
   return (
     <form action={action} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           Informations personnelles
         </h2>
 
@@ -44,7 +44,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
           <div>
             <label
               htmlFor="firstName"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Prénom *
             </label>
@@ -54,10 +54,10 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               type="text"
               required
               defaultValue={patient.firstName}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.firstName && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.firstName[0]}
               </p>
             )}
@@ -65,7 +65,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
           <div>
             <label
               htmlFor="lastName"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Nom *
             </label>
@@ -75,10 +75,10 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               type="text"
               required
               defaultValue={patient.lastName}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.lastName && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.lastName[0]}
               </p>
             )}
@@ -89,7 +89,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
           <div>
             <label
               htmlFor="dateOfBirth"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Date de naissance
             </label>
@@ -102,10 +102,10 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
                   ? new Date(patient.dateOfBirth).toISOString().split("T")[0]
                   : ""
               }
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.dateOfBirth && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.dateOfBirth[0]}
               </p>
             )}
@@ -113,7 +113,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
           <div>
             <label
               htmlFor="gender"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Genre
             </label>
@@ -121,7 +121,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               id="gender"
               name="gender"
               defaultValue={patient.gender || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             >
               <option value="">Non spécifié</option>
               <option value="Homme">Homme</option>
@@ -134,7 +134,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
           <div>
             <label
               htmlFor="phone"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Téléphone
             </label>
@@ -143,14 +143,14 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="phone"
               type="tel"
               defaultValue={patient.phone || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
               placeholder="+213 5XX XX XX XX"
             />
           </div>
           <div>
             <label
               htmlFor="email"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Email
             </label>
@@ -159,10 +159,10 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="email"
               type="email"
               defaultValue={patient.email || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
             {fieldErrors?.email && (
-              <p className="mt-1 text-xs text-red-500">
+              <p className="mt-1 text-xs text-destructive">
                 {fieldErrors.email[0]}
               </p>
             )}
@@ -172,7 +172,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         <div>
           <label
             htmlFor="address"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Adresse
           </label>
@@ -181,14 +181,14 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
             name="address"
             type="text"
             defaultValue={patient.address || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
 
         <div>
           <label
             htmlFor="wilayaCode"
-            className="block text-sm font-medium text-cool-700"
+            className="block text-sm font-medium text-foreground"
           >
             Wilaya
           </label>
@@ -196,7 +196,7 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
             id="wilayaCode"
             name="wilayaCode"
             defaultValue={patient.wilayaCode || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="">Sélectionner une wilaya</option>
             {WILAYAS.map((w) => (
@@ -208,15 +208,15 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">
           Contact d&apos;urgence
         </h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label
               htmlFor="emergencyContact"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Contact
             </label>
@@ -225,13 +225,13 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="emergencyContact"
               type="text"
               defaultValue={patient.emergencyContact || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
           <div>
             <label
               htmlFor="emergencyPhone"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Téléphone
             </label>
@@ -240,19 +240,19 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="emergencyPhone"
               type="tel"
               defaultValue={patient.emergencyPhone || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">Assurance</h2>
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Assurance</h2>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label
               htmlFor="insuranceProvider"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               Mutuelle
             </label>
@@ -261,13 +261,13 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="insuranceProvider"
               type="text"
               defaultValue={patient.insuranceProvider || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
           <div>
             <label
               htmlFor="insuranceNumber"
-              className="block text-sm font-medium text-cool-700"
+              className="block text-sm font-medium text-foreground"
             >
               N° d&apos;adhérent
             </label>
@@ -276,21 +276,21 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
               name="insuranceNumber"
               type="text"
               defaultValue={patient.insuranceNumber || ""}
-              className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+              className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
             />
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-cool-900">Notes</h2>
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Notes</h2>
         <div>
           <textarea
             id="notes"
             name="notes"
             rows={3}
             defaultValue={patient.notes || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
       </div>
@@ -299,13 +299,13 @@ export function PatientEditForm({ patient }: PatientEditFormProps) {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending ? "Enregistrement..." : "Enregistrer"}
         </button>
         <a
           href={`/patients/${patient.id}`}
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           Annuler
         </a>

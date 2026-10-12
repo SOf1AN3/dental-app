@@ -53,7 +53,7 @@ interface PatientResult {
 }
 
 const inputClassName =
-  "mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean";
+  "mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none";
 
 function emptyLineItem(): PrescriptionLineItem {
   return {
@@ -279,13 +279,13 @@ export function PrescriptionEditor({
           </aside>
         )}
 
-        <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-cool-900">
+        <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-foreground">
             Informations de l&apos;ordonnance
           </h2>
 
           {generalError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+            <div className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
               {generalError}
             </div>
           )}
@@ -298,20 +298,20 @@ export function PrescriptionEditor({
 
           {fixedPatient ? (
             <div>
-              <label className="block text-sm font-medium text-cool-700">
+              <label className="block text-sm font-medium text-foreground">
                 Patient *
               </label>
-              <div className="mt-1 rounded-lg border border-cool-200 bg-cool-100 px-3 py-2 text-sm text-cool-700">
+              <div className="mt-1 rounded-lg border border-input bg-muted px-3 py-2 text-sm text-foreground">
                 {selected ? `${selected.lastName} ${selected.firstName}` : "—"}
               </div>
               <input type="hidden" name="patientId" value={selected?.id || ""} />
               {fieldErrors?.patientId && (
-                <p className="mt-1 text-xs text-red-500">{fieldErrors.patientId[0]}</p>
+                <p className="mt-1 text-xs text-destructive">{fieldErrors.patientId[0]}</p>
               )}
             </div>
           ) : (
             <div ref={containerRef} className="relative">
-              <label htmlFor="patientSearch" className="block text-sm font-medium text-cool-700">
+              <label htmlFor="patientSearch" className="block text-sm font-medium text-foreground">
                 Patient *
               </label>
               <input
@@ -327,10 +327,10 @@ export function PrescriptionEditor({
               />
               <input type="hidden" name="patientId" value={selected?.id || ""} />
               {fieldErrors?.patientId && (
-                <p className="mt-1 text-xs text-red-500">{fieldErrors.patientId[0]}</p>
+                <p className="mt-1 text-xs text-destructive">{fieldErrors.patientId[0]}</p>
               )}
               {open && results.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-cool-200 bg-white dark:bg-cool-100 shadow-lg max-h-48 overflow-y-auto">
+                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border-card bg-card shadow-lg max-h-48 overflow-y-auto">
                   {results.map((p) => (
                     <li
                       key={p.id}
@@ -348,7 +348,7 @@ export function PrescriptionEditor({
           {sessionId && <input type="hidden" name="sessionId" value={sessionId} />}
 
           <div>
-            <label htmlFor="notes" className="block text-sm font-medium text-cool-700">
+            <label htmlFor="notes" className="block text-sm font-medium text-foreground">
               Notes
             </label>
             <textarea
@@ -365,7 +365,7 @@ export function PrescriptionEditor({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-cool-700 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Articles
             </label>
             <PrescriptionLineItems
@@ -383,7 +383,7 @@ export function PrescriptionEditor({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+            className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             {pending
               ? sessionId
@@ -400,14 +400,14 @@ export function PrescriptionEditor({
           {id && (
             <Link
               href={`/prescriptions/${id}`}
-              className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+              className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
             >
               Voir l&apos;ordonnance
             </Link>
           )}
           <Link
             href="/prescriptions"
-            className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+            className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Annuler
           </Link>
@@ -415,12 +415,12 @@ export function PrescriptionEditor({
       </form>
 
       <div className="hidden lg:block lg:sticky lg:top-24 self-start">
-        <p className="mb-2 text-xs font-medium text-cool-500 uppercase tracking-wider">
+        <p className="mb-2 text-xs font-medium text-muted-fg uppercase tracking-wider">
           Aperçu A5
         </p>
         <div ref={previewRef} className="w-full">
           <div
-            className="overflow-hidden rounded-lg border border-cool-200 shadow-lg"
+            className="overflow-hidden rounded-lg border border-border-card shadow-lg"
             style={{ width: A5_SHEET_WIDTH_PX * scale, height: A5_SHEET_HEIGHT_PX * scale }}
           >
             <div

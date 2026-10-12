@@ -133,9 +133,9 @@ export function AppointmentForm({
 
   return (
     <form action={action} className="max-w-xl space-y-6">
-      <div className="rounded-xl border border-cool-200 bg-white dark:bg-cool-100 p-6 space-y-4">
+      <div className="rounded-xl border border-border-card bg-card p-6 space-y-4">
         {generalError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400">
+          <div className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
             {generalError}
             {conflict && (
               <div className="mt-1">
@@ -147,7 +147,7 @@ export function AppointmentForm({
         )}
 
         <div>
-          <label htmlFor="patientId" className="block text-sm font-medium text-cool-700">Patient *</label>
+          <label htmlFor="patientId" className="block text-sm font-medium text-foreground">Patient *</label>
           <select
             id="patientId" name="patientId" required
             value={patientId}
@@ -156,18 +156,18 @@ export function AppointmentForm({
               setSlot("");
               setSlots([]);
             }}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="">Sélectionner un patient</option>
             {patients.map((p) => (
               <option key={p.id} value={p.id}>{p.lastName} {p.firstName}</option>
             ))}
           </select>
-          {fieldErrors?.patientId && <p className="mt-1 text-xs text-red-500">{fieldErrors.patientId[0]}</p>}
+          {fieldErrors?.patientId && <p className="mt-1 text-xs text-destructive">{fieldErrors.patientId[0]}</p>}
         </div>
 
         <div>
-          <label htmlFor="dentistId" className="block text-sm font-medium text-cool-700">Praticien</label>
+          <label htmlFor="dentistId" className="block text-sm font-medium text-foreground">Praticien</label>
           <select
             id="dentistId" name="dentistId"
             value={dentistId}
@@ -176,18 +176,18 @@ export function AppointmentForm({
               setSlot("");
               setSlots([]);
             }}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="">— Aucun praticien —</option>
             {dentists.map((d) => (
               <option key={d.id} value={d.id}>{d.name || "—"}{d.role === "owner" ? " (Propriétaire)" : ""}</option>
             ))}
           </select>
-          {fieldErrors?.dentistId && <p className="mt-1 text-xs text-red-500">{fieldErrors.dentistId[0]}</p>}
+          {fieldErrors?.dentistId && <p className="mt-1 text-xs text-destructive">{fieldErrors.dentistId[0]}</p>}
         </div>
 
         <div>
-          <label htmlFor="date" className="block text-sm font-medium text-cool-700">Date *</label>
+          <label htmlFor="date" className="block text-sm font-medium text-foreground">Date *</label>
           <ScheduleDatePicker
             id="date"
             ariaLabel="Date"
@@ -208,10 +208,10 @@ export function AppointmentForm({
         </div>
 
         <div>
-          <label htmlFor="startTime" className="block text-sm font-medium text-cool-700">Début *</label>
+          <label htmlFor="startTime" className="block text-sm font-medium text-foreground">Début *</label>
           <div className="mt-1">
             {loadingSlots ? (
-              <p className="text-xs text-cool-500">Chargement des créneaux...</p>
+              <p className="text-xs text-muted-fg">Chargement des créneaux...</p>
             ) : displaySlots.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {displaySlots.map((s) => (
@@ -222,7 +222,7 @@ export function AppointmentForm({
                     className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
                       slot === s
                         ? "border-cerulean bg-cerulean text-white"
-                        : "border-cool-200 bg-white dark:bg-cool-100 text-cool-700 hover:bg-cool-50"
+                        : "border-border-input bg-card text-foreground hover:bg-muted"
                     }`}
                   >
                     {formatSlotTime(s, timezone)}
@@ -230,21 +230,21 @@ export function AppointmentForm({
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-cool-400">Aucun créneau disponible pour cette sélection</p>
+              <p className="text-xs text-muted-fg">Aucun créneau disponible pour cette sélection</p>
             )}
           </div>
-          {fieldErrors?.startTime && <p className="mt-1 text-xs text-red-500">{fieldErrors.startTime[0]}</p>}
+          {fieldErrors?.startTime && <p className="mt-1 text-xs text-destructive">{fieldErrors.startTime[0]}</p>}
         </div>
 
         <input type="hidden" name="startTime" value={slot} />
         <input type="hidden" name="endTime" value={endIso} />
 
         <div>
-          <label htmlFor="type" className="block text-sm font-medium text-cool-700">Type</label>
+          <label htmlFor="type" className="block text-sm font-medium text-foreground">Type</label>
           <select
             id="type" name="type"
             defaultValue={appointment?.type || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           >
             <option value="">Sélectionner un type</option>
             {APPOINTMENT_TYPES.map((t) => (
@@ -254,11 +254,11 @@ export function AppointmentForm({
         </div>
 
         <div>
-          <label htmlFor="notes" className="block text-sm font-medium text-cool-700">Notes</label>
+          <label htmlFor="notes" className="block text-sm font-medium text-foreground">Notes</label>
           <textarea
             id="notes" name="notes" rows={3}
             defaultValue={appointment?.notes || ""}
-            className="mt-1 block w-full rounded-lg border border-cool-200 bg-cool-50 px-3 py-2 text-sm focus:border-cerulean focus:outline-none focus:ring-1 focus:ring-cerulean"
+            className="mt-1 block w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
           />
         </div>
       </div>
@@ -267,7 +267,7 @@ export function AppointmentForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary-light disabled:opacity-50 transition-colors"
+          className="rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           {pending
             ? (isEditing ? "Enregistrement..." : "Création...")
@@ -275,7 +275,7 @@ export function AppointmentForm({
         </button>
         <a
           href="/appointments"
-          className="rounded-lg border border-cool-200 px-6 py-2.5 text-sm font-medium text-cool-600 hover:bg-cool-50 transition-colors"
+          className="rounded-lg border border-border-input px-6 py-2.5 text-sm font-medium text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           Annuler
         </a>
