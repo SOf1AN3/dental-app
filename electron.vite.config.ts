@@ -4,8 +4,30 @@ import { defineConfig } from 'electron-vite'
 
 const nodeBuiltins: string[] = builtinModules.filter((name) => !name.startsWith('_'))
 
-/** `electron` + modules natifs Node.js (avec et sans préfixe `node:`). */
-const externals: string[] = ['electron', ...nodeBuiltins, ...nodeBuiltins.map((name) => `node:${name}`)]
+/**
+ * `electron` + modules natifs Node.js (avec et sans préfixe `node:`), plus les
+ * paquets laissés en `require()` résolu au runtime :
+ *
+ * - **`embedded-postgres`** est **ESM** et effectue des `import('…')` littéraux
+ *   vers ses `optionalDependencies` par plateforme (`@embedded-postgres/darwin-*`,
+ *   `linux-*`, …) qui **ne sont pas installées** ici → Rollup échouerait dès que
+ *   `electron/db/embedded-pg.ts` entre dans le graphe d'imports (étape 2.2).
+ *   Il résout en plus ses binaires via `import.meta.url`, faux une fois converti
+ *   en CJS par le format `main` ;
+ * - **`@embedded-postgres/windows-x64`** : binaires natifs, jamais bundlés ;
+ * - **`postgres`** : driver consommé par `embedded-pg.ts`, laissé externe pour
+ *   le même cycle de résolution au runtime.
+ *
+ * `electron-log` et `zod` restent **bundlés** (comportement inchangé).
+ */
+const externals: string[] = [
+  'electron',
+  ...nodeBuiltins,
+  ...nodeBuiltins.map((name) => `node:${name}`),
+  'embedded-postgres',
+  'postgres',
+  '@embedded-postgres/windows-x64',
+]
 
 /**
  * Configuration electron-vite.

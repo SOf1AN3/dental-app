@@ -106,8 +106,13 @@ function delay(ms: number): Promise<void> {
   })
 }
 
-/** Port : `process.env.PORT ? Number(...) : 3000` (avec garde-fou sur la valeur). */
-function resolvePort(): number {
+/**
+ * Port du serveur Next.js — **source unique** partagée avec `electron/env.ts`
+ * (`buildNextEnv`) : `AUTH_URL`/`PORT` de l'enfant doivent concorder avec le port
+ * réellement lancé ici, sinon l'origine servie et l'origine déclarée à NextAuth
+ * divergent (cookies `__Secure-` rejetés, redirects refusés).
+ */
+export function resolveNextPort(): number {
   const raw = process.env.PORT
   if (raw === undefined || raw === '') {
     return DEFAULT_PORT
@@ -388,8 +393,12 @@ async function probeReuse(url: string): Promise<ReuseProbeOutcome> {
  * fichier) : on remonte d'abord depuis le bundle compilé
  * (`<racine>/dist-electron/main/main.js` → deux niveaux au-dessus), puis on
  * valide la présence d'un `package.json`.
+ *
+ * Exportée : `electron/env.ts` (`buildNextEnv`) s'en sert pour `<racine>/uploads`
+ * (`UPLOAD_DIR` dev) — une racine divergente écrirait les pièces jointes ailleurs
+ * que le serveur ne les lit.
  */
-function resolveDevProjectRoot(): string {
+export function resolveDevProjectRoot(): string {
   const candidates = [path.resolve(__dirname, '..', '..'), app.getAppPath(), process.cwd()]
   for (const candidate of candidates) {
     if (existsSync(path.join(candidate, 'package.json'))) {
@@ -590,7 +599,7 @@ function createHandle(state: ChildState | null, url: string, port: number, owned
  * émet alors **DEP0190** (« args … not escaped, only concatenated ») si on lui
  * passe un tableau d'`args`. On construit donc une ligne de commande unique, dont
  * tous les fragments sont des constantes ou des entiers déjà validés par
- * `resolvePort()` (`-p` reçoit forcément un entier 1-65535) : aucune injection
+ * `resolveNextPort()` (`-p` reçoit forcément un entier 1-65535) : aucune injection
  * n'est possible. Les lancements sans `shell` (standalone) gardent le tableau d'args.
  */
 function spawnChild(spec: LaunchSpec): ChildProcess {
@@ -706,12 +715,25 @@ function assertOwnedOriginConsistent(url: string, derivedUrl: string, port: numb
   )
 }
 
+/** Options de `startNextServer()`. */
+export interface StartNextServerOptions {
+  /**
+   * Variables ajoutées à l'environnement du processus enfant **en complément**
+   * de `process.env` (jamais en remplacement) : `{ ...spec.env, ...env }`.
+   * Fournies par `electron/env.ts` (`buildNextEnv`) : `DATABASE_URL`,
+   * `AUTH_SECRET`, `AUTH_URL`, `HOSTNAME`, `PORT`, `NODE_ENV`, `UPLOAD_DIR`.
+   * Ignorée si le serveur est **réutilisé** (aucun enfant à équiper) — un
+   * avertissement en est alors journalisé.
+   */
+  readonly env?: NodeJS.ProcessEnv
+}
+
 /**
  * Point d'entrée : démarre (ou réutilise) le serveur Next.js.
  * Rejette si le processus enfant sort avant d'être prêt, ou en cas de timeout.
  */
-export async function startNextServer(): Promise<NextServerHandle> {
-  const port = resolvePort()
+export async function startNextServer(options: StartNextServerOptions = {}): Promise<NextServerHandle> {
+  const port = resolveNextPort()
   // `localhost` (et non `127.0.0.1`) : c'est l'origine de `START_URL` dans
   // `window.ts`, que cette étape ne doit pas modifier. L'écoute, elle, reste
   // strictement bouclage via `HOSTNAME`/`-H`.
@@ -720,6 +742,12 @@ export async function startNextServer(): Promise<NextServerHandle> {
 
   const reuse = await probeReuse(url)
   if (reuse.verdict === 'nextjs') {
+    if (options.env !== undefined) {
+      // Aucun enfant lancé : l'env injecté n'a aucun effet (le serveur réutilisé
+      // garde sa propre configuration) — on le dit explicitement plutôt que de
+      // laisser croire que `DATABASE_URL`/`AUTH_SECRET` ont été appliqués.
+      log.info('[next] serveur réutilisé : env injecté ignoré (aucun processus enfant lancé)')
+    }
     log.info(`[next] serveur Next.js déjà actif sur ${redactSecrets(url)} : réutilisation (aucun processus lancé)`)
     // Réutilisé : l'URL probeée est celle qui a répondu — c'est elle qui devient
     // le handle, **port réel compris** (`reusePortOf`) : le port du handle doit
@@ -748,7 +776,20 @@ export async function startNextServer(): Promise<NextServerHandle> {
   // configuration explicite — jamais une URL morte dans `handle.url`.
   assertOwnedOriginConsistent(url, derivedUrl, port)
 
-  const spec = process.env.ELECTRON_DEV === '1' ? devLaunchSpec(port) : standaloneLaunchSpec(port)
+  const baseSpec = process.env.ELECTRON_DEV === '1' ? devLaunchSpec(port) : standaloneLaunchSpec(port)
+  // Fusion **en complément** de `baseSpec.env` (qui contient déjà `process.env`,
+  // plus `PORT`/`HOSTNAME`/`NODE_ENV` en prod) : les clés injectées l'emportent,
+  // le reste de l'environnement parent est conservé tel quel.
+  const spec: LaunchSpec =
+    options.env === undefined ? baseSpec : { ...baseSpec, env: { ...baseSpec.env, ...options.env } }
+  if (options.env !== undefined) {
+    // Noms de clés **seulement** : les valeurs (DATABASE_URL, AUTH_SECRET, …)
+    // ne journalisent jamais.
+    log.info(
+      `[next] ${Object.keys(options.env).length} variable(s) injectée(s) dans l'enfant : ` +
+        `${Object.keys(options.env).join(', ')} (valeurs jamais journalisées)`,
+    )
+  }
   log.info(`[next] lancement de ${spec.label} : ${spec.command} ${spec.args.join(' ')} (port ${port})`)
 
   const child = spawnChild(spec)
