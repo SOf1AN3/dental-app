@@ -1,0 +1,1 @@
+ALTER TABLE "login_attempt" ADD COLUMN "denied_reason" text;

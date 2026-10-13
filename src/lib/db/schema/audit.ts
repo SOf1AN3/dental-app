@@ -40,6 +40,12 @@ export const loginAttempts = pgTable("login_attempt", {
   email: text("email").notNull(),
   ipAddress: text("ip_address"),
   successful: boolean("successful").notNull().default(false),
+  // Motif de refus **malgré** `successful = true` : un login dont le mot de
+  // passe est valide mais refusé par la gate de confiance d'appareil est
+  // journalisé tel quel (`device-trust:<raison>`), afin de rester distinguable
+  // d'un vrai succès à la forensique / à l'export propriétaire. Nullable et
+  // sans défaut : strictement additive, les lignes historiques restent NULL.
+  deniedReason: text("denied_reason"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull()
 }, (table) => [
   index("idx_login_attempts_email_ip_time").on(table.email, table.ipAddress, table.createdAt)

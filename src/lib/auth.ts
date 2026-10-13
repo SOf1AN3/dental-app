@@ -88,27 +88,38 @@ let lastAttemptPurgeAt = 0;
 // ---------------------------------------------------------------------------
 /** `TRUST_DAYS` : durée par défaut de la fenêtre de confiance (jours). */
 const TRUST_DAYS_DEFAULT = 30;
+/** Bornes de `TRUST_DAYS` — alignées sur le plafond refusé par `electron/env.ts`. */
+const TRUST_DAYS_MIN = 1;
+const TRUST_DAYS_MAX = 3650;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 /** Avertissement « confiance non opposable » émis au plus une fois par process. */
 let trustNotEnforceableWarned = false;
 
 /**
- * Durée de la fenêtre de confiance en millisecondes. `TRUST_DAYS` absent →
- * 30 j ; invalide (non entier, nul ou négatif) → repli sur 30 j **avec
- * journalisation** : la fenêtre reste bornée, et le desktop rejette déjà une
- * valeur invalide au démarrage (`electron/env.ts`), ce qui rend ce repli
- * inatteignable hors configuration bricolée à la main.
+ * Durée de la fenêtre de confiance en millisecondes.
+ *
+ * - `TRUST_DAYS` **absente** (ou vide) → 30 j (défaut assumé, documenté).
+ * - `TRUST_DAYS` **présente** → elle doit être un entier dans `[1, 3650]`
+ *   (le plafond que `electron/env.ts` refuse déjà au démarrage). Hors bornes
+ *   (`NaN`, `0`, négatif, non entier, `> 3650`) → `null` : la gate de
+ *   confiance en déduit un **refus** du login.
+ *
+ * Aucun repli silencieux sur 30 j : un `TRUST_DAYS` invalide signale une
+ * configuration incohérente, et la doctrine du dossier interdit de masquer
+ * cette incohérence derrière une valeur par défaut (fail-closed).
+ * La valeur retournée n'est jamais journalisée (`TRUST_DAYS` reste une
+ * donnée de configuration, seuls la décision et la raison sont tracées).
  */
-function resolveTrustTtlMs(raw: string | undefined): number {
+function resolveTrustTtlMs(raw: string | undefined): number | null {
   if (raw === undefined || raw.trim() === "") {
     return TRUST_DAYS_DEFAULT * MS_PER_DAY;
   }
   const days = Number(raw);
-  if (!Number.isInteger(days) || days < 1) {
+  if (!Number.isInteger(days) || days < TRUST_DAYS_MIN || days > TRUST_DAYS_MAX) {
     console.warn(
-      `[auth] TRUST_DAYS invalide : repli sur ${TRUST_DAYS_DEFAULT} j.`,
+      `[auth] TRUST_DAYS hors bornes [${TRUST_DAYS_MIN}, ${TRUST_DAYS_MAX}] j : refus du login (aucun repli sur ${TRUST_DAYS_DEFAULT} j).`,
     );
-    return TRUST_DAYS_DEFAULT * MS_PER_DAY;
+    return null;
   }
   return days * MS_PER_DAY;
 }
@@ -126,7 +137,8 @@ interface DeviceTrustGateParams {
 
 /**
  * Applique le mode D-A pour un login dont le mot de passe est déjà validé :
- * en ligne → renouvelle la confiance (30 j) puis autorise ; hors-ligne →
+ * en ligne → renouvelle la confiance (fenêtre `TRUST_DAYS`, 30 j par défaut,
+ * bornée à `[1, 3650]`) puis autorise ; hors-ligne →
  * n'autorise que si la fenêtre ouverte reste valide. `grantTrust` ne lève
  * jamais une révocation : un poste révoqué est donc refusé même en ligne,
  * jusqu'à ce que le serveur central (étape 5) lève la coupure.
@@ -134,6 +146,12 @@ interface DeviceTrustGateParams {
 async function authorizeDeviceTrust(
   params: DeviceTrustGateParams,
 ): Promise<DeviceTrustGateResult> {
+  // Bornes invalides → refus, avant tout accès réseau ou base : un
+  // `TRUST_DAYS` hors `[1, 3650]` ne doit jamais être masqué par un défaut.
+  const ttlMs = resolveTrustTtlMs(process.env.TRUST_DAYS);
+  if (ttlMs === null) {
+    return { ok: false, reason: "config:TRUST_DAYS-hors-bornes" };
+  }
   const repo = createDeviceTrustRepo(db);
   const now = new Date();
   if (await isCentralReachable(params.syncBaseUrl)) {
@@ -144,7 +162,7 @@ async function authorizeDeviceTrust(
         userId: params.userId,
         name: os.hostname(),
         os: process.platform,
-        ttlMs: resolveTrustTtlMs(process.env.TRUST_DAYS),
+        ttlMs,
       },
       now,
     );
@@ -155,7 +173,6 @@ async function authorizeDeviceTrust(
     ? { ok: true }
     : { ok: false, reason: `hors-ligne:${decision.reason}` };
 }
-
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -276,17 +293,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           valid = await verifyPassword(credentials.password as string, user.passwordHash);
         }
 
-        await db.insert(schema.loginAttempts).values({
-          email,
-          ipAddress,
-          successful: valid,
-        });
-
-        if (!user || !valid) return null;
+        if (!user || !valid) {
+          await db.insert(schema.loginAttempts).values({
+            email,
+            ipAddress,
+            successful: false,
+          });
+          return null;
+        }
 
         // Contrôle de confiance d'appareil (étape 3.2, mode D-A) — atteint
         // **uniquement** après une vérification bcrypt réussie. `DEVICE_ID`
         // absent (web Vercel, dev local) → comportement strictement inchangé.
+        //
+        // `deniedReason` : positionné uniquement quand la gate refuse un
+        // login dont le mot de passe est POURTANT valide. Ce refus est
+        // journalisé avec `successful = true` + `denied_reason = "device-trust:<raison>"`
+        // — et NON comme un échec — car ce n'est PAS un signal de
+        // brute-force : le candidat connaît le mot de passe. L'écrire comme
+        // un échec ferait grimper le compteur d'échecs du compte et
+        // déclencherait le backoff pour un utilisateur légitime (5 tentatives
+        // hors-ligne sans confiance suffiraient à le pénaliser). La colonne
+        // `denied_reason` porte donc seule l'information de refus, lisible en
+        // forensique et à l'export propriétaire.
+        let deniedReason: string | null = null;
+
         const deviceId = process.env.DEVICE_ID;
         if (deviceId) {
           const syncBaseUrl = process.env.SYNC_BASE_URL;
@@ -309,25 +340,39 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
                 userId: user.id,
               });
               if (!trust.ok) {
+                deniedReason = `device-trust:${trust.reason}`;
                 console.warn(
                   `[auth] login refusé (device=${deviceId}, userId=${user.id}, raison=${trust.reason}).`,
                 );
-                return null;
               }
             } catch (error) {
               // Échec fermé : une erreur d'infrastructure (table `device`
               // injoignable…) ne doit jamais laisser entrer un poste dont la
-              // confiance n'a pas pu être vérifiée. Message seul, jamais de
+              // confiance n'a pas pu être vérifiée. Seul `error.name` est
+              // journalisé : le `message` d'une erreur pg peut contenir
+              // hôte/port (`connect ECONNREFUSED 127.0.0.1:5433`) — jamais de
               // détail de connexion.
+              deniedReason = "device-trust:infra";
               console.error(
                 `[auth] login refusé (device=${deviceId}, userId=${user.id}, raison=infra: ${
-                  error instanceof Error ? error.message : String(error)
+                  error instanceof Error ? error.name : "unknown"
                 }).`,
               );
-              return null;
             }
           }
         }
+
+        // Une seule écriture, APRÈS la gate de confiance : le mot de passe
+        // étant validé, la ligne est `successful = true`, éventuellement
+        // qualifiée par `deniedReason` (cf. supra).
+        await db.insert(schema.loginAttempts).values({
+          email,
+          ipAddress,
+          successful: true,
+          deniedReason,
+        });
+
+        if (deniedReason !== null) return null;
 
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash, ...userWithoutPassword } = user;

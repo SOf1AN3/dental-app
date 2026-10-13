@@ -29,16 +29,25 @@ import { createDeviceTrustRepo } from "./device-trust-db";
  */
 
 async function isDeviceTableReachable(): Promise<boolean> {
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       db.execute(sql`select 1 from device limit 1`),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout connectivité")), 3000),
-      ),
+      new Promise<never>((_, reject) => {
+        probeTimer = setTimeout(
+          () => reject(new Error("timeout connectivité")),
+          3000,
+        );
+      }),
     ]);
     return true;
   } catch {
     return false;
+  } finally {
+    // Le timer doit être libéré dans TOUS les cas (réussite comme échec) :
+    // sans `clearTimeout`, la Promise perdue de la course retiendrait le
+    // process jusqu'à l'échéance des 3 s.
+    clearTimeout(probeTimer);
   }
 }
 
