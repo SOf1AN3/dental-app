@@ -14,3 +14,4 @@ export * from "./support";
 export * from "./drug-catalog";
 export * from "./relations";
 export * from "./device";
+export * from "./sync";

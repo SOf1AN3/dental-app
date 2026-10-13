@@ -13,7 +13,7 @@ export const users = pgTable("user", {
   // cette valeur à celle portée par le jeton et rejette la session si elles diffèrent,
   // ce qui révoque toutes les sessions existantes (strategy JWT, pas de session serveur).
   tokenVersion: integer("token_version").notNull().default(0),
-  // Réplication (tâche 4.1) : colones de curseur SEULEMENT — `password_hash`
+  // Réplication (tâche 4.1) : colonnes de curseur SEULEMENT — `password_hash`
   // n'est jamais répliqué. `rev` = version MONOTONE attribuée côté serveur,
   // curseur de pull (updated_at, id) — cette table n'a pas de clinic_id.
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
