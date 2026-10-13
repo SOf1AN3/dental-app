@@ -275,7 +275,7 @@ Migration unique à générer (**`src/lib/db/schema/sync.ts` + migration SQL**) 
 ```sql
 -- sur CHAQUE table sync-able (identique partout) :
 ALTER TABLE <t> ADD COLUMN updated_at  timestamptz NOT NULL DEFAULT now();  -- + $onUpdate Drizzle
-ALTER TABLE <t> ADD COLUMN device_id   uuid;          -- dernier auteur
+ALTER TABLE <t> ADD COLUMN device_id   text;              -- dernier auteur (TEXT, comme device.id — aucun type uuid dans ce projet)
 ALTER TABLE <t> ADD COLUMN rev         bigint NOT NULL DEFAULT 0;          -- version monotone
 ALTER TABLE <t> ADD COLUMN deleted_at  timestamptz;                         -- TOMBSTONE
 CREATE INDEX <t>_sync_cursor ON <t> (clinic_id, updated_at, id);            -- curseur de pull
