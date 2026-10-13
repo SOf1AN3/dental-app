@@ -148,6 +148,13 @@
       "when": 1791924618983,
       "tag": "0020_hesitant_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791929279441,
+      "tag": "0021_fuzzy_inhumans",
+      "breakpoints": true
     }
   ]
 }

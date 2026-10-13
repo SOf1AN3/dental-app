@@ -52,6 +52,12 @@ export const devices = pgTable(
     lastSyncAt: timestamp("last_sync_at", { mode: "date" }),
     trustExpiresAt: timestamp("trust_expires_at", { mode: "date" }),
     trustRevokedAt: timestamp("trust_revoked_at", { mode: "date" }),
+    // Tâche 5.2a — jeton d'appareil du serveur central (authentification sync).
+    // SHA-256 du jeton d'appareil — JAMAIS répliqué (`device` est exclue du
+    // registre `TABLE_REGISTRY` de `src/lib/sync/protocol.ts`), JAMAIS journalisé.
+    // Le jeton en clair n'est renvoyé qu'une fois à l'émission ; seul son hash
+    // est stocké. Valide tant que `trustExpiresAt` court et `trustRevokedAt` est nul.
+    tokenHash: text("token_hash"),
     rev: bigint("rev", { mode: "number" }).default(0).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" })
       .defaultNow()
