@@ -607,8 +607,10 @@ extraResources:
   2.1 Promouvoir embedded-postgres en dependencies + vérifier binaires windows-x64
   2.2 electron/db/embedded-pg.ts (init, port Q-5, start/stop, safeStorage)
   2.3 electron/env.ts (DATABASE_URL, AUTH_SECRET, UPLOAD_DIR)
-  2.4 src/lib/db/desktop-db.ts (client lazy — interdiction d'importer db.ts)
   2.5 Appliquer les 17 migrations drizzle/*.sql sur le cluster vierge + T-8
+  [2.4 src/lib/db/desktop-db.ts REPORTÉ EN ÉTAPE 4 : ce client Drizzle lazy n'a
+   de consommateur qu'avec le moteur de sync — le livrer ici produirait du
+   code mort (règle de revue).]
       ✅ FAIT SI : l'app tourne entièrement offline avec données persistées après reboot.
 
 ÉTAPE 3 — AUTH LOCALE (D-8)
