@@ -596,8 +596,12 @@ extraResources:
   1.4 electron/server/next.ts : next dev en dev / standalone en prod
   1.5 next.config.ts : output conditionnel par NEXT_OUTPUT
   1.6 Épingler la version npm (`packageManager` dans package.json) — le bloc
-      `allowScripts` n'est honored que par npm ≥ 11.6 (revue 1.2, point mineur)
+      `allowScripts` n'est honoré que par npm ≥ 11.6 (revue 1.2, point mineur)
       ✅ FAIT SI : l'app Electron ouvre l'app Next existante en dev, sans régression web.
+
+  [1.1 à 1.6 FAITES — builds vérifiés : web 79 routes OK, standalone OK,
+   tsc 0 erreur. Le lancement spawn→prêt→loadURL reste à valider en conditions
+   réelles dès que le `next dev` en cours sur le port 3000 sera arrêté.]
 
 ÉTAPE 2 — BASE LOCALE
   2.1 Promouvoir embedded-postgres en dependencies + vérifier binaires windows-x64
@@ -650,6 +654,14 @@ extraResources:
   8.3 storage-panel.tsx + indicateur « nécessite connexion »   [conditionné par SEC-B05]
 
 ÉTAPE 9 — PACKAGING (D-7)
+  9.0 BLOCAGE IDENTIFIÉ EN REVUE 1.5 : le build standalone embarque `.env`
+      (secrets), `pgdata/` (PHI + postmaster.pid), `uploads/` (PHI), `src/`,
+      `audit/` — tracé NFT élargi par src/app/api/files/[...key]/route.ts.
+      → EXCLURE impérativement `.env*`, `pgdata/`, `uploads/`, `src/`, `audit/`,
+        `*.md` via les patterns `files`/`extraResources` d'electron-builder,
+      → PURGER le dossier standalone avant packaging,
+      → copier le datadir PG UNIQUEMENT après arrêt complet du cluster,
+      → jamais de secrets dans l'artefact livré au client.
   9.1 scripts/build-desktop.ts + electron-builder.yml (NSIS, asarUnpack)
   9.2 Icônes (build/icon.ico — aucune n'existe)
   9.3 electron-updater + hébergement releases (Q-1) + certificat (Q-2)
