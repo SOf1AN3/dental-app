@@ -4,6 +4,9 @@ import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_pro
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
+// Source de vérité unique de l'origine : `window.ts` ne fait qu'exporter une
+// constante (aucun effet de bord au chargement — voir `resolveServerUrl`).
+import { START_URL } from '../window'
 
 /**
  * Cycle de vie du serveur Next.js embarqué (PLAN-ELECTRON §1.4 — tâche 1.4).
@@ -41,7 +44,14 @@ const LOOPBACK_HOSTNAME = '127.0.0.1'
 const DEFAULT_PORT = 3000
 
 const PROBE_INTERVAL_MS = 250
+/** Timeout du probe de **readiness** interne (`waitUntilReady`) : inchangé. */
 const PROBE_TIMEOUT_MS = 2_000
+/**
+ * Timeout du probe de **réutilisation** au démarrage : un `next dev` à froid
+ * dépasse largement 2 s — un délai trop court classerait un serveur sain en
+ * « non réactif » (ou, pire, en « libre » si l'erreur était mal classée).
+ */
+const REUSE_PROBE_TIMEOUT_MS = 8_000
 const DEV_READY_TIMEOUT_MS = 90_000
 const STANDALONE_READY_TIMEOUT_MS = 60_000
 const STOP_TIMEOUT_MS = 5_000
@@ -111,11 +121,17 @@ function resolvePort(): number {
 }
 
 const CREDENTIALS_IN_URL_PATTERN = /(\w+:\/\/[^/\s:@]+):([^@\s/]+)@/g
+// `["']?\s*[=:]\s*` : accepte `KEY=value`, `KEY: value` **et** les clés JSON
+// quotées (`"AUTH_SECRET": "valeur"`, `'TOKEN':'valeur'`) — sans quoi la valeur
+// partait en clair dans les logs à chaque ligne d'erreur de configuration.
+// La chaîne doublement quoteée gère les échappements (`"pa\"ss"`) via une
+// classe sans répétition imbriquée ambiguë → comportement linéaire (pas de ReDoS) :
+// `[^"\\]*` ne peut jamais revenir en arrière sur un `\` consommé par `\\.`.
 const SECRET_ASSIGNMENT_PATTERN =
-  /\b(DATABASE_URL|AUTH_SECRET|AUTH_SECRET_KEY|POSTGRES_PASSWORD|PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY)\b(\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi
+  /\b(DATABASE_URL|AUTH_SECRET|AUTH_SECRET_KEY|POSTGRES_PASSWORD|PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY)\b(["']?\s*[=:]\s*)("[^"\\]*(?:\\.[^"\\]*)*"|'[^']*'|\S+)/gi
 
 /** Jamais de secret dans les logs (ni en clair dans les messages d'erreur). */
-function redactSecrets(raw: string): string {
+export function redactSecrets(raw: string): string {
   return raw.replace(CREDENTIALS_IN_URL_PATTERN, '$1:***@').replace(SECRET_ASSIGNMENT_PATTERN, '$1$2***')
 }
 
@@ -171,6 +187,193 @@ async function probe(url: string): Promise<boolean> {
     return false
   } finally {
     clearTimeout(timer)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Détection de réutilisation (Next.js uniquement)                            */
+/* -------------------------------------------------------------------------- */
+
+/** Verdict du probe de réutilisation du port au démarrage. */
+type ReuseProbeResult =
+  /** Personne ne répond (refus de connexion prouvé) : on peut lancer. */
+  | 'free'
+  /** Un serveur **Next.js** répond : réutilisation sûre. */
+  | 'nextjs'
+  /** Un service **inconnu** (pas Next.js) occupe le port : refus de le charger. */
+  | 'foreign'
+  /** Le port **accepte** les connexions mais n'a pas parlé HTTP dans le délai. */
+  | 'unresponsive'
+
+/**
+ * Verdict enrichi d'une cause honnête : le verdict seul (`foreign`) ne dit pas
+ * **pourquoi** le port est refusé, et le message de rejet doit distinguer
+ * (a) une redirection sortante (IdP externe) d'(b) une réponse sans marqueur
+ * Next.js et d'(c) un service non réactif — ne pas amalgamer en « service inconnu ».
+ */
+interface ReuseProbeOutcome {
+  readonly verdict: ReuseProbeResult
+  /** Description factuelle de la cause (vide pour `free` / `nextjs`). */
+  readonly detail: string
+}
+
+const PROBE_MAX_BODY_BYTES = 8_192
+const PROBE_REDIRECT_HOPS_MAX = 3
+const NEXTJS_HEADER_PREFIX = 'x-nextjs-'
+/** Marqueurs stables d'une page Next.js (App Router inclut `/_next/static/…`). */
+const NEXTJS_BODY_MARKERS = ['__NEXT_DATA__', '/_next/'] as const
+
+/** Marqueurs Next.js : en-tête `x-nextjs-*` ou marqueur dans le corps (échantillon). */
+function hasNextJsMarker(response: Response, bodySample: string): boolean {
+  for (const name of response.headers.keys()) {
+    if (name.toLowerCase().startsWith(NEXTJS_HEADER_PREFIX)) {
+      return true
+    }
+  }
+  return NEXTJS_BODY_MARKERS.some((marker) => bodySample.includes(marker))
+}
+
+/** Suit une redirection **même origine** uniquement ; sinon refus (`null`). */
+function sameOriginRedirect(location: string, base: URL): string | null {
+  try {
+    const target = new URL(location, base)
+    return target.origin === base.origin ? target.href : null
+  } catch {
+    return null
+  }
+}
+
+/** Échantillon de corps plafonné (un service étranger peut servir un flux illimité). */
+async function readBodySample(response: Response): Promise<string> {
+  const body = response.body
+  if (body === null) {
+    return ''
+  }
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let sample = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      if (value !== undefined) {
+        sample += decoder.decode(value, { stream: true })
+        if (sample.length >= PROBE_MAX_BODY_BYTES) {
+          break
+        }
+      }
+    }
+  } catch (error) {
+    // Un **abort** (timer du probe déclenché pendant la lecture du corps) n'est
+    // pas un corps tronqué : le re-jeter laisse le `catch` de `probeReuse()`
+    // classer `unresponsive` (« non réactif ») au lieu d'un diagnostic faux
+    // « aucun marqueur Next.js ».
+    const name = error instanceof Error ? error.name : ''
+    if (name === 'AbortError' || name === 'TimeoutError') {
+      throw error
+    }
+    // Corps tronqué ou invalide : l'échantillon déjà lu reste exploitable.
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+  return sample
+}
+
+/**
+ * Détecte si on peut réutiliser ce qui répond sur `url`.
+ *
+ * Seul un serveur **Next.js** (en-tête `x-nextjs-*` ou marqueur `/_next/`,
+ * `__NEXT_DATA__` dans le corps) est réutilisé : charger un service étranger
+ * (autre app Node, serveur de fichiers, …) exposerait un contenu inconnu.
+ * Les redirections internes (ex. redirect login du middleware) sont suivies,
+ * les redirections sortantes classent le port en « inconnu ».
+ *
+ * **Classification du `catch` (fail-safe, aucun défaut « libre »)** :
+ * | Cause                                   | Verdict        |
+ * |-----------------------------------------|----------------|
+ * | `AbortError` / `TimeoutError` (timeout) | `unresponsive` |
+ * | `ECONNREFUSED` / `ENOTFOUND` (cause)    | `free`         |
+ * | Tout le reste (ECONNRESET, protocole…)  | `foreign`      |
+ *
+ * Seul un **refus de connexion** prouve un port libre. Un timeout ou une erreur
+ * de protocole ne prouve rien : un service étranger lié sur `[::1]:3000` alors
+ * que notre enfant se lie sur `127.0.0.1:3000` démarre **sans EADDRINUSE**, et
+ * `http://localhost:3000` résout vers `::1` dans Chromium → contenu étranger
+ * chargé à l'origine exacte de l'app.
+ */
+async function probeReuse(url: string): Promise<ReuseProbeOutcome> {
+  let current = url
+  for (let hop = 0; hop <= PROBE_REDIRECT_HOPS_MAX; hop += 1) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort()
+    }, REUSE_PROBE_TIMEOUT_MS)
+    const startedAt = Date.now()
+    try {
+      const response = await fetch(current, { method: 'GET', redirect: 'manual', signal: controller.signal })
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location')
+        await response.body?.cancel().catch(() => undefined)
+        if (location === null) {
+          return {
+            verdict: 'foreign',
+            detail: `redirection HTTP ${response.status} sans en-tête Location sur ${redactSecrets(current)}`,
+          }
+        }
+        const next = sameOriginRedirect(location, new URL(current))
+        if (next === null) {
+          // (a) Redirection **sortante** : un Next redirigeant vers un IdP
+          // externe n'est pas « un service inconnu » — le dire honnêtement.
+          let target = location
+          try {
+            target = new URL(location, current).href
+          } catch {
+            // `location` illisible : on garde la valeur brute dans le message.
+          }
+          return {
+            verdict: 'foreign',
+            detail: `redirection sortante détectée vers ${redactSecrets(target)} (hors origine ${new URL(current).origin})`,
+          }
+        }
+        current = next
+        continue
+      }
+      const bodySample = await readBodySample(response)
+      if (hasNextJsMarker(response, bodySample)) {
+        return { verdict: 'nextjs', detail: '' }
+      }
+      // (b) Réponse HTTP valide mais sans aucun marqueur Next.js.
+      return {
+        verdict: 'foreign',
+        detail: `aucun marqueur Next.js détecté sur ${redactSecrets(current)} (réponse HTTP ${response.status})`,
+      }
+    } catch (error) {
+      // (c) Classification par cause — **jamais « libre » par défaut**.
+      const elapsedMs = Date.now() - startedAt
+      const name = error instanceof Error ? error.name : ''
+      if (name === 'AbortError' || name === 'TimeoutError') {
+        return {
+          verdict: 'unresponsive',
+          detail: `n'a pas répondu sous ${elapsedMs} ms`,
+        }
+      }
+      const code = (error as { cause?: { code?: string } }).cause?.code
+      if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
+        return { verdict: 'free', detail: '' }
+      }
+      return {
+        verdict: 'foreign',
+        detail: `protocole illisible (${code ?? (name === '' ? 'erreur inconnue' : name)}) : le service ne parle pas HTTP`,
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return {
+    verdict: 'foreign',
+    detail: `plus de ${PROBE_REDIRECT_HOPS_MAX} redirections internes consécutives sans marqueur Next.js`,
   }
 }
 
@@ -398,6 +601,111 @@ function spawnChild(spec: LaunchSpec): ChildProcess {
   return spawn(spec.command, [...spec.args], { ...options, shell: false })
 }
 
+/** Supprime les barres obliques finales (comparaison d'origines insensible au `/` final). */
+function normalizeOrigin(rawUrl: string): string {
+  return rawUrl.replace(/\/+$/, '')
+}
+
+/**
+ * **Origine** normalisée d'une URL (`scheme://host[:port]`), seule comparaison
+ * pertinente : `window.ts` whitelist **par origine**, un chemin (`/app`) ou un
+ * `/` final ne doit donc jamais faire échouer la comparaison.
+ * Repli sur `normalizeOrigin()` si l'URL est illisible (aucune exception propagée).
+ */
+function originOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).origin
+  } catch {
+    return normalizeOrigin(rawUrl)
+  }
+}
+
+/**
+ * Port **réellement servi** par une URL de réutilisation (composante `:port`,
+ * ou port par défaut du schéma) : le handle d'un serveur réutilisé doit
+ * refléter l'URL qui a répondu, pas la variable `PORT` — avec
+ * `ELECTRON_START_URL=http://localhost:4000` + `PORT=3000`, afficher 3000 serait
+ * un log mensonger. Repli sur `port` si l'URL est illisible (quasi impossible
+ * après un probe réussi).
+ */
+function reusePortOf(url: string, fallback: number): number {
+  try {
+    return Number(new URL(url).port || DEFAULT_PORT)
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Origine exposée au renderer.
+ *
+ * **Source de vérité unique** : `START_URL`, exporté par `window.ts`, qui construit
+ * déjà sa liste blanche `will-navigate` sur `ELECTRON_START_URL || http://localhost:3000`.
+ * On ne redéfinit **jamais** cette expression ici (divergence future impossible).
+ * `process.env.ELECTRON_START_URL` n'est consulté que pour sa **présence**, afin
+ * de distinguer (a) `PORT ≠ 3000` sans override — erreur de configuration
+ * **bloquante** — de (b) une divergence entre deux origines explicites
+ * (avertissement seul), sans double source de vérité.
+ *
+ * Si notre `handle.url` diverge, le premier `loadURL` passerait mais toute
+ * navigation suivante (redirect login, middleware) serait bloquée → écran blanc.
+ *
+ * **Sous-cas « `PORT ≠ 3000` + origines convergentes » impossible** : sans
+ * override, `window.ts` whitelist `http://localhost:3000` par défaut et
+ * `derivedUrl` est toujours `http://localhost:<port>` — les origines ne peuvent
+ * donc converger que si `port = 3000`. Tout `PORT ≠ 3000` sans
+ * `ELECTRON_START_URL` est **rejeté** par l'erreur actionnable ci-dessous : il
+ * n'existe aucun cas d'avertissement seul dans cette branche.
+ */
+function resolveServerUrl(derivedUrl: string, port: number): string {
+  const startUrl = START_URL
+  const hasOverride = process.env.ELECTRON_START_URL !== undefined && process.env.ELECTRON_START_URL !== ''
+  if (!hasOverride) {
+    const startOrigin = originOf(startUrl)
+    const derivedOrigin = originOf(derivedUrl)
+    if (port !== DEFAULT_PORT && startOrigin !== derivedOrigin) {
+      // Fail-fast **avant** le spawn : sans override, `window.ts` whitelist
+      // l'origine par défaut de `START_URL` alors que l'enfant écouterait sur un
+      // autre port → toute navigation suivante serait bloquée (écran blanc
+      // silencieux). Une erreur de configuration explicite vaut mieux.
+      throw new Error(
+        `PORT=${port} mais ELECTRON_START_URL n'est pas défini : la navigation serait bloquée ` +
+          `(window.ts whitelist ${startOrigin}, le serveur écouterait ${derivedOrigin}). ` +
+          `Définissez ELECTRON_START_URL=${derivedUrl} ou laissez PORT=${DEFAULT_PORT}.`,
+      )
+    }
+    return derivedUrl
+  }
+  if (originOf(startUrl) !== originOf(derivedUrl)) {
+    log.warn(
+      `[next] ELECTRON_START_URL (${redactSecrets(startUrl)}) diverge de l'origine dérivée de PORT (${derivedUrl}) : ` +
+        'la première fait foi (cohérence avec window.ts) — alignez PORT et ELECTRON_START_URL.',
+    )
+  }
+  return startUrl
+}
+
+/**
+ * Divergence `ELECTRON_START_URL` / `PORT` détectée **avant** le `spawn`.
+ *
+ * Notre enfant écoutera sur `derivedUrl` (où `waitUntilReady` prouve la
+ * disponibilité), or `window.ts` whitelist `START_URL` : charger l'une pendant
+ * que l'autre est prête laisserait `handle.url` pointer ailleurs que l'endroit
+ * réellement servi (URL morte en config périmée). Plutôt que de deviner, on
+ * rejette avec une erreur de configuration explicite.
+ */
+function assertOwnedOriginConsistent(url: string, derivedUrl: string, port: number): void {
+  if (originOf(url) === originOf(derivedUrl)) {
+    return
+  }
+  throw new Error(
+    `ELECTRON_START_URL (${redactSecrets(url)}) ne correspond pas au port ${port} (origine dérivée ${derivedUrl}) : ` +
+      'le serveur que nous lançons écouterait une autre origine que celle whitelistée par window.ts. ' +
+      `Utilisez l'origine dérivée http://localhost:${port} (ex. ELECTRON_START_URL=${derivedUrl}) ` +
+      `ou laissez PORT=${DEFAULT_PORT}.`,
+  )
+}
+
 /**
  * Point d'entrée : démarre (ou réutilise) le serveur Next.js.
  * Rejette si le processus enfant sort avant d'être prêt, ou en cas de timeout.
@@ -407,12 +715,38 @@ export async function startNextServer(): Promise<NextServerHandle> {
   // `localhost` (et non `127.0.0.1`) : c'est l'origine de `START_URL` dans
   // `window.ts`, que cette étape ne doit pas modifier. L'écoute, elle, reste
   // strictement bouclage via `HOSTNAME`/`-H`.
-  const url = `http://localhost:${port}`
+  const derivedUrl = `http://localhost:${port}`
+  const url = resolveServerUrl(derivedUrl, port)
 
-  if (await probe(url)) {
-    log.info(`[next] serveur déjà actif sur ${url} : réutilisation (aucun processus lancé)`)
-    return createHandle(null, url, port, false)
+  const reuse = await probeReuse(url)
+  if (reuse.verdict === 'nextjs') {
+    log.info(`[next] serveur Next.js déjà actif sur ${redactSecrets(url)} : réutilisation (aucun processus lancé)`)
+    // Réutilisé : l'URL probeée est celle qui a répondu — c'est elle qui devient
+    // le handle, **port réel compris** (`reusePortOf`) : le port du handle doit
+    // refléter l'URL servie, jamais la variable `PORT`.
+    return createHandle(null, url, reusePortOf(url, port), false)
   }
+  if (reuse.verdict === 'unresponsive') {
+    // Fail-safe : le port accepte les connexions mais n'a jamais parlé HTTP.
+    throw new Error(
+      `Le port ${port} accepte les connexions mais ${redactSecrets(reuse.detail)} : service non identifié, chargement refusé. ` +
+        'Arrêtez ce service ou changez la variable PORT/ELECTRON_START_URL.',
+    )
+  }
+  if (reuse.verdict === 'foreign') {
+    // Rejet propre : jamais de `loadURL` sur un service qui n'est pas Next.js.
+    // `reuse.detail` distingue honnêtement la cause (redirection sortante,
+    // marqueur Next absent, protocole illisible, boucle de redirection).
+    throw new Error(
+      `Le port ${port} est occupé par un service inconnu (${redactSecrets(reuse.detail)}). ` +
+        'Arrêtez ce service ou changez la variable PORT/ELECTRON_START_URL.',
+    )
+  }
+
+  // Avant tout spawn : l'enfant écoutera sur `derivedUrl` (URL réellement prête).
+  // Toute divergence avec `START_URL` (whitelist de window.ts) est une erreur de
+  // configuration explicite — jamais une URL morte dans `handle.url`.
+  assertOwnedOriginConsistent(url, derivedUrl, port)
 
   const spec = process.env.ELECTRON_DEV === '1' ? devLaunchSpec(port) : standaloneLaunchSpec(port)
   log.info(`[next] lancement de ${spec.label} : ${spec.command} ${spec.args.join(' ')} (port ${port})`)
@@ -455,7 +789,10 @@ export async function startNextServer(): Promise<NextServerHandle> {
   })
 
   try {
-    await waitUntilReady(state, url, port, spec.readyTimeoutMs)
+    // Le probe cible l'URL dérivée (l'adresse où l'enfant écoute réellement) :
+    // `ELECTRON_START_URL` peut désigner une autre origine en cas de config
+    // hétérogène — voir l'avertissement de `resolveServerUrl`.
+    await waitUntilReady(state, derivedUrl, port, spec.readyTimeoutMs)
     state.ready = true
   } catch (error) {
     if (!state.exited) {
@@ -465,8 +802,10 @@ export async function startNextServer(): Promise<NextServerHandle> {
     throw error
   }
 
-  log.info(`[next] serveur ${spec.label} prêt sur ${url} (pid ${child.pid ?? 'n/a'})`)
-  return createHandle(state, url, port, true)
+  log.info(`[next] serveur ${spec.label} prêt sur ${derivedUrl} (pid ${child.pid ?? 'n/a'})`)
+  // Possédé : `handle.url` = URL **dérivée**, celle que `waitUntilReady` vient de
+  // prouver disponible (l'enfant écoute sur `derivedUrl`, pas sur `url` arbitraire).
+  return createHandle(state, derivedUrl, port, true)
 }
 
 /** Arrêt public : idempotent et tolérant à `null` (aucun rejet). */

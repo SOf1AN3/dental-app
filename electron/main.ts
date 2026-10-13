@@ -1,11 +1,9 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import log from 'electron-log'
 import { registerIpcHandlers } from './ipc'
-import { forceKillNextServer, startNextServer, stopNextServer, type NextServerHandle } from './server/next'
+import { forceKillNextServer, redactSecrets, startNextServer, stopNextServer, type NextServerHandle } from './server/next'
 import { createMainWindow, START_URL } from './window'
 
-const SERVER_POLL_INTERVAL_MS = 150
-const SERVER_STARTUP_TIMEOUT_MS = 60_000
 /** Délai de secours au-delà duquel l'arrêt du serveur est forcé (tâche 1.4). */
 const SERVER_SHUTDOWN_TIMEOUT_MS = 5_000
 
@@ -14,40 +12,6 @@ let mainWindow: BrowserWindow | null = null
 let nextServer: NextServerHandle | null = null
 /** Arrêt en cours (ou déjà réalisé) — sert à synchroniser la sortie de l'application. */
 let serverShutdown: Promise<void> | null = null
-
-/**
- * Attend que le serveur Next.js accepte les requêtes avant de charger l'URL.
- * Sans cela, la fenêtre afficherait une page d'erreur blanche pendant le démarrage
- * (compilation à froid de Next.js) ou un `loadURL` rejeté.
- */
-async function waitForServer(url: string): Promise<void> {
-  const deadline = Date.now() + SERVER_STARTUP_TIMEOUT_MS
-  log.info(`[main] attente du serveur Next.js sur ${url}`)
-
-  for (;;) {
-    try {
-      const response = await fetch(url, { method: 'HEAD' })
-      // Toute réponse HTTP prouve que le serveur écoute sur le port.
-      if (response.ok) {
-        log.info(`[main] serveur prêt (HTTP ${response.status}) : ${url}`)
-      } else {
-        log.warn(`[main] serveur joignable mais en erreur (HTTP ${response.status}) : ${url}`)
-      }
-      return
-    } catch {
-      // Le serveur n'accepte pas encore les connexions : on réessaie.
-    }
-
-    if (Date.now() >= deadline) {
-      break
-    }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, SERVER_POLL_INTERVAL_MS)
-    })
-  }
-
-  throw new Error(`Le serveur Next.js n'est pas prêt après ${SERVER_STARTUP_TIMEOUT_MS} ms : ${url}`)
-}
 
 async function openMainWindow(url: string): Promise<void> {
   const win = createMainWindow()
@@ -119,10 +83,11 @@ async function startApplication(): Promise<void> {
   const server = await startNextServer()
   nextServer = server
   log.info(
-    `[main] serveur Next.js ${server.owned ? 'démarré' : 'réutilisé'} sur ${server.url} (port ${server.port})`,
+    `[main] serveur Next.js ${server.owned ? 'démarré' : 'réutilisé'} sur ${redactSecrets(server.url)} (port ${server.port})`,
   )
   try {
-    await waitForServer(server.url)
+    // `startNextServer()` n'a résolu qu'une fois le serveur **prêt** (boucle
+    // d'attente interne) : inutile d'ajouter une seconde boucle d'attente ici.
     await openMainWindow(server.url)
     log.info('[main] application démarrée')
   } catch (error) {
@@ -139,12 +104,20 @@ function handleStartupFailure(error: unknown): void {
       type: 'error',
       title: 'Échec du démarrage',
       message: "L'application de bureau n'a pas pu démarrer.",
-      detail: error instanceof Error ? error.message : String(error),
+      // Par prudence : le message peut reprendre une URL (timeout, config) —
+      // même redaction que les logs de `next.ts` (aucune donnée sensible en clair).
+      detail: redactSecrets(error instanceof Error ? error.message : String(error)),
       buttons: ['OK'],
       noLink: true,
     })
     .catch((dialogError: unknown) => {
       log.error("[main] impossible d'afficher la boîte de dialogue d'erreur", dialogError)
+    })
+    .finally(() => {
+      // Sans fenêtre, l'app resterait un processus zombie après fermeture du
+      // dialogue : on sort proprement. `app.quit()` déclenche `before-quit`,
+      // qui gère déjà l'arrêt du serveur (aucun `app.exit` en double).
+      app.quit()
     })
 }
 
