@@ -1,9 +1,12 @@
 {
   "name": "dental-app",
+  "main": "dist-electron/main/main.js",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:desktop": "electron-vite dev",
+    "typecheck:desktop": "tsc --noEmit -p electron/tsconfig.json",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
