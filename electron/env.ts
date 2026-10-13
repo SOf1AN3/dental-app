@@ -947,11 +947,23 @@ export function buildNextEnv(db: LocalDbHandle, config: DbConfig): NodeJS.Proces
   // même que le message promettait « restaurez ce fichier ». Ici : échec
   // propre, avant toute génération.
   if (config.fileCorrupt === true) {
+    // Pondération du conseil de récupération selon l'état réel du cluster
+    // (étape 2.2c) : si un cluster PostgreSQL existe déjà dans `dataDir`,
+    // supprimer `config.json` **ne régénère rien** — le démarrage suivant
+    // échouera sur `unrecoverablePasswordMessage()` (mot de passe produit
+    // ≠ mot de passe initdb) et imposera de supprimer `pgdata` = **perte
+    // définitive des données du cabinet**. Dans ce cas : restauration du
+    // fichier, jamais la suppression du répertoire.
+    const clusterPresent = existsSync(path.join(config.dataDir, 'PG_VERSION'))
+    const recoveryHint = clusterPresent
+      ? `Un cluster PostgreSQL existe déjà dans ${config.dataDir} : ne supprimez **jamais** ce répertoire ` +
+        '(destruction définitive des données du cabinet). Restaurez à la place un exemplaire ' +
+        'config.json.corrupt-<timestamp> conservé à côté, ou récupérez le mot de passe du cluster.'
+      : 'Restaurez ce fichier (un exemplaire config.json.corrupt-<timestamp> est conservé à côté s’il a été ' +
+        'réécrit), ou supprimez-le pour régénérer la configuration complète.'
     throw new Error(
       'config.json corrompu : AUTH_SECRET de production impossible à résoudre sans risquer une régénération à ' +
-        'chaque démarrage (sessions perpétuellement invalidées). Restaurez ce fichier (un exemplaire ' +
-        'config.json.corrupt-<timestamp> est conservé à côté s’il a été réécrit), ou supprimez-le pour ' +
-        'régénérer la configuration complète.',
+        `chaque démarrage (sessions perpétuellement invalidées). ${recoveryHint}`,
     )
   }
   const port = resolveNextPort()

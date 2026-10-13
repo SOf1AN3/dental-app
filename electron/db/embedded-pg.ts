@@ -43,12 +43,51 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import log from 'electron-log'
-import EmbeddedPostgres from 'embedded-postgres'
+import EmbeddedPostgresImport from 'embedded-postgres'
 import postgres from 'postgres'
 // Export existant (`electron/server/next.ts`) : la même redaction sert les logs
 // de Next et ceux de PG — un seul traitement des secrets, pas deux.
 import { redactSecrets } from '../server/next'
 import type { DbConfig } from '../env'
+
+/* -------------------------------------------------------------------------- */
+/* Déballage `embedded-postgres` (ESM pur → frontière CJS)                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `embedded-postgres` est **100 % ESM** (`"type": "module"`, `export default`).
+ * Le main Electron est emballé en **CJS** (`electron.vite.config.ts`, externals
+ * voulus) : `require()` d'un paquet ESM sous Node 22 (Electron 44) renvoie
+ * l'**objet namespace** `{ default: EmbeddedPostgres }`, jamais la fonction
+ * directement. Sans déballage, `new` s'applique au namespace →
+ * `TypeError: EmbeddedPostgres is not a constructor`, et **uniquement** au
+ * premier démarrage (port libre + cluster absent) — c'est-à-dire le chemin de
+ * production exact. On déballe ici les **deux formes** possibles :
+ * fonction directe (ESM natif, tests `tsx`) **ou** `.default` (namespace CJS).
+ */
+type EmbeddedPostgresCtor = typeof EmbeddedPostgresImport
+
+const EmbeddedPostgresCandidate: EmbeddedPostgresCtor | undefined =
+  typeof EmbeddedPostgresImport === 'function'
+    ? EmbeddedPostgresImport
+    : (EmbeddedPostgresImport as unknown as { default?: EmbeddedPostgresCtor } | undefined)?.default
+
+// Les deux formes absentes : throw lisible, jamais « undefined is not a
+// constructor » au milieu d'un stack trace au premier démarrage.
+if (typeof EmbeddedPostgresCandidate !== 'function') {
+  throw new Error(
+    'embedded-postgres : export inattendu — ni constructeur direct, ni export `.default` ' +
+      `(typeof(module)=${typeof EmbeddedPostgresImport}, ` +
+      `typeof(module.default)=${typeof (EmbeddedPostgresImport as { default?: unknown } | undefined)?.default}). ` +
+      'Paquet ESM inutilisable depuis le bundle CJS du main : la base locale ne peut pas démarrer.',
+  )
+}
+
+/** Constructeur effectif, quelle que soit la forme renvoyée par `require()`. */
+const EmbeddedPostgres: EmbeddedPostgresCtor = EmbeddedPostgresCandidate
+
+/** Type d'instance : `typeof` d'une classe = type **constructeur** → `InstanceType`. */
+type EmbeddedPostgresInstance = InstanceType<EmbeddedPostgresCtor>
 
 /* -------------------------------------------------------------------------- */
 /* Types publics                                                              */
@@ -95,7 +134,7 @@ const STOP_SETTLE_RETRY_INTERVAL_MS = 100
 
 /** Cluster que **nous** avons démarré (null = rien à notre actif). */
 interface OwnedCluster {
-  readonly pg: EmbeddedPostgres
+  readonly pg: EmbeddedPostgresInstance
   /** Configuration utilisée au démarrage (URL, port, répertoire). */
   readonly config: DbConfig
   /** `true` = arrêt gracieux confirmé (port libre + verrou retiré). */
