@@ -1,9 +1,16 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import os from "node:os";
 import { db } from "@/lib/db/db";
 import * as schema from "@/lib/db/schema";
 import { verifyPassword } from "@/lib/auth-utils";
+import {
+  checkTrust,
+  grantTrust,
+  isCentralReachable,
+} from "@/lib/offline/device-trust";
+import { createDeviceTrustRepo } from "@/lib/offline/device-trust-db";
 import { and, desc, eq, gt, lt, or, type SQL } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +64,98 @@ const PURGE_INTERVAL_MS = 60 * 60 * 1000;
 const RECENT_ATTEMPTS_ROW_CAP = 500;
 
 let lastAttemptPurgeAt = 0;
+
+// ---------------------------------------------------------------------------
+// Confiance d'appareil (étape 3.2 — D-8)
+//
+// Deux modes distingués par `SYNC_BASE_URL` (décision d'architecture D-A) :
+//
+// • `DEVICE_ID` absent (web Vercel, dev local, desktop sans identifiant
+//   d'appareil) OU `SYNC_BASE_URL` absente (serveur central inexistant avant
+//   l'étape 5) → **aucun contrôle**, comportement strictement identique à
+//   aujourd'hui, avec un avertissement **unique par process** lorsque la
+//   confiance est présente mais non opposable. Imposer la confiance maintenant
+//   interdirait tout login.
+// • `SYNC_BASE_URL` présente (desktop en production) → contrôle actif :
+//   central joignable → `grantTrust` (fenêtre de 30 j ouverte/renouvelée,
+//   échec fermé si la ligne est révoquée) ; central injoignable →
+//   `checkTrust` (une fenêtre encore valide est exigée, sinon refus).
+//
+// Le contrôle s'applique **uniquement après** une vérification bcrypt
+// réussie — jamais avant, jamais à la place du rate-limiting. Aucun secret
+// (hash, mot de passe, `AUTH_SECRET`, `DATABASE_URL`) n'est journalisé : seuls
+// la décision, l'appareil, le compte et la raison le sont.
+// ---------------------------------------------------------------------------
+/** `TRUST_DAYS` : durée par défaut de la fenêtre de confiance (jours). */
+const TRUST_DAYS_DEFAULT = 30;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** Avertissement « confiance non opposable » émis au plus une fois par process. */
+let trustNotEnforceableWarned = false;
+
+/**
+ * Durée de la fenêtre de confiance en millisecondes. `TRUST_DAYS` absent →
+ * 30 j ; invalide (non entier, nul ou négatif) → repli sur 30 j **avec
+ * journalisation** : la fenêtre reste bornée, et le desktop rejette déjà une
+ * valeur invalide au démarrage (`electron/env.ts`), ce qui rend ce repli
+ * inatteignable hors configuration bricolée à la main.
+ */
+function resolveTrustTtlMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") {
+    return TRUST_DAYS_DEFAULT * MS_PER_DAY;
+  }
+  const days = Number(raw);
+  if (!Number.isInteger(days) || days < 1) {
+    console.warn(
+      `[auth] TRUST_DAYS invalide : repli sur ${TRUST_DAYS_DEFAULT} j.`,
+    );
+    return TRUST_DAYS_DEFAULT * MS_PER_DAY;
+  }
+  return days * MS_PER_DAY;
+}
+
+/** Résultat du contrôle de confiance appliqué dans `authorize`. */
+type DeviceTrustGateResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+interface DeviceTrustGateParams {
+  readonly deviceId: string;
+  readonly syncBaseUrl: string;
+  readonly userId: string;
+}
+
+/**
+ * Applique le mode D-A pour un login dont le mot de passe est déjà validé :
+ * en ligne → renouvelle la confiance (30 j) puis autorise ; hors-ligne →
+ * n'autorise que si la fenêtre ouverte reste valide. `grantTrust` ne lève
+ * jamais une révocation : un poste révoqué est donc refusé même en ligne,
+ * jusqu'à ce que le serveur central (étape 5) lève la coupure.
+ */
+async function authorizeDeviceTrust(
+  params: DeviceTrustGateParams,
+): Promise<DeviceTrustGateResult> {
+  const repo = createDeviceTrustRepo(db);
+  const now = new Date();
+  if (await isCentralReachable(params.syncBaseUrl)) {
+    const decision = await grantTrust(
+      repo,
+      {
+        deviceId: params.deviceId,
+        userId: params.userId,
+        name: os.hostname(),
+        os: process.platform,
+        ttlMs: resolveTrustTtlMs(process.env.TRUST_DAYS),
+      },
+      now,
+    );
+    return decision.ok ? { ok: true } : { ok: false, reason: decision.reason };
+  }
+  const decision = await checkTrust(repo, params.deviceId, params.userId, now);
+  return decision.ok
+    ? { ok: true }
+    : { ok: false, reason: `hors-ligne:${decision.reason}` };
+}
+
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -184,6 +283,51 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
 
         if (!user || !valid) return null;
+
+        // Contrôle de confiance d'appareil (étape 3.2, mode D-A) — atteint
+        // **uniquement** après une vérification bcrypt réussie. `DEVICE_ID`
+        // absent (web Vercel, dev local) → comportement strictement inchangé.
+        const deviceId = process.env.DEVICE_ID;
+        if (deviceId) {
+          const syncBaseUrl = process.env.SYNC_BASE_URL;
+          if (!syncBaseUrl) {
+            // Confiance présente mais non opposable (serveur central inexistant
+            // avant l'étape 5) : un refus ici interdirait tout login — on
+            // autorise, avec un avertissement unique par process.
+            if (!trustNotEnforceableWarned) {
+              trustNotEnforceableWarned = true;
+              console.warn(
+                `[auth] confiance d'appareil non opposable (SYNC_BASE_URL absente) : login autorisé sans contrôle ` +
+                  `(device=${deviceId}, userId=${user.id}).`,
+              );
+            }
+          } else {
+            try {
+              const trust = await authorizeDeviceTrust({
+                deviceId,
+                syncBaseUrl,
+                userId: user.id,
+              });
+              if (!trust.ok) {
+                console.warn(
+                  `[auth] login refusé (device=${deviceId}, userId=${user.id}, raison=${trust.reason}).`,
+                );
+                return null;
+              }
+            } catch (error) {
+              // Échec fermé : une erreur d'infrastructure (table `device`
+              // injoignable…) ne doit jamais laisser entrer un poste dont la
+              // confiance n'a pas pu être vérifiée. Message seul, jamais de
+              // détail de connexion.
+              console.error(
+                `[auth] login refusé (device=${deviceId}, userId=${user.id}, raison=infra: ${
+                  error instanceof Error ? error.message : String(error)
+                }).`,
+              );
+              return null;
+            }
+          }
+        }
 
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { passwordHash, ...userWithoutPassword } = user;

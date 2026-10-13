@@ -31,7 +31,7 @@
 
 import { app, safeStorage } from 'electron'
 import log from 'electron-log'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
@@ -390,6 +390,9 @@ const persistedFieldSchemas = {
   encoding: storedEncodingSchema,
   authSecret: z.string().min(1).max(512),
   authSecretEncoding: storedEncodingSchema,
+  // Identifiant d'appareil (étape 3.2) : UUID persisté, stable sur la durée de
+  // vie du poste — clé de la fenêtre de confiance hors-ligne (D-B).
+  deviceId: z.string().min(1).max(128),
 }
 
 /** Schéma d'ensemble, dérivé des champs ci-dessus (source du type persisté). */
@@ -400,6 +403,7 @@ const persistedDbConfigSchema = z.object({
   encoding: persistedFieldSchemas.encoding.optional(),
   authSecret: persistedFieldSchemas.authSecret.optional(),
   authSecretEncoding: persistedFieldSchemas.authSecretEncoding.optional(),
+  deviceId: persistedFieldSchemas.deviceId.optional(),
 })
 
 type PersistedDbConfig = z.infer<typeof persistedDbConfigSchema>
@@ -616,6 +620,17 @@ function carryAuthSecret(persisted: PersistedDbConfig): Pick<PersistedDbConfig, 
 }
 
 /**
+ * Conserve le `deviceId` lors d'une **réécriture** du `config.json`
+ * (étape 3.2) : régénérer cet identifiant à chaque réécriture effacerait la
+ * clé de la fenêtre de confiance hors-ligne — la confiance déjà ouverte
+ * deviendrait inexploitable et le serveur central verrait un « nouvel
+ * appareil » à chaque démarrage. Même mécanique que `carryAuthSecret`.
+ */
+function carryDeviceId(persisted: PersistedDbConfig): Pick<PersistedDbConfig, 'deviceId'> {
+  return persisted.deviceId !== undefined ? { deviceId: persisted.deviceId } : {}
+}
+
+/**
  * Message d'action explicite (récupération, jamais de régénération muette) quand
  * un cluster existe et que son mot de passe n'est pas récupérable : réécrire
  * `config.json` ferait disparaître le seul exemplaire chiffré → accès aux
@@ -717,7 +732,10 @@ function resolveProdDbConfig(dataDirOverride: string | undefined): DbBaseConfig 
       corruptFields.includes('authSecret') || corruptFields.includes('authSecretEncoding')
         ? {}
         : carryAuthSecret(persisted)
-    writePersistedConfig(configPath, { ...carried, port, database, ...encodePasswordForStorage(password) })
+    // Même garde pour `deviceId` (étape 3.2) : une réécriture ne doit jamais
+    // régénérer l'identifiant d'appareil porteur de la confiance hors-ligne.
+    const carriedDevice = corruptFields.includes('deviceId') ? {} : carryDeviceId(persisted)
+    writePersistedConfig(configPath, { ...carried, ...carriedDevice, port, database, ...encodePasswordForStorage(password) })
   }
 
   return {
@@ -911,6 +929,107 @@ function resolveUploadDir(config: DbConfig): string {
   return directory
 }
 
+/* -------------------------------------------------------------------------- */
+/* Confiance d'appareil (étape 3.2 — D-B / D-A)                                */
+/* -------------------------------------------------------------------------- */
+
+/** `TRUST_DAYS` par défaut : 30 j (même valeur que `DEFAULT_TRUST_TTL_MS`). */
+const DEFAULT_TRUST_DAYS = 30
+/**
+ * Plafond de sanityité pour `TRUST_DAYS` : une valeur absurde (milliers de
+ * jours) désactiverait de facto la limite de confiance hors-ligne. 10 ans
+ * reste très largement au-dessus de tout usage raisonnable.
+ */
+const MAX_TRUST_DAYS = 3650
+
+/**
+ * Identifiant d'appareil (D-B) : UUID stable **persisté** dans
+ * `<userData>/config.json`, généré au premier démarrage. Fonctionne aussi en
+ * dev (le processus main Electron a toujours un `userData`). L'identifiant
+ * d'appareil n'est pas un secret : il est journalisé (traçabilité du couple
+ * app/registre `device`).
+ *
+ * Discipline identique au reste du fichier : un `config.json` corrompu est
+ * mis de côté (`quarantineCorruptConfig`) avant toute réécriture, jamais
+ * écrasé silencieusement.
+ */
+export function resolveDeviceId(): string {
+  const configPath = path.join(resolveUserDataDir(), 'config.json')
+  const { persisted, fileCorrupt } = readPersistedConfig(configPath)
+  if (!fileCorrupt && persisted.deviceId !== undefined) {
+    return persisted.deviceId
+  }
+  const deviceId = randomUUID()
+  if (fileCorrupt) {
+    // Traçabilité (même règle que `resolveProdDbConfig`) : jamais de
+    // réécriture par-dessus un fichier corrompu sans l'avoir conservé.
+    quarantineCorruptConfig(configPath)
+  }
+  writePersistedConfig(configPath, { ...persisted, deviceId })
+  log.info(`[env] DEVICE_ID généré et persisté : ${deviceId}`)
+  return deviceId
+}
+
+/**
+ * `SYNC_BASE_URL` (optionnelle) : origine du serveur central. Présente → le
+ * contrôle de confiance est actif (`src/lib/auth.ts`, décision D-A) ; absente
+ * → mode désactivé, comportement web historique. Reprise de l'environnement
+ * parent, puis du `.env`/`.env.local` **en dev uniquement** (même précédence
+ * que `resolveDevAuthSecret`). Une valeur **malformée est refusée** : la
+ * laisser passer désactiverait silencieusement le contrôle (fail-open).
+ */
+function resolveSyncBaseUrl(mode: DbMode): string | undefined {
+  const fromProcess = process.env.SYNC_BASE_URL
+  const raw =
+    fromProcess !== undefined && fromProcess !== ''
+      ? fromProcess
+      : mode === 'dev'
+        ? readDotEnvFile()['SYNC_BASE_URL']
+        : undefined
+  if (raw === undefined || raw === '') {
+    return undefined
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch (error) {
+    throw new Error(`SYNC_BASE_URL illisible : « ${raw} » n'est pas une URL valide (attendu https://…).`, {
+      cause: error,
+    })
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`SYNC_BASE_URL invalide : schéma « ${parsed.protocol} » refusé (attendu http(s)).`)
+  }
+  return raw
+}
+
+/**
+ * `TRUST_DAYS` : entier **positif**, défaut 30. Une valeur invalide est
+ * **rejetée au démarrage** (jamais remplacée silencieusement par le défaut) :
+ * une fenêtre de confiance mal calibrée est un risque de sécurité, pas un
+ * détail de confort. `.env` consulté en dev uniquement (cf. `SYNC_BASE_URL`).
+ */
+function resolveTrustDays(mode: DbMode): number {
+  const fromProcess = process.env.TRUST_DAYS
+  const raw =
+    fromProcess !== undefined && fromProcess !== ''
+      ? fromProcess
+      : mode === 'dev'
+        ? readDotEnvFile()['TRUST_DAYS']
+        : undefined
+  if (raw === undefined || raw === '') {
+    return DEFAULT_TRUST_DAYS
+  }
+  const days = Number(raw)
+  if (!Number.isInteger(days) || days < 1 || days > MAX_TRUST_DAYS) {
+    throw new Error(
+      `TRUST_DAYS invalide : « ${raw} » n'est pas un entier positif ≤ ${MAX_TRUST_DAYS} ` +
+        `(défaut ${DEFAULT_TRUST_DAYS}). Corrigez le .env ou l'environnement.`,
+    )
+  }
+  return days
+}
+
 /**
  * Construit l'environnement du **processus enfant Next.js** (étape 2.2a).
  *
@@ -933,6 +1052,13 @@ function resolveUploadDir(config: DbConfig): string {
  *   pas entrer en conflit avec `next dev -p`), `NODE_ENV` = `production` **en
  *   prod seulement** (en dev, `next dev` fixe `development` lui-même) ;
  * - `UPLOAD_DIR` : `<racine>/uploads` (dev) ou `<userData>/uploads` (prod) ;
+ * - `DEVICE_ID` (étape 3.2) : UUID d'appareil persisté dans
+ *   `<userData>/config.json` (D-B) — identifie le poste, y compris en dev ;
+ * - `SYNC_BASE_URL` (étape 3.2, optionnelle) : serveur central. Absente → le
+ *   contrôle de confiance n'est pas opposable (D-A) ; malformée → démarrage
+ *   refusé (jamais de fail-open silencieux) ;
+ * - `TRUST_DAYS` (étape 3.2) : entier positif, défaut 30, invalide → refus au
+ *   démarrage ;
  * - **reste de `process.env` conservé** (héritage du parent) — les secrets qui
  *   y traînent sont signalés (noms seuls) par `warnInheritedSecrets()`.
  *
@@ -980,9 +1106,29 @@ export function buildNextEnv(db: LocalDbHandle, config: DbConfig): NodeJS.Proces
   }
   env.UPLOAD_DIR = resolveUploadDir(config)
 
+  // Confiance d'appareil (étape 3.2) : `DEVICE_ID` est toujours renseigné (il
+  // identifie le poste, y compris en dev), mais il n'est **opposable** qu'en
+  // présence de `SYNC_BASE_URL` (mode prod desktop, cf. décision D-A — sans
+  // serveur central, la confiance n'est pas contrôlée pour ne pas interdire
+  // tout login). `TRUST_DAYS` est validé ici : une valeur invalide bloque le
+  // démarrage au lieu d'être remplacée silencieusement.
+  env.DEVICE_ID = resolveDeviceId()
+  const syncBaseUrl = resolveSyncBaseUrl(config.mode)
+  if (syncBaseUrl !== undefined) {
+    env.SYNC_BASE_URL = syncBaseUrl
+  } else {
+    // Efface une éventuelle valeur héritée de `process.env` : le mode sans
+    // central doit être **absent**, pas seulement ignoré (l'enfant Next lit
+    // cette variable pour activer le contrôle).
+    delete env.SYNC_BASE_URL
+  }
+  env.TRUST_DAYS = String(resolveTrustDays(config.mode))
+
   log.info(
     `[env] env du serveur Next : AUTH_URL=${env.AUTH_URL}, PORT=${env.PORT}, HOSTNAME=${env.HOSTNAME}, ` +
-      `NODE_ENV=${env.NODE_ENV ?? '(inchangé)'}, UPLOAD_DIR=${env.UPLOAD_DIR} ` +
+      `NODE_ENV=${env.NODE_ENV ?? '(inchangé)'}, UPLOAD_DIR=${env.UPLOAD_DIR}, ` +
+      `DEVICE_ID=${env.DEVICE_ID}, TRUST_DAYS=${env.TRUST_DAYS}, ` +
+      `SYNC_BASE_URL=${syncBaseUrl ?? '(absente : confiance non opposable)'} ` +
       '(DATABASE_URL et AUTH_SECRET jamais journalisés)',
   )
   return env
