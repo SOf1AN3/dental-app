@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:desktop": "electron-vite dev",
+    "dev:desktop": "cross-env ELECTRON_DEV=1 electron-vite dev",
     "typecheck:desktop": "tsc --noEmit -p electron/tsconfig.json",
     "build": "next build",
     "start": "next start",
