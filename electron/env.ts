@@ -32,7 +32,7 @@
 import { app, safeStorage } from 'electron'
 import log from 'electron-log'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 // Type seulement (effacé à la compilation) : aucun cycle d'import au runtime —
@@ -60,6 +60,15 @@ export interface DbConfig {
   /** Répertoire du cluster (initdb / `postmaster.pid`). */
   readonly dataDir: string
   readonly mode: DbMode
+  /**
+   * Signal `fileCorrupt` (étape 2.2b) : `true` = le `<userData>/config.json`
+   * était corrompu au moment de la lecture (JSON illisible **ou** au moins un
+   * champ invalide). Propagé jusqu'à `buildNextEnv()`, qui **échoue** en cas de
+   * corruption au lieu de régénérer `AUTH_SECRET` par-dessus un fichier à
+   * restaurer (les sessions ouvertes seraient invalidées alors même que le
+   * message promet « restaurez ce fichier »).
+   */
+  readonly fileCorrupt?: boolean
 }
 
 /**
@@ -153,45 +162,67 @@ export function parseEnvFile(content: string): Record<string, string> {
 }
 
 /**
- * Localise le `.env` : source (`electron/env.ts` → racine) **et** bundle
+ * Localise(x) le(s) `.env` : source (`electron/env.ts` → racine) **et** bundle
  * (`dist-electron/main/main.js` → racine), plus le répertoire courant pour les
  * lancements depuis la racine du projet (`npm run dev:desktop`).
+ *
+ * **Précédence identique à celle de Next.js** : au sein d'un même répertoire,
+ * `.env.local` **complète et surcharge** `.env` (les deux sont lus, la valeur
+ * locale l'emporte). Next lit `.env.local` en priorité : un
+ * `AUTH_SECRET`/`DATABASE_URL` placé là rendrait l'app bureau in démarrable
+ * alors que `next dev` seul fonctionne — les deux lancements doivent donc lire,
+ * eux aussi, les mêmes fichiers. S'arrêter au **premier** fichier trouvé, lui,
+ * casserait une config où `DATABASE_URL` reste dans `.env` : on fusionne donc
+ * les fichiers du premier répertoire qui en porte.
+ *
+ * Le répertoire **parent** de `process.cwd()` est volontairement exclu (rejet
+ * de la revue A3) : capter `<parent>/.env` risquerait de récupérer le `.env`
+ * d'un **autre projet** (aujourd'hui `DATABASE_URL`, demain `AUTH_SECRET`), bien
+ * pire qu'un démarrage en configuration par défaut. Les candidats `../..` des
+ * deux premières lignes restent nécessaires au bundle : `<__dirname>` y vaut
+ * `<racine>/dist-electron/main`, donc `../..` **est** la racine du projet.
  */
-function findDotEnvFile(): string | null {
-  const candidates = [
-    path.resolve(__dirname, '.env'),
-    path.resolve(__dirname, '..', '.env'),
-    path.resolve(__dirname, '..', '..', '.env'),
-    path.resolve(process.cwd(), '.env'),
-    path.resolve(process.cwd(), '..', '.env'),
+function findDotEnvFiles(): string[] {
+  const directories = [
+    __dirname, // source : <racine>/electron · bundle : <racine>/dist-electron/main
+    path.resolve(__dirname, '..'), // source : <racine>          · bundle : <racine>/dist-electron
+    path.resolve(__dirname, '..', '..'), // source : <parent>     · bundle : <racine>
+    process.cwd(), // lancement depuis la racine (`npm run dev:desktop`)
   ]
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate
+  for (const directory of directories) {
+    // `.env` d'abord, `.env.local` ensuite : l'ordre de fusion fait de la
+    // valeur locale la gagnante (priorité identique à Next.js).
+    const found = ['.env', '.env.local'].map((name) => path.join(directory, name)).filter((file) => existsSync(file))
+    if (found.length > 0) {
+      return found
     }
   }
-  return null
+  return []
 }
 
 /**
- * Lit le `.env` **sans muter `process.env`** (comme `dotenv`, une variable déjà
- * définie dans l'environnement reste prioritaire — c'est le seul arbitrage fait
- * dans `resolveDbConfig()`).
+ * Lit le (ou les) `.env` **sans muter `process.env`** (comme `dotenv`, une
+ * variable déjà définie dans l'environnement reste prioritaire — c'est le seul
+ * arbitrage fait dans `resolveDbConfig()`). Fusion dans l'ordre de
+ * `findDotEnvFiles()` : `.env.local` écrase `.env` clé par clé, comme Next.js.
  */
 export function readDotEnvFile(): Record<string, string> {
-  const file = findDotEnvFile()
-  if (file === null) {
+  const files = findDotEnvFiles()
+  if (files.length === 0) {
     log.warn('[env] fichier .env introuvable : configuration dev par défaut utilisée')
     return {}
   }
-  try {
-    const parsed = parseEnvFile(readFileSync(file, 'utf8'))
-    log.debug(`[env] .env lu : ${file} (${Object.keys(parsed).length} clés, valeurs jamais journalisées)`)
-    return parsed
-  } catch (error) {
-    log.warn(`[env] .env illisible (${file}) : ${error instanceof Error ? error.message : String(error)}`)
-    return {}
+  const merged: Record<string, string> = {}
+  for (const file of files) {
+    try {
+      const parsed = parseEnvFile(readFileSync(file, 'utf8'))
+      Object.assign(merged, parsed)
+      log.debug(`[env] ${path.basename(file)} lu : ${file} (${Object.keys(parsed).length} clés, valeurs jamais journalisées)`)
+    } catch (error) {
+      log.warn(`[env] .env illisible (${file}) : ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
+  return merged
 }
 
 /* -------------------------------------------------------------------------- */
@@ -208,6 +239,13 @@ interface DbUrlParts {
 }
 
 type DbConfigParts = DbUrlParts & { readonly dataDir: string }
+
+/**
+ * Composants résolus par le mode courant + **signal `fileCorrupt`** (étape
+ * 2.2b) : toujours `false` en dev (aucun `config.json`), porté depuis la
+ * lecture tolérante du fichier en prod, jusqu'à `buildNextEnv()`.
+ */
+type DbBaseConfig = DbConfigParts & { readonly fileCorrupt: boolean }
 
 /** `decodeURIComponent` tolérant : une valeur non encodée ne doit pas faire planter. */
 function safeDecode(value: string): string {
@@ -266,9 +304,15 @@ function formatDbUrl(parts: DbUrlParts): string {
 /**
  * Data dir dev : doit pointer sur **le même** `./pgdata` que `scripts/dev-db.ts`
  * (sinon on initialiserait un second catalogue). Candidats dans l'ordre :
- * `DEV_DB_DATA_DIR` explicite, puis source (`electron/` → racine), puis bundle
- * (`dist-electron/main/` → racine), puis `cwd`. Le premier existant l'emporte ;
- * à défaut, `cwd/pgdata` (défaut exact de `dev-db.ts` : `pgdata` relatif).
+ * `DEV_DB_DATA_DIR` explicite, puis source (`<__dirname>/../pgdata` = racine),
+ * puis bundle (`<__dirname>/../../pgdata` = racine, `<__dirname>` y valant
+ * `<racine>/dist-electron/main`), puis `<cwd>/pgdata`. Le premier existant
+ * l'emporte ; à défaut, `cwd/pgdata` (défaut exact de `dev-db.ts`).
+ *
+ * **Aucun candidat hors projet** (rejet de la revue A4) : l'ancien candidat à
+ * trois `..` (`<__dirname>/../../../pgdata`) tombait, depuis un bundle, sur
+ * `<grand-parent>/pgdata` — ex. un `~/pgdata` posé sur le Bureau — et on aurait
+ * initialisé/interrogé un catalogue qui n'est pas celui du projet.
  */
 function resolveDevDataDir(): string {
   const override = process.env.DEV_DB_DATA_DIR
@@ -276,8 +320,8 @@ function resolveDevDataDir(): string {
     return path.resolve(override)
   }
   const candidates = [
-    path.resolve(__dirname, '..', '..', 'pgdata'),
-    path.resolve(__dirname, '..', '..', '..', 'pgdata'),
+    path.resolve(__dirname, '..', 'pgdata'), // source : <racine>/pgdata
+    path.resolve(__dirname, '..', '..', 'pgdata'), // bundle : <racine>/pgdata
     path.resolve(process.cwd(), 'pgdata'),
   ]
   for (const candidate of candidates) {
@@ -289,7 +333,7 @@ function resolveDevDataDir(): string {
   return candidates[2]
 }
 
-function resolveDevDbConfig(): DbConfigParts {
+function resolveDevDbConfig(): DbBaseConfig {
   const dotEnv = readDotEnvFile()
   const fromProcess = process.env.DATABASE_URL
   const fromDotEnv = dotEnv['DATABASE_URL']
@@ -311,7 +355,7 @@ function resolveDevDbConfig(): DbConfigParts {
       )
     }
   }
-  return { ...parseDbUrl(rawUrl, 'DATABASE_URL'), dataDir: resolveDevDataDir() }
+  return { ...parseDbUrl(rawUrl, 'DATABASE_URL'), dataDir: resolveDevDataDir(), fileCorrupt: false }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -332,13 +376,30 @@ function resolveDevDbConfig(): DbConfigParts {
  */
 const storedEncodingSchema = z.enum(['safeStorage', 'plain'])
 
+/**
+ * Schémas **par champ** : la lecture du fichier est tolérante champ par champ
+ * (étape 2.2b) — un champ invalide n'a le droit d'écarter **que lui-même**.
+ * Un parseur binaire (tout-ou-rien) écartait `password`/`authSecret` dès qu'un
+ * `port` mal recopié sautait, et la réécriture qui suivait détruisait alors le
+ * seul exemplaire chiffré du mot de passe : verrouillage définitif du cluster.
+ */
+const persistedFieldSchemas = {
+  port: z.number().int().min(1).max(65535),
+  database: z.string().min(1).max(63),
+  password: z.string().min(1),
+  encoding: storedEncodingSchema,
+  authSecret: z.string().min(1).max(512),
+  authSecretEncoding: storedEncodingSchema,
+}
+
+/** Schéma d'ensemble, dérivé des champs ci-dessus (source du type persisté). */
 const persistedDbConfigSchema = z.object({
-  port: z.number().int().min(1).max(65535).optional(),
-  database: z.string().min(1).max(63).optional(),
-  password: z.string().min(1).optional(),
-  encoding: storedEncodingSchema.optional(),
-  authSecret: z.string().min(1).max(512).optional(),
-  authSecretEncoding: storedEncodingSchema.optional(),
+  port: persistedFieldSchemas.port.optional(),
+  database: persistedFieldSchemas.database.optional(),
+  password: persistedFieldSchemas.password.optional(),
+  encoding: persistedFieldSchemas.encoding.optional(),
+  authSecret: persistedFieldSchemas.authSecret.optional(),
+  authSecretEncoding: persistedFieldSchemas.authSecretEncoding.optional(),
 })
 
 type PersistedDbConfig = z.infer<typeof persistedDbConfigSchema>
@@ -453,44 +514,91 @@ function decodeStoredPassword(persisted: PersistedDbConfig): string | null {
 function writePersistedConfig(configPath: string, data: PersistedDbConfig): void {
   try {
     mkdirSync(path.dirname(configPath), { recursive: true })
-    writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+    // `mode: 0o600` (étape 2.2b, revue B3) : propriétaire seul sous POSIX. Sous
+    // Windows, le mode est ignoré par Node — l'ACL héritée du dossier
+    // `userData` s'applique — sans effet de bord : le même appel reste valable.
+    writeFileSync(configPath, `${JSON.stringify(data, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
     log.info(`[env] configuration de la base persistée : ${configPath}`)
   } catch (error) {
     throw new Error(`Impossible d'écrire ${configPath} (configuration de la base non persistée).`, { cause: error })
   }
 }
 
-/** Lecture du `config.json` : valeurs validées, ou `{}` + `fileCorrupt`. */
+/**
+ * Met de côté un `config.json` corrompu **avant toute réécriture**
+ * (étape 2.2b, revue A1) : `config.json.corrupt-<timestamp>`. Ce fichier est le
+ * seul endroit où a pu exister le chiffrement du mot de passe et du secret de
+ * session — l'écraser silencieusement effacerait toute trace récupérable.
+ * Renommage impossible (`EPERM`…) → **aucune réécriture** : on ne détruit jamais
+ * un exemplaire qu'on n'a pas réussi à préserver.
+ */
+function quarantineCorruptConfig(configPath: string): string {
+  const backupPath = `${configPath}.corrupt-${Date.now()}`
+  try {
+    renameSync(configPath, backupPath)
+  } catch (error) {
+    throw new Error(
+      `Impossible de mettre de côté ${configPath} (attendu ${path.basename(backupPath)}) : réécriture refusée — ` +
+        'un config.json corrompu n’est jamais écrasé sans sauvegarde.',
+      { cause: error },
+    )
+  }
+  log.warn(`[env] config.json corrompu conservé pour traçabilité : ${backupPath}`)
+  return backupPath
+}
+
+/** Lecture **tolérante champ par champ** du `config.json` (étape 2.2b). */
 interface PersistedConfigRead {
   readonly persisted: PersistedDbConfig
-  /** `true` = fichier absent de valeurs exploitables (illisible ou invalide). */
+  /** `true` = fichier illisible **ou** portant au moins un champ invalide. */
   readonly fileCorrupt: boolean
+  /** Noms (jamais de valeurs) des champs refusés par leur schéma. */
+  readonly corruptFields: readonly string[]
 }
 
 function readPersistedConfig(configPath: string): PersistedConfigRead {
   if (!existsSync(configPath)) {
-    return { persisted: {}, fileCorrupt: false }
+    return { persisted: {}, fileCorrupt: false, corruptFields: [] }
   }
+  let raw: unknown
   try {
-    const parsed = persistedDbConfigSchema.safeParse(JSON.parse(readFileSync(configPath, 'utf8')))
-    if (parsed.success) {
-      return { persisted: parsed.data, fileCorrupt: false }
-    }
-    log.warn(
-      `[env] config.json invalide (${parsed.error.issues
-        .map((issue) => issue.path.join('.') || '(racine)')
-        .join(', ')}) : valeurs par défaut régénérées. Si un cluster existe déjà sur ce port, la ` +
-        'connexion échouera (échec fermé) tant que le mot de passe exact n’est pas restauré.',
-    )
-    return { persisted: {}, fileCorrupt: true }
+    raw = JSON.parse(readFileSync(configPath, 'utf8'))
   } catch (error) {
     log.warn(
-      `[env] config.json illisible (${error instanceof Error ? error.message : String(error)}) : valeurs ` +
-        'par défaut régénérées. Si un cluster existe déjà sur ce port, la connexion échouera (échec fermé) ' +
-        'tant que le mot de passe exact n’est pas restauré.',
+      `[env] config.json illisible (${error instanceof Error ? error.message : String(error)}) : aucun champ n'en ` +
+        'est extrait et le fichier reste **en place** (jamais de réécriture sans sauvegarde préalable). ' +
+        'Restaurez-le depuis une sauvegarde ou supprimez-le manuellement.',
     )
-    return { persisted: {}, fileCorrupt: true }
+    return { persisted: {}, fileCorrupt: true, corruptFields: ['(illisible)'] }
   }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    log.warn('[env] config.json : contenu racine inattendu (un objet JSON est attendu) : aucun champ exploitable.')
+    return { persisted: {}, fileCorrupt: true, corruptFields: ['(racine)'] }
+  }
+  const record = raw as Record<string, unknown>
+  const persisted: PersistedDbConfig = {}
+  const corruptFields: string[] = []
+  for (const [key, schema] of Object.entries(persistedFieldSchemas)) {
+    if (!(key in record)) {
+      continue
+    }
+    const parsed = schema.safeParse(record[key])
+    if (parsed.success) {
+      // Un champ invalide n'écartera **que lui** : `password` et `authSecret`
+      // survivent, par exemple, à un `port` illisible (et inversement).
+      Object.assign(persisted, { [key]: parsed.data })
+      continue
+    }
+    corruptFields.push(key)
+  }
+  if (corruptFields.length === 0) {
+    return { persisted, fileCorrupt: false, corruptFields: [] }
+  }
+  log.warn(
+    `[env] config.json : champ(s) invalide(s) ignoré(s), les autres restent exploitables : ` +
+      `${corruptFields.join(', ')} (lecture tolérante champ par champ, jamais de régénération muette).`,
+  )
+  return { persisted, fileCorrupt: true, corruptFields }
 }
 
 /**
@@ -507,31 +615,109 @@ function carryAuthSecret(persisted: PersistedDbConfig): Pick<PersistedDbConfig, 
   }
 }
 
-function resolveProdDbConfig(): DbConfigParts {
+/**
+ * Message d'action explicite (récupération, jamais de régénération muette) quand
+ * un cluster existe et que son mot de passe n'est pas récupérable : réécrire
+ * `config.json` ferait disparaître le seul exemplaire chiffré → accès aux
+ * données du cabinet verrouillé **définitivement**.
+ */
+function unrecoverablePasswordMessage(
+  configPath: string,
+  dataDir: string,
+  fileCorrupt: boolean,
+  corruptFields: readonly string[],
+): string {
+  const reason = fileCorrupt
+    ? `config.json corrompu (champ(s) invalide(s) : ${corruptFields.length > 0 ? corruptFields.join(', ') : 'illisible'})`
+    : 'config.json ne contient plus de mot de passe exploitable'
+  return (
+    `Le cluster PostgreSQL de ${dataDir} existe déjà mais le mot de passe de ${configPath} n'est pas récupérable ` +
+    `(${reason}) : réécrire ce fichier verrouillerait définitivement les données du cabinet. ` +
+    'Restaurez config.json depuis une sauvegarde (le déchiffrement exige que Credential Manager/DPAPI soit ' +
+    'accessible au compte Windows courant), ou supprimez à la fois config.json ET ce répertoire de données ' +
+    'pour repartir de zéro (perte des données du cabinet).'
+  )
+}
+
+/**
+ * Config prod (étape 2.2b — reprise complète de la lecture/écriture) :
+ *
+ * 1. **lecture tolérante champ par champ** : un champ invalide n'écartera que
+ *    lui-même (`password`/`authSecret` survivent à un `port` illisible) ;
+ * 2. **échec fermé sur cluster vivant** : si `<dataDir>/PG_VERSION` existe et
+ *    que le mot de passe n'est pas récupérable (champ corrompu, déchiffrement
+ *    impossible, clé absente), on **refuse d'écrire** et on rejette avec un
+ *    message de récupération — jamais de régénération par-dessus ;
+ * 3. **traçabilité** : un fichier corrompu est renommé
+ *    `config.json.corrupt-<timestamp>` **avant toute réécriture** ;
+ * 4. `fileCorrupt` est **porté** jusqu'à `buildNextEnv()` : le `AUTH_SECRET` n'y
+ *    sera jamais régénéré par-dessus un fichier à restaurer.
+ */
+function resolveProdDbConfig(dataDirOverride: string | undefined): DbBaseConfig {
   const userDataDir = resolveUserDataDir()
   const configPath = path.join(userDataDir, 'config.json')
+  const dataDir = dataDirOverride ?? path.join(userDataDir, 'pgdata')
+  // Un cluster existant = des données vivantes : le moindre risque de verrouillage
+  // est refusé avant toute écriture.
+  const clusterExists = existsSync(path.join(dataDir, 'PG_VERSION'))
 
-  const { persisted, fileCorrupt } = readPersistedConfig(configPath)
+  const { persisted, fileCorrupt, corruptFields } = readPersistedConfig(configPath)
+
+  // Un `password` ou `encoding` invalide rend le mot de passe **non
+  // récupérable** : le déchiffrer « à l'aveugle » produirait un mot de passe
+  // faux, que la réécriture écraserait par-dessus le seul exemplaire valable.
+  const passwordFieldUsable = !corruptFields.includes('password') && !corruptFields.includes('encoding')
+  let storedPassword: string | null = null
+  if (passwordFieldUsable) {
+    try {
+      storedPassword = decodeStoredPassword(persisted)
+    } catch (error) {
+      if (!clusterExists) {
+        // Comportement inchangé (échec fermé) : aucun cluster à verrouiller.
+        throw error
+      }
+      throw new Error(unrecoverablePasswordMessage(configPath, dataDir, fileCorrupt, corruptFields), {
+        cause: error,
+      })
+    }
+  }
+
+  // Règle absolue : cluster vivant + mot de passe non récupérable → **aucune
+  // écriture** (le fichier corrompu reste en place, intact, pour restauration).
+  if (storedPassword === null && clusterExists) {
+    throw new Error(unrecoverablePasswordMessage(configPath, dataDir, fileCorrupt, corruptFields))
+  }
 
   const port = persisted.port ?? PROD_DEFAULT_PORT
   const database = persisted.database ?? DEFAULT_DATABASE
-  const storedPassword = fileCorrupt ? null : decodeStoredPassword(persisted)
   const password = storedPassword ?? generatePassword()
   const isIncomplete =
     persisted.port === undefined ||
     persisted.database === undefined ||
     persisted.encoding === undefined ||
     storedPassword === null
+  // Rétablissement opportuniste du chiffrement (fallback « clair » réversible).
+  const mayReencrypt = persisted.encoding === 'plain' && safeStorage.isEncryptionAvailable()
 
-  if (isIncomplete) {
+  if (isIncomplete || fileCorrupt || mayReencrypt) {
     if (storedPassword === null) {
       log.info('[env] premier démarrage : mot de passe de la base locale généré')
+    } else if (mayReencrypt) {
+      log.info('[env] safeStorage de retour : réchiffrement du mot de passe dans config.json')
     }
-    writePersistedConfig(configPath, { ...carryAuthSecret(persisted), port, database, ...encodePasswordForStorage(password) })
-  } else if (persisted.encoding === 'plain' && safeStorage.isEncryptionAvailable()) {
-    // Rétablissement opportuniste du chiffrement (fallback « clair » réversible).
-    log.info('[env] safeStorage de retour : réchiffrement du mot de passe dans config.json')
-    writePersistedConfig(configPath, { ...carryAuthSecret(persisted), port, database, ...encodePasswordForStorage(password) })
+    if (fileCorrupt) {
+      // Traçabilité : jamais de réécriture par-dessus un fichier corrompu sans
+      // l'avoir mis de côté (le renommage échoué bloque toute écriture).
+      quarantineCorruptConfig(configPath)
+    }
+    // Ne recopie `authSecret` que s'il n'est pas lui-même en cause : porter une
+    // valeur dont l'encodage est illisible produirait un secret faux au
+    // démarrage suivant (l'exemplaire d'origine reste dans le fichier mis de côté).
+    const carried =
+      corruptFields.includes('authSecret') || corruptFields.includes('authSecretEncoding')
+        ? {}
+        : carryAuthSecret(persisted)
+    writePersistedConfig(configPath, { ...carried, port, database, ...encodePasswordForStorage(password) })
   }
 
   return {
@@ -540,7 +726,8 @@ function resolveProdDbConfig(): DbConfigParts {
     user: DEFAULT_USER,
     password,
     database,
-    dataDir: path.join(userDataDir, 'pgdata'),
+    dataDir,
+    fileCorrupt,
   }
 }
 
@@ -559,7 +746,11 @@ function resolveProdDbConfig(): DbConfigParts {
  */
 export function resolveDbConfig(overrides: DbConfigOverrides = {}): DbConfig {
   const mode: DbMode = overrides.mode ?? (process.env.ELECTRON_DEV === '1' ? 'dev' : 'prod')
-  const base = mode === 'dev' ? resolveDevDbConfig() : resolveProdDbConfig()
+  // En prod, l'éventuelle surcharge de répertoire (tests d'intégration) doit
+  // être prise en compte **dès** la détection de cluster (`PG_VERSION`) :
+  // c'est le répertoire réellement utilisé qui décide du risque de verrouillage.
+  const prodDataDir = overrides.dataDir === undefined ? undefined : path.resolve(overrides.dataDir)
+  const base = mode === 'dev' ? resolveDevDbConfig() : resolveProdDbConfig(prodDataDir)
   const parts: DbUrlParts = {
     host: base.host,
     port: overrides.port ?? base.port,
@@ -576,9 +767,15 @@ export function resolveDbConfig(overrides: DbConfigOverrides = {}): DbConfig {
     database: parts.database,
     dataDir,
     mode,
+    // Signal `fileCorrupt` (prod) : porté jusqu'à `buildNextEnv()`, qui échoue
+    // en cas de corruption au lieu de régénérer `AUTH_SECRET`.
+    fileCorrupt: base.fileCorrupt,
   }
   log.info(
-    `[env] base locale ${mode} : 127.0.0.1:${config.port}/${config.database} ` +
+    // L'hôte n'est **pas** toujours le bouclage : en dev il vient du
+    // `DATABASE_URL` du `.env` (voir C2) — on journalise l'hôte réel, jamais
+    // l'URL ni le mot de passe.
+    `[env] base locale ${mode} : ${parts.host}:${config.port}/${config.database} ` +
       `(user=${config.user}, dataDir=${config.dataDir})`,
   )
   return config
@@ -660,12 +857,23 @@ function resolveOrCreateAuthSecret(): string {
   const configPath = path.join(resolveUserDataDir(), 'config.json')
   const { persisted, fileCorrupt } = readPersistedConfig(configPath)
   if (fileCorrupt) {
+    // Garde de **second niveau** : `buildNextEnv()` a déjà rejeté sur le signal
+    // `fileCorrupt` porté par `resolveDbConfig()` (le fichier a pu être mis de
+    // côté/réécrit entre-temps, d'où cette relecture défensive).
     throw new Error(
       `config.json illisible : ${AUTH_SECRET_LABEL} de production impossible à résoudre sans risquer une ` +
         'régénération à chaque démarrage (sessions perpétuellement invalidées). Restaurez ce fichier, ' +
         'ou supprimez-le pour régénérer la configuration complète.',
     )
   }
+  // Repli **délibéré** et documenté (revue C4) : `authSecretEncoding` n'existe
+  // que depuis la persistance dédiée d'`AUTH_SECRET`. Un fichier plus ancien
+  // porte ce secret sous l'unique marqueur `encoding` du fichier : ce marqueur
+  // est alors **historiquement le bon** (le secret y a été chiffré avec le même
+  // schéma que le mot de passe). Ce n'est **pas** un couplage des deux
+  // marqueurs : dès que `authSecretEncoding` est présent, il fait seul foi, et
+  // `decodeStoredSecret` échoue fermé si le déchiffrement échoue — jamais de
+  // régénération silencieuse en cas de divergence réelle.
   const storedEncoding = persisted.authSecretEncoding ?? persisted.encoding
   const decoded = decodeStoredSecret(persisted.authSecret, storedEncoding, AUTH_SECRET_LABEL, AUTH_SECRET_HINTS)
   if (decoded !== null) {
@@ -709,6 +917,10 @@ function resolveUploadDir(config: DbConfig): string {
  * Ordre de résolution dans `main.ts` : `resolveDbConfig()` → `startLocalDb()`
  * → **cette fonction** → `startNextServer({ env })`.
  *
+ * - **garde `fileCorrupt` (étape 2.2b)** : si `config.json` était corrompu au
+ *   démarrage, on **rejette ici**, avant toute génération — régénérer
+ *   `AUTH_SECRET` par-dessus un fichier à restaurer invaliderait toutes les
+ *   sessions ouvertes alors que le message promet « restaurez ce fichier » ;
  * - `DATABASE_URL` : URL prête de la base locale (déjà démarrée ou réutilisée) ;
  * - `AUTH_SECRET` : dev → valeur du `.env` (**jamais** régénérée) ; prod →
  *   `randomBytes(32)` généré une fois et persisté (`safeStorage`/`config.json`) ;
@@ -727,6 +939,21 @@ function resolveUploadDir(config: DbConfig): string {
  * Ni `DATABASE_URL` ni `AUTH_SECRET` ne sont jamais journalisés.
  */
 export function buildNextEnv(db: LocalDbHandle, config: DbConfig): NodeJS.ProcessEnv {
+  // Garde `fileCorrupt` (étape 2.2b, revue A1-i) : `config.json` était corrompu
+  // au démarrage. Sans ce signal — propagé par `resolveDbConfig()` — la garde de
+  // `resolveOrCreateAuthSecret()` n'était **jamais** atteinte (`resolveProdDbConfig()`
+  // réécrivait le fichier avant sa relecture) et un nouvel `AUTH_SECRET` était
+  // régénéré silencieusement par-dessus : toutes les sessions invalidées, alors
+  // même que le message promettait « restaurez ce fichier ». Ici : échec
+  // propre, avant toute génération.
+  if (config.fileCorrupt === true) {
+    throw new Error(
+      'config.json corrompu : AUTH_SECRET de production impossible à résoudre sans risquer une régénération à ' +
+        'chaque démarrage (sessions perpétuellement invalidées). Restaurez ce fichier (un exemplaire ' +
+        'config.json.corrupt-<timestamp> est conservé à côté s’il a été réécrit), ou supprimez-le pour ' +
+        'régénérer la configuration complète.',
+    )
+  }
   const port = resolveNextPort()
   warnInheritedSecrets()
 

@@ -427,13 +427,25 @@ async function stopOwnedCluster(cluster: OwnedCluster): Promise<void> {
   // L'arrêt gracieux a réussi : on attend (borné) que shutdown soit achevé —
   // port libéré **et** verrou retiré — sans quoi l'appelant croirait pouvoir
   // enchaîner sur un serveur encore en cours d'extinction.
-  if (await waitClusterFullyStopped(config)) {
-    log.info(`[pg] port ${config.port} libéré, verrou retiré : arrêt confirmé`)
-  } else {
-    log.warn(
-      `[pg] cluster arrêté mais shutdown non confirmé après ${STOP_SETTLE_TIMEOUT_MS} ms ` +
-        `(port ${config.port} et/ou postmaster.pid)`,
-    )
+  //
+  // **Contrat : `stop()` ne rejette jamais** (un rejet ferait échouer le
+  // `before-quit` de `main.ts`). La phase de settle peut pourtant lever :
+  // `reapDeadPidLock()` appelle `rmSync(postmaster.pid, { force: true })`, qui
+  // échoue en `EPERM`/`EBUSY` dès qu'un antivirus Windows verrouille le
+  // fichier. Simple avertissement : la sortie de l'application n'est jamais
+  // bloquée par un verrou de fichier (le verrou sera démêlé au démarrage
+  // suivant, le détenteur étant prouvé mort).
+  try {
+    if (await waitClusterFullyStopped(config)) {
+      log.info(`[pg] port ${config.port} libéré, verrou retiré : arrêt confirmé`)
+    } else {
+      log.warn(
+        `[pg] cluster arrêté mais shutdown non confirmé après ${STOP_SETTLE_TIMEOUT_MS} ms ` +
+          `(port ${config.port} et/ou postmaster.pid)`,
+      )
+    }
+  } catch (error) {
+    log.warn(`[pg] confirmation d'arrêt interrompue (verrou de fichier refusé ?) : ${describeError(error)}`)
   }
 }
 
@@ -543,14 +555,46 @@ export async function startLocalDb(config: DbConfig): Promise<LocalDbHandle> {
 }
 
 /**
+ * Windows — identifie l'image d'un pid **avant** tout `taskkill` (étape 2.2b,
+ * revue B2).
+ *
+ * `postmaster.pid` peut avoir survécu à la mort de notre postmaster : Windows
+ * recycle alors les pid, et le pid lu désignerait un processus **étranger**
+ * que `taskkill /T /F` détruirait. Les deux filtres `tasklist` (PID **et**
+ * IMAGENAME) ne renvoient une ligne que si le pid correspond bien à
+ * `postgres.exe` ; `/FO CSV /NH` évite tout en-tête et tout nom de colonne
+ * localisé (le nom d'image n'est jamais traduit). `false` = on ne tue **rien**
+ * (image non vérifiée → échec fermé, jamais de kill à l'aveugle).
+ */
+function isPostgresImage(pid: number): boolean {
+  try {
+    const output = execFileSync(
+      'tasklist',
+      ['/FI', `PID eq ${pid}`, '/FI', 'IMAGENAME eq postgres.exe', '/FO', 'CSV', '/NH'],
+      { windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+    // `"postgres.exe","<pid>",…` (guillemets de CSV acceptés en option).
+    return new RegExp(`^"postgres\\.exe"\\s*,\\s*"?${pid}"?`, 'im').test(output)
+  } catch {
+    // `tasklist` indisponible/inaccessible : la vérification a échoué → on ne
+    // tue pas (un processus étranger tué est irréversible, un PG orphelin se
+    // rattrape au démarrage suivant).
+    return false
+  }
+}
+
+/**
  * Filet **synchrone** : à n'utiliser que depuis `process.on('exit')`, où aucune
  * API asynchrone n'est autorisée. L'arrêt gracieux normal reste
  * `handle.stop()` (sur `before-quit`). Ne tue que le cluster que nous avons
  * lancé (`owned`) — un serveur réutilisé n'est jamais touché.
  *
- * Méthode : `postmaster.pid` → pid du postmaster → `taskkill` de l'arbre (Windows)
- * / `SIGKILL` (POSIX). Un arrêt brutal laisse un verrou : c'est assumé, il sera
- * démêlé au démarrage suivant par `clearStalePidLock()` (le détenteur est mort).
+ * Méthode : `postmaster.pid` → pid du postmaster → **vérification de l'image**
+ * (Windows : `taskkill` n'est lancé que si le pid est toujours celui de
+ * `postgres.exe`, sinon PID recyclé → rien n'est tué) → `taskkill` de l'arbre
+ * (Windows) / `SIGKILL` (POSIX). Un arrêt brutal laisse un verrou : c'est
+ * assumé, il sera démêlé au démarrage suivant par `clearStalePidLock()` (le
+ * détenteur est mort).
  */
 export function forceStopLocalDb(): void {
   const cluster = ownedCluster
@@ -560,6 +604,17 @@ export function forceStopLocalDb(): void {
   const pid = readPostmasterPid(cluster.config.dataDir)
   if (pid === null) {
     log.warn(`[pg] kill de secours : aucun postmaster.pid exploitable dans ${cluster.config.dataDir} — rien à tuer`)
+    cluster.stopped = true
+    ownedCluster = null
+    return
+  }
+  if (process.platform === 'win32' && !isPostgresImage(pid)) {
+    // PID recyclé : le pid lu n'est plus un `postgres.exe` (mort ou étranger).
+    // Tuer tel quel détruirait un processus qui n'a rien à voir — on n'y touche pas.
+    log.warn(
+      `[pg] kill de secours annulé : le pid ${pid} n'est plus identifié comme postgres.exe (postmaster mort ou ` +
+        'pid recyclé) — processus étranger laissé intact.',
+    )
     cluster.stopped = true
     ownedCluster = null
     return

@@ -723,9 +723,20 @@ export interface StartNextServerOptions {
    * Fournies par `electron/env.ts` (`buildNextEnv`) : `DATABASE_URL`,
    * `AUTH_SECRET`, `AUTH_URL`, `HOSTNAME`, `PORT`, `NODE_ENV`, `UPLOAD_DIR`.
    * Ignorée si le serveur est **réutilisé** (aucun enfant à équiper) — un
-   * avertissement en est alors journalisé.
+   * avertissement en est alors journalisé, ou un rejet si
+   * `requireEnvInjection` est `true` (voir ci-dessous).
    */
   readonly env?: NodeJS.ProcessEnv
+  /**
+   * `true` = l'injection d'`env` est **obligatoire** (mode production) : un
+   * serveur réutilisé conserverait son propre `DATABASE_URL`/`AUTH_SECRET`, et
+   * l'application parlerait alors à une base **autre que le cluster embarqué**.
+   * Dans ce cas, `startNextServer()` **rejette** (fail-fast) au lieu de
+   * réutiliser en silence. Dev (`false`/omis, comportement conservé) : la
+   * réutilisation reste permise avec un simple avertissement — un `next dev`
+   * réutilisé lit le même `.env` que nous.
+   */
+  readonly requireEnvInjection?: boolean
 }
 
 /**
@@ -742,11 +753,24 @@ export async function startNextServer(options: StartNextServerOptions = {}): Pro
 
   const reuse = await probeReuse(url)
   if (reuse.verdict === 'nextjs') {
+    if (options.requireEnvInjection === true) {
+      // Fail-fast prod (étape 2.2b, revue C3) : un serveur réutilisé garde son
+      // propre `DATABASE_URL`/`AUTH_SECRET` — l'application parlerait à une base
+      // autre que le cluster embarqué, sans le moindre signe visible. Mieux
+      // vaut refuser le démarrage que de servir une mauvaise base.
+      throw new Error(
+        `Le serveur Next.js déjà actif sur le port ${port} serait réutilisé alors que l'injection d'environnement ` +
+          'est obligatoire (mode production) : il conserverait son propre DATABASE_URL/AUTH_SECRET et ' +
+          "l'application parlerait à une base autre que le cluster embarqué. Arrêtez ce serveur (ou changez " +
+          'PORT/ELECTRON_START_URL) avant de relancer l’application.',
+      )
+    }
     if (options.env !== undefined) {
       // Aucun enfant lancé : l'env injecté n'a aucun effet (le serveur réutilisé
-      // garde sa propre configuration) — on le dit explicitement plutôt que de
-      // laisser croire que `DATABASE_URL`/`AUTH_SECRET` ont été appliqués.
-      log.info('[next] serveur réutilisé : env injecté ignoré (aucun processus enfant lancé)')
+      // garde sa propre configuration) — un avertissement (et non plus une simple
+      // information) plutôt que de laisser croire que `DATABASE_URL`/`AUTH_SECRET`
+      // ont été appliqués.
+      log.warn('[next] serveur réutilisé : env injecté ignoré (aucun processus enfant lancé)')
     }
     log.info(`[next] serveur Next.js déjà actif sur ${redactSecrets(url)} : réutilisation (aucun processus lancé)`)
     // Réutilisé : l'URL probeée est celle qui a répondu — c'est elle qui devient
@@ -782,12 +806,18 @@ export async function startNextServer(options: StartNextServerOptions = {}): Pro
   // le reste de l'environnement parent est conservé tel quel.
   const spec: LaunchSpec =
     options.env === undefined ? baseSpec : { ...baseSpec, env: { ...baseSpec.env, ...options.env } }
-  if (options.env !== undefined) {
-    // Noms de clés **seulement** : les valeurs (DATABASE_URL, AUTH_SECRET, …)
-    // ne journalisent jamais.
+  const injected = options.env
+  if (injected !== undefined) {
+    // Noms de clés **seulement**, et **delta uniquement** (étape 2.2b, revue
+    // C1) : `buildNextEnv()` reconstruit l'env sur tout l'héritage de
+    // `process.env` (~60 clés) — les lister ici serait un doublon inutile avec
+    // `warnInheritedSecrets()` (`env.ts`). Ne restent que les clés **réellement
+    // modifiées ou ajoutées** par rapport à l'environnement de base du spec.
+    const deltaKeys = Object.keys(injected).filter((key) => baseSpec.env[key] !== injected[key])
     log.info(
-      `[next] ${Object.keys(options.env).length} variable(s) injectée(s) dans l'enfant : ` +
-        `${Object.keys(options.env).join(', ')} (valeurs jamais journalisées)`,
+      `[next] ${deltaKeys.length} variable(s) réellement injectée(s) dans l'enfant (par rapport à ` +
+        `l'environnement de base) : ${deltaKeys.length === 0 ? '(aucune)' : deltaKeys.join(', ')} ` +
+        '(valeurs jamais journalisées)',
     )
   }
   log.info(`[next] lancement de ${spec.label} : ${spec.command} ${spec.args.join(' ')} (port ${port})`)

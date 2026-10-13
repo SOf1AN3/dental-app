@@ -38,6 +38,20 @@ function currentServerUrl(): string {
 }
 
 /**
+ * Hôte **seul** d'une URL de connexion (étape 2.2b, revue C2) : `localDb.url`
+ * contient le mot de passe — on n'en extrait que la composante `hostname`, car
+ * l'hôte n'est pas toujours le bouclage en dev (il provient du `DATABASE_URL`
+ * du `.env`). Repli explicite si l'URL est illisible : jamais l'URL brute.
+ */
+function hostOfDbUrl(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return '(hôte illisible)'
+  }
+}
+
+/**
  * Arrêt (ou forçage) du serveur Next.js.
  *
  * Idempotent : un second appel retourne la promesse en cours — jamais de rejet.
@@ -163,15 +177,23 @@ async function startApplication(): Promise<void> {
     )
   }
   log.info(
-    `[main] base locale ${localDb.owned ? 'démarrée' : 'réutilisée'} sur 127.0.0.1:${localDb.port}` +
-      `${localDb.owned ? '' : ' (aucun processus à notre charge)'}`,
+    // L'hôte provient du `DATABASE_URL` résolue (du `.env` en dev) : il n'est
+    // **pas** toujours `127.0.0.1` — on journalise l'hôte réel, redacté (jamais
+    // l'URL ni les identifiants).
+    redactSecrets(
+      `[main] base locale ${localDb.owned ? 'démarrée' : 'réutilisée'} sur ${hostOfDbUrl(localDb.url)}:${localDb.port}` +
+        `${localDb.owned ? '' : ' (aucun processus à notre charge)'}`,
+    ),
   )
 
   try {
     // 3 — env de l'enfant : construit uniquement une fois PG prêt.
     const env = buildNextEnv(localDb, config)
     // 4 — serveur Next (réutilise un `next dev` déjà actif, sinon le lance).
-    const server = await startNextServer({ env })
+    // En prod, l'injection est **obligatoire** : un serveur réutilisé garde son
+    // propre `DATABASE_URL`/`AUTH_SECRET` → rejet explicite plutôt que de parler
+    // à une autre base que le cluster embarqué (revue C3).
+    const server = await startNextServer({ env, requireEnvInjection: config.mode === 'prod' })
     nextServer = server
     log.info(
       `[main] serveur Next.js ${server.owned ? 'démarré' : 'réutilisé'} sur ${redactSecrets(server.url)} (port ${server.port})`,
