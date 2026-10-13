@@ -674,6 +674,13 @@ extraResources:
 ÉTAPE 10 — DURCISSEMENT & VALIDATION
   10.1 Checklist §6.4 → Reviewer
   10.2 Tester (E2E complet : offline → sync → conflit → update)
+  10.3 Durcissements issus des revues (relevés, non bloquants) :
+      - embedded-pg.ts : garde `isPostgresImage` sur le repli taskkill (pid recyclé)
+      - embedded-pg.ts : confirmer l'arrêt avant de désarmer le filet `forceStopLocalDb`
+      - embedded-pg.ts : vérifier le detach du champ `process` + documenter le risque de version (package en beta)
+      - embedded-pg.ts : logger en `warn` si l'instance `async-exit-hook` diffère (layout non hoisté)
+      - embedded-pg.ts : ne cacher que les succès de résolution de `pg_ctl`
+      - electron.vite.config.ts : `asarUnpack` des binaires PG + exclusion `.env*`/`pgdata`/`uploads`/`src` (voir 9.0)
 ```
 
 > **Principe** : chaque étape se termine par une application **fonctionnelle**. Les Étapes 1-3
