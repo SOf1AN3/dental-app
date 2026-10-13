@@ -247,7 +247,7 @@ Fichier : **`electron/db/embedded-pg.ts`** (CRÉER)
 |---|---|
 | `src/lib/db/db.ts` (EXISTANT) | **inchangé pour le web** ; `validateEnv()` reste en top-level |
 | `src/lib/db/desktop-db.ts` (CRÉER) | client Drizzle **lazy** pour le processus main (sync runner) : reçoit l'URL via paramètre, zéro lecture `process.env` au import |
-| `electron/env.ts` (CRÉER) | construit l'env du serveur enfant : `DATABASE_URL`, `AUTH_SECRET` (≥ 32 chars, `safeStorage`), `AUTH_URL=http://127.0.0.1:<port>`, `PORT`, `HOSTNAME=127.0.0.1`, `UPLOAD_DIR=userData/uploads` |
+| `electron/env.ts` (CRÉER) | construit l'env du serveur enfant : `DATABASE_URL`, `AUTH_SECRET` (≥ 32 chars, `safeStorage`), `AUTH_URL=http://localhost:<port>` (**cohérent avec `START_URL` et la whitelist `window.ts`** : un `127.0.0.1` divergerait et casserait les redirections NextAuth), `PORT`, `HOSTNAME=127.0.0.1`, `UPLOAD_DIR=userData/uploads` |
 
 > ** piège identifié ** : `db.ts` exécute `validateEnv()` au **top-level**. Un import de `db.ts`
 > depuis le main process avant génération de l'env provoquerait un crash. D'où `desktop-db.ts`
@@ -337,7 +337,7 @@ Le serveur local tourne **le même code** que le web. Adaptations à vérifier e
 
 | Route | Comportement local |
 |---|---|
-| `/api/auth/[...nextauth]` | NextAuth v5 avec `AUTH_URL=http://127.0.0.1:<port>` → **cookies `useSecureCookies: false`** (sinon aucun cookie n'est écrit en HTTP local). Fichier : `src/lib/auth.ts` (à localiser et adapter par env `AUTH_INSECURE_COOKIES=1`). |
+| `/api/auth/[...nextauth]` | NextAuth v5 avec `AUTH_URL=http://localhost:<port>` → **cookies `useSecureCookies: false`** (sinon aucun cookie n'est écrit en HTTP local). Fichier : `src/lib/auth.ts` (à localiser et adapter par env `AUTH_INSECURE_COOKIES=1`). |
 | `/api/files/[...key]` | sert `UPLOAD_DIR` local au lieu de S3 (**obligatoire** : corrige aussi la faille SEC-B05 — aucune URL publique permanente). |
 | `/api/cron/*` | **désactivés en local** (pas de cron) → remplacés par des tâches planifiées du main process (expiration devis, rappels abonnement) — **hors périmètre D-3**, simple no-op local. |
 | `/api/drugs/search` | inchangé (base locale) ou fallback réseau si catalogue distant. |
