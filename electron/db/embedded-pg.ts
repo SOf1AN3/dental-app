@@ -25,7 +25,10 @@
  *    détenteur est réellement mort, sinon on abandonne ;
  *  - **journalisation** : `electron-log` **uniquement** (aucun `console.log`), et
  *    toute URL/jeton passe par `redactSecrets()` (l'URL contient le mot de passe) ;
- *  - **arrêt** : `stop()` idempotent, jamais rejetant ; `forceStopLocalDb()`
+ *  - **arrêt** : `stop()` idempotent, jamais rejetant ; arrêt **gracieux** via
+ *    `pg_ctl stop -m fast` (checkpoint de fermeture → `postmaster.pid` retiré
+ *    par PostgreSQL, plus de « automatic recovery » au démarrage suivant), le
+ *    `taskkill /F` du package ne servant que de repli ; `forceStopLocalDb()`
  *    synchrone en filet de `process.on('exit')`.
  *
  * Ordre de démarrage à venir (**étape 2.2 — branchement dans `main.ts`**, non
@@ -39,8 +42,9 @@
  * sur `process.on('exit')` (filet **synchrone**, seul type d'appel autorisé là).
  */
 
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import log from 'electron-log'
 import EmbeddedPostgresImport from 'embedded-postgres'
@@ -90,6 +94,92 @@ const EmbeddedPostgres: EmbeddedPostgresCtor = EmbeddedPostgresCandidate
 type EmbeddedPostgresInstance = InstanceType<EmbeddedPostgresCtor>
 
 /* -------------------------------------------------------------------------- */
+/* Hook de sortie `async-exit-hook` (désarmement ciblé)                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * API **partielle** d'`async-exit-hook@2` (CJS, partagé avec `embedded-postgres`).
+ * Seule la paire `hookedEvents()` / `unhookEvent()` est utilisée ici.
+ */
+interface AsyncExitHookApi {
+  readonly hookedEvents?: () => string[]
+  readonly unhookEvent?: (event: string) => void
+}
+
+/** Fichier du bundle courant (CJS) — base de résolution de `createRequire`. */
+function bundleFilename(): string {
+  // `typeof` sur un global absent (contexte ESM/tsx) ne lève jamais : c'est le
+  // garde-fou qui évite un `ReferenceError` au chargement.
+  return typeof __filename === 'string' && __filename.length > 0 ? __filename : path.join(process.cwd(), 'index.js')
+}
+
+/**
+ * Retire le hook **`exit`** qu'`embedded-postgres` enregistre via
+ * `async-exit-hook` (`dist/index.js:395` → `AsyncExitHook(gracefulShutdown)`).
+ *
+ * Cause racine de la réjection observée à l'arrêt :
+ *  - `gracefulShutdown(done)` (`embedded-postgres/dist/index.js:386-394`) est une
+ *    fonction **asynchrone** qui termine par `done()` **ligne 393** ;
+ *  - `async-exit-hook` n'applique le contrat « async » **que** si l'événement est
+ *    porteur d'un code de sortie (`runHook` : `if (exit && hook.length > syncArgCount)
+ *    → hook(stepTowardExit)`, sinon `hook()` **sans aucun argument**) ;
+ *  - l'événement brut `exit` est justement le seul enregistré **sans code**
+ *    (`add.hookEvent('exit')` → `exit(false, undefined)`) : le callback `done`
+ *    est donc `undefined`, `done()` lève `TypeError: done is not a function`,
+ *    et la promesse ainsi rejetée n'est **jamais observée** par le package →
+ *    `UnhandledPromiseRejection` à chaque sortie (`app.exit(0)` de `main.ts`).
+ *
+ * Désarmer **ce hook précis** est sans effet de bord :
+ *  - aucun travail asynchrone n'est de toute façon possible pendant l'événement
+ *    `exit` (boucle d'événements déjà arrêtée) ;
+ *  - les autres événements d'`async-exit-hook` (`beforeExit`, signaux) restent
+ *    branchés : ils fournissent bien `done` et ne posent pas ce problème ;
+ *  - notre filet synchrone `process.once('exit') → forceStopLocalDb()`
+ *    (`main.ts`) couvre toujours une sortie imprévue.
+ *
+ * L'instance retournée par `createRequire(__filename)('async-exit-hook')` est
+ * **celle du cache CJS**, donc exactement celle qu'`embedded-postgres` importe
+ * (`import AsyncExitHook from 'async-exit-hook'` → `module.exports`). Le retrait
+ * est ensuite **vérifié** sur `process.listenerCount('exit')` : si le compteur
+ * n'a pas bougé, on journalise une erreur (le package ne peut pas être désarmé
+ * depuis ici) plutôt que de faire croire à un succès silencieux.
+ */
+function disarmAsyncExitHook(): void {
+  try {
+    const requireFromBundle = createRequire(bundleFilename())
+    const exitHook = requireFromBundle('async-exit-hook') as unknown as AsyncExitHookApi
+    if (typeof exitHook.hookedEvents !== 'function' || typeof exitHook.unhookEvent !== 'function') {
+      log.error("[pg] async-exit-hook : API hookedEvents/unhookEvent introuvable — hook 'exit' laissé en place")
+      return
+    }
+    if (!exitHook.hookedEvents().includes('exit')) {
+      log.info("[pg] hook 'exit' d'async-exit-hook déjà absent : rien à désarmer")
+      return
+    }
+    const listenersBefore = process.listenerCount('exit')
+    exitHook.unhookEvent('exit')
+    const listenersAfter = process.listenerCount('exit')
+    if (listenersAfter >= listenersBefore) {
+      log.error(
+        "[pg] retrait du hook 'exit' d'async-exit-hook sans effet (instance partagée introuvable) : " +
+          'la réjection interne « done is not a function » subsistera à l’arrêt',
+      )
+      return
+    }
+    log.info(
+      "[pg] hook 'exit' d'async-exit-hook désarmé : embedded-postgres l'invoquait sans callback " +
+        '(TypeError « done is not a function »)',
+    )
+  } catch (error) {
+    log.error(`[pg] désarmement du hook 'exit' d'async-exit-hook impossible : ${describeError(error)}`)
+  }
+}
+
+// Effectué **dès le chargement** : l'import statique `embedded-postgres` ci-dessus
+// a déjà enregistré le hook fautif — il faut le retirer avant toute sortie.
+disarmAsyncExitHook()
+
+/* -------------------------------------------------------------------------- */
 /* Types publics                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -127,6 +217,28 @@ const CLIENT_END_TIMEOUT_S = 1
  */
 const STOP_SETTLE_TIMEOUT_MS = 5_000
 const STOP_SETTLE_RETRY_INTERVAL_MS = 100
+/**
+ * Attente maximale de `pg_ctl stop -w` (**arrêt gracieux**, en secondes).
+ *
+ * C'est **ce chemin qui garantit un arrêt propre** : le package, sous Windows,
+ * se contente d'un `taskkill /f /t` (`embedded-postgres/dist/index.js:254`) —
+ * le postmaster est tué avant son checkpoint de fin, son `postmaster.pid`
+ * survit et le démarrage suivant annonce « database system was not properly
+ * shut down; automatic recovery in progress ». `pg_ctl stop -m fast` fait
+ * jouer à PostgreSQL son propre arrêt (sessions terminées, checkpoint de
+ * fermeture, retrait du verrou) — le `postmaster.pid` disparaît **par lui-même**.
+ */
+const PG_CTL_STOP_TIMEOUT_S = 3
+/** Filet matériel autour de `pg_ctl` (ms) : au-delà, on replie sur le package. */
+const PG_CTL_EXEC_TIMEOUT_MS = 4_000
+/**
+ * Attente bornée de `pg.stop()` (le package) : son `spawn('taskkill', …)` est
+ * lancé **synchrone­ment** dès le premier tour, l'attente ne sert qu'à laisser
+ * le temps au processus enfant de se terminer. Ce garde-fou protège contre la
+ * seule configuration où cette promesse peut ne **jamais** se résoudre : l'enfant
+ * a déjà émis `exit` (le listener ajouté par `stop()` ne se déclencherait plus).
+ */
+const PACKAGE_STOP_MAX_WAIT_MS = 1_000
 
 /* -------------------------------------------------------------------------- */
 /* État interne                                                               */
@@ -439,6 +551,138 @@ function buildPostgresLogHandlers(): { onLog: (message: string) => void; onError
 }
 
 /* -------------------------------------------------------------------------- */
+/* Arrêt (gracieux d'abord, repli sur le package)                             */
+/* -------------------------------------------------------------------------- */
+
+/** Cache de résolution de `pg_ctl` : `undefined` = pas encore cherché. */
+let pgCtlPathCache: string | null | undefined
+
+/**
+ * Chemin absolu de `pg_ctl.exe`, résolu **exactement comme le fait le package**
+ * (son `dist/binary.js` importe `@embedded-postgres/<plateforme>`) mais sans
+ * import statique : la résolution est lazy et reste isolée à l'arrêt.
+ * `null` = indisponible → comportement historique du package (`taskkill /F`).
+ */
+function resolvePgCtlPath(): string | null {
+  if (pgCtlPathCache !== undefined) {
+    return pgCtlPathCache
+  }
+  pgCtlPathCache = null
+  if (process.platform !== 'win32') {
+    // Seul Windows est couvert ici : `electron.vite.config.ts` externalise
+    // `@embedded-postgres/windows-x64` (les binaires des autres plateformes ne
+    // sont même pas installés). Ailleurs : repli sur le package, comme avant.
+    return pgCtlPathCache
+  }
+  try {
+    const requireFromBundle = createRequire(bundleFilename())
+    // `exports` de la plateforme n'expose que `"."` → `…/windows-x64/dist/index.js`,
+    // d'où `pg_ctl.exe` vit à `../native/bin/pg_ctl.exe`.
+    const entry = requireFromBundle.resolve('@embedded-postgres/windows-x64')
+    const candidate = path.join(path.dirname(entry), '..', 'native', 'bin', 'pg_ctl.exe')
+    if (existsSync(candidate)) {
+      pgCtlPathCache = candidate
+    } else {
+      log.warn(`[pg] pg_ctl introuvable (${redactSecrets(candidate)}) : arrêt gracieux indisponible`)
+    }
+  } catch (error) {
+    log.error(`[pg] résolution de pg_ctl impossible : ${describeError(error)}`)
+  }
+  return pgCtlPathCache
+}
+
+/**
+ * `pg_ctl stop -D <datadir> -m fast -w -t <n>` — **arrêt gracieux**, seul
+ * moyen d'obtenir un `postmaster.pid` retiré par PostgreSQL lui-même.
+ * Ne **rejette jamais** : `false` = échec/indisponibilité → repli sur le package.
+ */
+async function stopClusterWithPgCtl(config: DbConfig): Promise<boolean> {
+  const pgCtl = resolvePgCtlPath()
+  if (pgCtl === null) {
+    return false
+  }
+  const outcome = await new Promise<{ failed: boolean; details: string }>((resolve) => {
+    execFile(
+      pgCtl,
+      ['stop', '-D', config.dataDir, '-m', 'fast', '-w', '-t', String(PG_CTL_STOP_TIMEOUT_S)],
+      {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: PG_CTL_EXEC_TIMEOUT_MS,
+        // Même locale que les enfants du package : messages PostgreSQL en anglais.
+        env: { ...process.env, LC_MESSAGES: 'C' },
+      },
+      (error, stdout, stderr) => {
+        resolve({ failed: error !== null, details: `${stdout ?? ''}${stderr ?? ''}` })
+      },
+    )
+  })
+  const details = outcome.details.replace(/\s+$/, '')
+  if (!outcome.failed) {
+    if (details.length > 0) {
+      log.info(`[pg] ${redactSecrets(details)}`)
+    }
+    log.info(`[pg] pg_ctl stop -m fast : arrêt gracieux effectué (port ${config.port})`)
+    return true
+  }
+  log.warn(
+    `[pg] pg_ctl stop a échoué (port ${config.port}) : ` +
+      `${redactSecrets(details.length > 0 ? details : 'aucune sortie')} — repli sur l'arrêt du package`,
+  )
+  return false
+}
+
+/**
+ * Efface la référence au processus enfant détenue par `embedded-postgres`
+ * (champ privé `process`, **même affectation que son propre `stop()`** :
+ * `this.process = undefined`). Indispensable après un arrêt `pg_ctl` réussi :
+ * l'enfant est déjà terminé, et sans ce détachement un rappel ultérieur de
+ * `pg.stop()` tenterait un `taskkill /pid <…>` sur un **pid éventuellement
+ * recyclé** (processus innocent) et attendrait indéfiniment un événement
+ * `exit` qui ne viendra plus.
+ */
+function detachPackageProcessRef(pg: EmbeddedPostgresInstance): void {
+  const internals = pg as unknown as { process?: unknown }
+  if (internals.process !== undefined) {
+    internals.process = undefined
+    log.info('[pg] référence de processus du package effacée (enfant déjà terminé)')
+  }
+}
+
+/** `pg.stop()` **jamais rejetant et jamais bloquant** (attente bornée ci-dessus). */
+async function stopViaPackageBounded(pg: EmbeddedPostgresInstance): Promise<boolean> {
+  let failed = false
+  const stopping = pg.stop().catch((error: unknown) => {
+    failed = true
+    log.error(`[pg] arrêt du package impossible : ${describeError(error)}`)
+  })
+  await Promise.race([stopping, delay(PACKAGE_STOP_MAX_WAIT_MS)])
+  return !failed
+}
+
+/**
+ * Arrêt complet du cluster `pg` : **gracieux d'abord** (`pg_ctl stop -m fast`),
+ * **repli sur le package** (`taskkill /F`, comportement historique, brutal)
+ * uniquement si `pg_ctl` est indisponible ou échoue **et** que le postmaster
+ * est toujours vivant. Ne rejette jamais ; `true` = cluster arrêté (ou déjà
+ * arrêté).
+ */
+async function stopCluster(pg: EmbeddedPostgresInstance, config: DbConfig): Promise<boolean> {
+  if (await stopClusterWithPgCtl(config)) {
+    detachPackageProcessRef(pg)
+    await stopViaPackageBounded(pg)
+    return true
+  }
+  const pid = readPostmasterPid(config.dataDir)
+  if (pid === null || !isProcessAlive(pid)) {
+    log.info('[pg] aucun postmaster actif : plus rien à arrêter')
+    return true
+  }
+  log.warn("[pg] repli sur l'arrêt du package (taskkill /F) : arrêt brutal, récupération automatique au prochain démarrage")
+  return await stopViaPackageBounded(pg)
+}
+
+/* -------------------------------------------------------------------------- */
 /* Handle                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -449,9 +693,10 @@ async function stopOwnedCluster(cluster: OwnedCluster): Promise<void> {
   const config = cluster.config
   log.info(`[pg] arrêt du cluster sur le port ${config.port} …`)
   try {
-    await cluster.pg.stop()
-    cluster.stopped = true
-    log.info('[pg] cluster arrêté')
+    if (await stopCluster(cluster.pg, config)) {
+      cluster.stopped = true
+      log.info('[pg] cluster arrêté')
+    }
   } catch (error) {
     // Ne pas marquer `stopped` : le filet `forceStopLocalDb()` reste armé.
     log.error(`[pg] échec de l'arrêt du cluster : ${describeError(error)}`)
@@ -580,8 +825,9 @@ export async function startLocalDb(config: DbConfig): Promise<LocalDbHandle> {
     await pg.start()
     await waitUntilReady(config)
   } catch (error) {
-    // Jamais de cluster orphelin derrière un démarrage avorté.
-    await pg.stop().catch((stopError: unknown) => {
+    // Jamais de cluster orphelin derrière un démarrage avorté — et, si possible,
+    // arrêt **gracieux** (`pg_ctl`) : même ici, pas de `taskkill /F` inutile.
+    await stopCluster(pg, config).catch((stopError: unknown) => {
       log.error(`[pg] nettoyage du démarrage avorté impossible : ${describeError(stopError)}`)
     })
     throw error instanceof Error ? error : new Error(`Démarrage du cluster impossible : ${describeError(error)}`)
