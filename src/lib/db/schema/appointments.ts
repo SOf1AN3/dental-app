@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { clinics } from "./tenant";
 import { patients } from "./patients";
@@ -21,8 +21,15 @@ export const appointments = pgTable("appointment", {
   color: text("color"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur de pull : (clinic_id, updated_at, id) → index ci-dessous.
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_appointments_clinic_id").on(table.clinicId),
+  index("idx_appointments_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_appointments_patient_id").on(table.patientId),
   index("idx_appointments_start_time").on(table.startTime),
 ]);
@@ -40,8 +47,13 @@ export const waitingRoomEntries = pgTable("waiting_room_entry", {
   arrivedAt: timestamp("arrived_at", { mode: "date" }).defaultNow().notNull(),
   calledAt: timestamp("called_at", { mode: "date" }),
   notes: text("notes"),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_waiting_room_entries_clinic_id").on(table.clinicId),
+  index("idx_waiting_room_entries_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_waiting_room_entries_clinic_id_status").on(table.clinicId, table.status),
   index("idx_waiting_room_entries_appointment_id").on(table.appointmentId),
   uniqueIndex("uq_waiting_room_active_patient_clinic")

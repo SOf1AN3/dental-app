@@ -134,6 +134,13 @@
       "when": 1791917366474,
       "tag": "0018_motionless_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791921654123,
+      "tag": "0019_glorious_magus",
+      "breakpoints": true
     }
   ]
 }

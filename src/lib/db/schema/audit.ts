@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, boolean, jsonb, index } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 import { clinics } from "./tenant";
 
@@ -14,9 +14,18 @@ export const auditLogs = pgTable("audit_log", {
   beforeState: jsonb("before_state").$type<Record<string, unknown>>(),
   afterState: jsonb("after_state").$type<Record<string, unknown>>(),
   ipAddress: text("ip_address"),
-  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull()
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur (updated_at, id) : répliqué push-only, le curseur n'utilise pas le
+  // clinic_id (nullable ici) — décision tâche 4.1.
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_audit_logs_clinic_id").on(table.clinicId),
+  index("idx_audit_logs_updated_id").on(table.updatedAt, table.id),
   index("idx_audit_logs_actor_user_id").on(table.actorUserId),
   index("idx_audit_logs_entity").on(table.entityType, table.entityId)
 ]);

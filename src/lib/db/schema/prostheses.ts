@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, integer, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, integer, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { clinics } from "./tenant";
 import { patients } from "./patients";
 import { users } from "./auth";
@@ -13,8 +13,16 @@ export const prosthesisLabs = pgTable("prosthesis_lab", {
   address: text("address"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur de pull : (clinic_id, updated_at, id) → index ci-dessous.
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_prosthesis_labs_clinic_id").on(table.clinicId),
+  index("idx_prosthesis_labs_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
 ]);
 
 export const prosthesisOrderStatusEnum = pgEnum("prosthesis_order_status", [
@@ -38,8 +46,12 @@ export const prosthesisOrders = pgTable("prosthesis_order", {
   createdBy: text("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_prosthesis_orders_clinic_id").on(table.clinicId),
+  index("idx_prosthesis_orders_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_prosthesis_orders_patient_id").on(table.patientId),
   index("idx_prosthesis_orders_lab_id").on(table.labId),
   index("idx_prosthesis_orders_status").on(table.status),

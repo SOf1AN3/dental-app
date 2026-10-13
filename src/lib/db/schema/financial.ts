@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, integer, numeric, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, integer, numeric, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { clinics } from "./tenant";
 import { patients } from "./patients";
 import { users } from "./auth";
@@ -33,7 +33,15 @@ export const invoices = pgTable("invoice", {
   total: numeric("total", { precision: 12, scale: 2, mode: "number" }).notNull(),
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur de pull : (clinic_id, updated_at, id) → index ci-dessous.
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
+  index("idx_invoices_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   uniqueIndex("uq_invoices_clinic_number").on(table.clinicId, table.number),
   index("idx_invoices_clinic_id").on(table.clinicId),
   index("idx_invoices_status").on(table.status),
@@ -78,7 +86,12 @@ export const quotes = pgTable("quote", {
     onDelete: "set null",
   }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
+  index("idx_quotes_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   uniqueIndex("uq_quotes_clinic_number").on(table.clinicId, table.number),
   index("idx_quotes_clinic_id").on(table.clinicId),
   index("idx_quotes_patient_id").on(table.patientId),
@@ -114,7 +127,12 @@ export const payments = pgTable("payment", {
   notes: text("notes"),
   createdBy: text("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
+  index("idx_payments_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_payments_clinic_id").on(table.clinicId),
   index("idx_payments_invoice_id").on(table.invoiceId),
   index("idx_payments_patient_id").on(table.patientId),

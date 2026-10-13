@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, time, boolean, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, time, boolean, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 import type { DocumentBranding } from "@/lib/document-branding";
 
@@ -31,7 +31,14 @@ export const clinics = pgTable("clinic", {
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
   deletedAt: timestamp("deleted_at", { mode: "date" }),
-});
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone (déjà ci).
+  // Curseur de pull (updated_at, id) — `clinic` n'a pas de clinic_id.
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+}, (table) => [
+  index("idx_clinics_updated_id").on(table.updatedAt, table.id),
+]);
 
 export const clinicMemberships = pgTable("clinic_membership", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -42,9 +49,14 @@ export const clinicMemberships = pgTable("clinic_membership", {
   invitedAt: timestamp("invited_at", { mode: "date" }),
   joinedAt: timestamp("joined_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_clinic_memberships_user_id").on(table.userId),
   uniqueIndex("uq_clinic_memberships_user_clinic").on(table.userId, table.clinicId),
+  index("idx_clinic_memberships_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
 ]);
 
 export const platformOwners = pgTable("platform_owner", {
@@ -65,8 +77,12 @@ export const clinicSchedule = pgTable("clinic_schedule", {
   isWeekend: boolean("is_weekend").default(false).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_clinic_schedule_clinic_id").on(table.clinicId),
+  index("idx_clinic_schedule_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   uniqueIndex("uq_clinic_schedule_clinic_day").on(table.clinicId, table.dayOfWeek),
 ]);
 
@@ -85,6 +101,11 @@ export const notifications = pgTable("notification", {
   readAt: timestamp("read_at", { mode: "date" }),
   createdBy: text("created_by").references(() => platformOwners.userId, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_notifications_clinic_read").on(table.clinicId, table.readAt),
+  index("idx_notifications_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
 ]);

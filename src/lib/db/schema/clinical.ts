@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, text, timestamp, integer, numeric, boolean, index, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, pgEnum, pgTable, text, timestamp, integer, numeric, boolean, index, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { clinics } from "./tenant";
 import { patients } from "./patients";
 import { appointments } from "./appointments";
@@ -16,8 +16,15 @@ export const dentalCharts = pgTable("dental_chart", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur de pull : (clinic_id, updated_at, id) → index ci-dessous.
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_dental_charts_clinic_id").on(table.clinicId),
+  index("idx_dental_charts_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_dental_charts_patient_id").on(table.patientId),
   index("idx_dental_charts_patient_id_tooth_number").on(table.patientId, table.toothNumber),
 ]);
@@ -30,8 +37,12 @@ export const odontogramStates = pgTable("odontogram_state", {
   version: integer("version").default(0).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_odontogram_state_clinic_id").on(table.clinicId),
+  index("idx_odontogram_states_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_odontogram_state_patient_id").on(table.patientId),
   uniqueIndex("uq_odontogram_state_patient_clinic").on(table.patientId, table.clinicId),
 ]);
@@ -52,8 +63,12 @@ export const treatmentPlans = pgTable("treatment_plan", {
   createdBy: text("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_treatment_plans_clinic_id").on(table.clinicId),
+  index("idx_treatment_plans_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_treatment_plans_patient_id").on(table.patientId),
 ]);
 
@@ -82,8 +97,13 @@ export const consultationNotes = pgTable("consultation_note", {
   diagnosis: text("diagnosis"),
   notes: text("notes").notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_consultation_notes_clinic_id").on(table.clinicId),
+  index("idx_consultation_notes_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_consultation_notes_patient_id").on(table.patientId),
 ]);
 
@@ -96,8 +116,13 @@ export const medicalHistoryEntries = pgTable("medical_history_entry", {
   notes: text("notes"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_medical_history_entries_clinic_id").on(table.clinicId),
+  index("idx_medical_history_entries_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_medical_history_entries_patient_id").on(table.patientId),
 ]);
 
@@ -112,8 +137,12 @@ export const treatmentCatalog = pgTable("treatment_catalog", {
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_treatment_catalog_clinic_id").on(table.clinicId),
+  index("idx_treatment_catalog_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
 ]);
 
 export const radiographs = pgTable("radiograph", {
@@ -129,7 +158,14 @@ export const radiographs = pgTable("radiograph", {
   takenAt: timestamp("taken_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { mode: "date" }),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit ; `deleted_at` (tombstone) existe
+  // déjà ci-dessus. Curseur (clinic_id, updated_at, id) → index ci-dessous.
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
 }, (table) => [
   index("idx_radiographs_clinic_id").on(table.clinicId),
+  index("idx_radiographs_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_radiographs_patient_id").on(table.patientId),
 ]);

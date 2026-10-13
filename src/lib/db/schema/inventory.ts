@@ -1,4 +1,5 @@
 import {
+  bigint,
   pgEnum,
   pgTable,
   text,
@@ -31,8 +32,15 @@ export const stockItems = pgTable("stock_item", {
   sellingPrice: numeric("selling_price", { precision: 12, scale: 2, mode: "number" }),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  // Réplication (tâche 4.1) : `rev` = version MONOTONE attribuée côté serveur,
+  // `device_id` = dernier poste ayant écrit, `deleted_at` = tombstone.
+  // Curseur de pull : (clinic_id, updated_at, id) → index ci-dessous.
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_stock_items_clinic_id").on(table.clinicId),
+  index("idx_stock_items_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   // Z-60 : le stock ne peut jamais devenir négatif (garde de dernier recours
   // en base, la garde applicative restant en JS).
   check("ck_stock_items_current_qty_non_negative", sql`${table.currentQty} >= 0`),
@@ -65,8 +73,13 @@ export const stockAlerts = pgTable("stock_alert", {
   triggeredAt: timestamp("triggered_at", { mode: "date" }).defaultNow().notNull(),
   resolvedAt: timestamp("resolved_at", { mode: "date" }),
   status: stockAlertStatusEnum("status").default("active").notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  deviceId: text("device_id"),
+  rev: bigint("rev", { mode: "number" }).default(0).notNull(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 }, (table) => [
   index("idx_stock_alerts_clinic_id").on(table.clinicId),
+  index("idx_stock_alerts_clinic_updated_id").on(table.clinicId, table.updatedAt, table.id),
   index("idx_stock_alerts_item_id").on(table.itemId),
   index("idx_stock_alerts_clinic_id_status").on(table.clinicId, table.status),
   // Z-62 : une seule alerte active par article (la sélection puis l'insertion
