@@ -6,7 +6,14 @@ const nodeBuiltins: string[] = builtinModules.filter((name) => !name.startsWith(
 
 /**
  * `electron` + modules natifs Node.js (avec et sans préfixe `node:`), plus les
- * paquets laissés en `require()` résolu au runtime :
+ * paquets laissés en `require()` résolu au runtime.
+ *
+ * Depuis electron-vite v5, `externalizeDeps` vaut `true` par défaut : **toutes**
+ * les `dependencies` sont donc externalisées (jamais bundlées) —
+ * `dist-electron/main/main.js` contient ainsi des `require("electron-log")`,
+ * `require("zod")`, `require("drizzle-orm/postgres-js")`, … résolus au runtime.
+ * Seuls les paquets listés **explicitement** ci-dessous le sont parce qu'ils
+ * exigent un traitement particulier :
  *
  * - **`embedded-postgres`** est **ESM** et effectue des `import('…')` littéraux
  *   vers ses `optionalDependencies` par plateforme (`@embedded-postgres/darwin-*`,
@@ -17,8 +24,6 @@ const nodeBuiltins: string[] = builtinModules.filter((name) => !name.startsWith(
  * - **`@embedded-postgres/windows-x64`** : binaires natifs, jamais bundlés ;
  * - **`postgres`** : driver consommé par `embedded-pg.ts`, laissé externe pour
  *   le même cycle de résolution au runtime.
- *
- * `electron-log` et `zod` restent **bundlés** (comportement inchangé).
  */
 const externals: string[] = [
   'electron',

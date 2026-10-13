@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import log from 'electron-log'
 import { forceStopLocalDb, startLocalDb, type LocalDbHandle } from './db/embedded-pg'
+import { runMigrations } from './db/migrate'
 import { buildNextEnv, resolveDbConfig } from './env'
 import { registerIpcHandlers } from './ipc'
 import { forceKillNextServer, redactSecrets, startNextServer, stopNextServer, type NextServerHandle } from './server/next'
@@ -151,12 +152,15 @@ function shutdownLocalDb(reason: string): Promise<void> {
 }
 
 /**
- * Démarrage de l'application — **ordre imposé (étape 2.2a)** :
- *   1. `resolveDbConfig()`  → config dev/prod ;
- *   2. `startLocalDb()`     → PostgreSQL prêt (réutilisé ou démarré) ;
- *   3. `buildNextEnv()`     → env de l'enfant Next (DATABASE_URL, AUTH_SECRET…) ;
- *   4. `startNextServer()`  → serveur prêt ;
- *   5. `openMainWindow()`   → `loadURL` uniquement quand tout est prêt.
+ * Démarrage de l'application — **ordre imposé (étapes 2.2a + 2.5)** :
+ *   1. `resolveDbConfig()`   → config dev/prod ;
+ *   2. `startLocalDb()`      → PostgreSQL prêt (réutilisé ou démarré) ;
+ *   3. `runMigrations()`     → schéma migré (`drizzle/*.sql`, idempotent) :
+ *      échec → nettoyage via le chemin d'arrêt existant + `handleStartupFailure`
+ *      (dialogue + `app.quit()`) — **jamais** de fenêtre sur un schéma non migré ;
+ *   4. `buildNextEnv()`      → env de l'enfant Next (DATABASE_URL, AUTH_SECRET…) ;
+ *   5. `startNextServer()`   → serveur prêt ;
+ *   6. `openMainWindow()`    → `loadURL` uniquement quand tout est prêt.
  *
  * L'arrêt (`before-quit`) reprend cet ordre **inversé** : Next d'abord (plus
  * aucune écriture possible), puis la base locale.
@@ -187,9 +191,16 @@ async function startApplication(): Promise<void> {
   )
 
   try {
-    // 3 — env de l'enfant : construit uniquement une fois PG prêt.
+    // 3 — migrations Drizzle : strictement après santé de PG et **avant** tout
+    // env / serveur / fenêtre. `runMigrations()` rejette sur tout échec (cause
+    // racine redactée) : le `catch` ci-dessous nettoie la base locale lancée
+    // (Next n'a pas encore démarré, `shutdownNextServer()` y est un no-op),
+    // puis `handleStartupFailure()` affiche « les migrations ont échoué » et
+    // quitte — aucun rendu sur un schéma partiel.
+    await runMigrations(localDb.url)
+    // 4 — env de l'enfant : construit uniquement une fois PG prêt et migré.
     const env = buildNextEnv(localDb, config)
-    // 4 — serveur Next (réutilise un `next dev` déjà actif, sinon le lance).
+    // 5 — serveur Next (réutilise un `next dev` déjà actif, sinon le lance).
     // En prod, l'injection est **obligatoire** : un serveur réutilisé garde son
     // propre `DATABASE_URL`/`AUTH_SECRET` → rejet explicite plutôt que de parler
     // à une autre base que le cluster embarqué (revue C3).
@@ -198,7 +209,7 @@ async function startApplication(): Promise<void> {
     log.info(
       `[main] serveur Next.js ${server.owned ? 'démarré' : 'réutilisé'} sur ${redactSecrets(server.url)} (port ${server.port})`,
     )
-    // 5 — la fenêtre ne se charge que d'un serveur déjà disponible.
+    // 6 — la fenêtre ne se charge que d'un serveur déjà disponible.
     // `startNextServer()` n'a résolu qu'une fois le serveur **prêt** (boucle
     // d'attente interne) : inutile d'ajouter une seconde boucle d'attente ici.
     await openMainWindow(server.url)
