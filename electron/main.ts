@@ -5,7 +5,16 @@ import { forceStopLocalDb, startLocalDb, type LocalDbHandle } from './db/embedde
 import { runMigrations } from './db/migrate'
 import { buildNextEnv, resolveDbConfig } from './env'
 import { registerIpcHandlers } from './ipc'
-import { forceKillNextServer, redactSecrets, startNextServer, stopNextServer, type NextServerHandle } from './server/next'
+import type { SyncLoginResult } from './preload'
+import {
+  forceKillNextServer,
+  redactSecrets,
+  restartNextServer,
+  startNextServer,
+  stopNextServer,
+  type NextServerHandle,
+} from './server/next'
+import { loginToCentral, type LoginToCentralResult } from './sync/auth'
 import { startSyncRunner, type SyncRunnerHandle } from './sync/runner'
 import { createMainWindow, START_URL } from './window'
 
@@ -29,6 +38,14 @@ let syncRunner: SyncRunnerHandle | null = null
 let desktopDbInstalled = false
 /** Fermeture du pool Drizzle en cours (ou déjà réalisée) — idempotente. */
 let desktopDbShutdown: Promise<void> | null = null
+/**
+ * Reconstruction de l'env de l'enfant Next (tâche 7.1) : fermeture sur
+ * `buildNextEnv(db, config)` capturés au démarrage, installée **une fois** PG
+ * migré et l'env initial construit. Permet à `handleSyncLogin()` de produire un
+ * env intégrant le **jeton fraîchement persisté** sans re-exécuter le bootstrap
+ * complet. `null` tant que le démarrage n'a pas atteint cette étape.
+ */
+let rebuildNextEnv: (() => NodeJS.ProcessEnv) | null = null
 
 async function openMainWindow(url: string): Promise<void> {
   const win = createMainWindow()
@@ -185,6 +202,91 @@ function shutdownDesktopDb(): Promise<void> {
 }
 
 /**
+ * Reconnexion au serveur central (tâche 7.1) — séquence complète :
+ *  1. `loginToCentral()` : échange email + mot de passe contre un **jeton
+ *     d'appareil**, persisté chiffré (`writeSyncToken`). Le mot de passe n'est
+ *     **ni journalisé ni conservé** : il ne survit pas à cet appel ;
+ *  2. reconstruction de l'env de l'enfant (`buildNextEnv`) : `SYNC_TOKEN` y
+ *     figure désormais (jeton frais, non expiré) ;
+ *  3. `restartNextServer()` : l'enfant Next **redémarre** avec ce nouvel env —
+ *     seul moyen de lui transmettre un `SYNC_TOKEN` (indispensable à la
+ *     réservation de blocs, tâche 6.1c) ;
+ *  4. déclenchement immédiat du runner (`triggerNow`) : le cœur **relit** le
+ *     jeton persisté à chaque cycle (`deps.token.read` → `readSyncToken()`),
+ *     aucune configuration n'a donc à être poussée — d'où l'absence de
+ *     `setSyncToken` sur le handle du runner.
+ *
+ * **Aucune défaillance ne casse l'application** : chaque étape est encapsulée
+ * et se termine par un `SyncLoginResult` typé pour le renderer (échec du login
+ * → `ok: false` ; jeton acquis mais env non appliqué → `ok: true` +
+ * `warning`). Aucun message ne contient de mot de passe ni de jeton.
+ */
+async function handleSyncLogin(email: string, password: string): Promise<SyncLoginResult> {
+  // 1 — échange d'identifiants (garde anti-throw : `loginToCentral` se veut
+  //     non levante, mais une défaillance imprévue ne doit jamais remonter
+  //     en travers de l'IPC).
+  let auth: LoginToCentralResult
+  try {
+    auth = await loginToCentral({ email, password })
+  } catch (error) {
+    log.error(`[main] échange d’identifiants imprévu (${error instanceof Error ? error.name : 'unknown'})`)
+    return {
+      ok: false,
+      reason: 'central-error',
+      message: 'Échange d’identifiants impossible (erreur interne).',
+      serverRestarted: false,
+    }
+  }
+  if (!auth.ok) {
+    log.warn(`[main] connexion au serveur central refusée : ${auth.reason}`)
+    return { ok: false, reason: auth.reason, message: auth.message, serverRestarted: false }
+  }
+
+  // 2 — env reconstruit avec le jeton fraîchement persisté.
+  if (rebuildNextEnv === null) {
+    log.warn('[main] env de l’enfant Next indisponible : jeton acquis mais non transmis (aucun redémarrage)')
+    return { ok: true, serverRestarted: false, warning: 'env-unavailable' }
+  }
+  let env: NodeJS.ProcessEnv
+  try {
+    env = rebuildNextEnv()
+  } catch (error) {
+    // `redactSecrets` : le message peut reprendre un chemin ou une clé de config.
+    log.warn(redactSecrets(`[main] reconstruction de l’env Next impossible : ${messageOf(error)}`))
+    return { ok: true, serverRestarted: false, warning: 'env-rebuild-failed' }
+  }
+
+  // 3 — redémarrage de l'enfant avec le nouvel env (serveur réutilisé →
+  //     `restarted: false` + avertissement journalisé côté `next.ts`).
+  try {
+    const restarted = await restartNextServer({ env, previous: nextServer })
+    nextServer = restarted.handle
+    if (!restarted.restarted) {
+      log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle')
+      return { ok: true, serverRestarted: false, warning: 'server-not-restartable' }
+    }
+  } catch (error) {
+    log.warn(redactSecrets(`[main] redémarrage du serveur Next impossible : ${messageOf(error)}`))
+    return { ok: true, serverRestarted: false, warning: 'restart-failed' }
+  }
+  log.info('[main] serveur Next redémarré avec le jeton d’appareil à jour')
+
+  // 4 — runner : premier cycle immédiat (jamais bloquant pour l'UI).
+  const runner = syncRunner
+  if (runner !== null) {
+    void runner.triggerNow().catch((error: unknown) => {
+      log.warn(`[main] premier cycle après reconnexion impossible (${error instanceof Error ? error.name : 'unknown'})`)
+    })
+  }
+
+  return { ok: true, serverRestarted: true }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
  * Démarrage de l'application — **ordre imposé (étapes 2.2a + 2.5 + 5.5)** :
  *   1. `resolveDbConfig()`   → config dev/prod ;
  *   2. `startLocalDb()`      → PostgreSQL prêt (réutilisé ou démarré) ;
@@ -202,7 +304,9 @@ function shutdownDesktopDb(): Promise<void> {
  * et seulement ensuite la base locale.
  */
 async function startApplication(): Promise<void> {
-  registerIpcHandlers()
+  // Handlers IPC : `sync:login` délègue à `handleSyncLogin` (tâche 7.1) —
+  // injection explicite pour éviter tout cycle d'import ipc ↔ main.
+  registerIpcHandlers({ onSyncLogin: handleSyncLogin })
 
   // 1 + 2 — base locale : doit être saine avant tout enfant Next.
   const config = resolveDbConfig()
@@ -236,6 +340,11 @@ async function startApplication(): Promise<void> {
     await runMigrations(localDb.url)
     // 4 — env de l'enfant : construit uniquement une fois PG prêt et migré.
     const env = buildNextEnv(localDb, config)
+    // Fermeture de reconnexion (tâche 7.1) : rejoue **exactement** cette
+    // construction plus tard, avec le jeton d'appareil à jour — `buildNextEnv`
+    // relit `config.json` (donc `readSyncToken()`) à chaque appel.
+    const dbHandle = localDb
+    rebuildNextEnv = () => buildNextEnv(dbHandle, config)
     // 5 — serveur Next (réutilise un `next dev` déjà actif, sinon le lance).
     // En prod, l'injection est **obligatoire** : un serveur réutilisé garde son
     // propre `DATABASE_URL`/`AUTH_SECRET` → rejet explicite plutôt que de parler

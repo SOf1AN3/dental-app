@@ -52,6 +52,31 @@ export interface SyncStatus {
 export type SyncTriggerResult = SyncCycleResult
 
 /**
+ * Résultat de `loginToSync(email, password)` (tâche 7.1 — bootstrap).
+ *
+ *  - `ok: true`  : jeton d'appareil **acquis et persisté** chiffré côté main ;
+ *  - `ok: false` : échec de l'échange — `reason` est un motif **générique**
+ *    (union fermée) et `message` un texte court à afficher ; **aucun** détail
+ *    du serveur central, aucun mot de passe, aucun jeton n'y figurent ;
+ *  - `serverRestarted` : `true` = l'enfant Next a bien été **redémarré** avec
+ *    le nouvel env `SYNC_TOKEN` (le serveur local peut donc réserver des blocs
+ *    et servir `/api/sync/bootstrap`) ;
+ *  - `warning` : avertissement non bloquant quand `ok: true` mais que l'env n'a
+ *    pas pu être appliqué (`env-unavailable`, `env-rebuild-failed`,
+ *    `restart-failed`, `server-not-restartable`).
+ *
+ * ⚠️ Le mot de passe **ne transite** que dans le message IPC `sync:login` :
+ * il n'est jamais journalisé, ni persisté, côté main.
+ */
+export interface SyncLoginResult {
+  readonly ok: boolean
+  readonly reason?: string
+  readonly message?: string
+  readonly serverRestarted: boolean
+  readonly warning?: string
+}
+
+/**
  * Canaux IPC autorisés : c'est la allow-list unique du pont.
  *
  * Pour étendre le pont (synchronisation, etc.) :
@@ -66,6 +91,8 @@ export interface DesktopEventMap {
   'sync:status': SyncStatus
   /** Cycle déclenché à la demande (`triggerSync()`) — union `SyncCycleResult`. */
   'sync:trigger': SyncTriggerResult
+  /** Échange d'identifiants contre un jeton d'appareil (`loginToSync()`). */
+  'sync:login': SyncLoginResult
 }
 
 /** Union des canaux IPC autorisés. */
@@ -89,6 +116,15 @@ export interface DesktopApi {
    * `reason: "concurrent-cycle"`).
    */
   triggerSync(): Promise<SyncTriggerResult>
+  /**
+   * Échange email + mot de passe contre un **jeton d'appareil** (tâche 7.1).
+   *
+   * Le payload `{ email, password }` voyage dans le message IPC **uniquement** :
+   * le main ne le journalise ni ne le persiste, et renvoie un
+   * `SyncLoginResult` générique. En cas de succès, le main redémarre l'enfant
+   * Next avec `SYNC_TOKEN` à jour puis relance le runner.
+   */
+  loginToSync(email: string, password: string): Promise<SyncLoginResult>
   /**
    * S'abonne à un événement émis par le processus principal.
    * @returns fonction de désabonnement.
@@ -114,6 +150,7 @@ const ALLOWED_CHANNELS: readonly DesktopChannel[] = [
   'net:state',
   'sync:status',
   'sync:trigger',
+  'sync:login',
 ]
 
 function isAllowedChannel(channel: string): channel is DesktopChannel {
@@ -152,6 +189,9 @@ const api: DesktopApi = {
   getInfo: () => invoke('app:info'),
   getSyncStatus: () => invoke('sync:status'),
   triggerSync: () => invoke('sync:trigger'),
+  // Le couple identifiants ne quitte pas le message IPC : jamais de journal,
+  // jamais de stockage côté main (voir `handleSyncLogin` de `main.ts`).
+  loginToSync: (email, password) => invoke('sync:login', { email, password }),
   onEvent,
 }
 

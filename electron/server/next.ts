@@ -795,6 +795,33 @@ export async function startNextServer(options: StartNextServerOptions = {}): Pro
     )
   }
 
+  return launchOwnedServer({ port, derivedUrl, url, env: options.env })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lancement d'un enfant possédé (démarrage ET redémarrage, tâche 7.1)        */
+/* -------------------------------------------------------------------------- */
+
+/** Paramètres du spawn d'un enfant **possédé** — communs à start et restart. */
+interface LaunchOwnedParams {
+  readonly port: number
+  readonly derivedUrl: string
+  readonly url: string
+  /** Env complet de l'enfant (`buildNextEnv`) — jamais de remplacement silencieux. */
+  readonly env: NodeJS.ProcessEnv | undefined
+}
+
+/**
+ * Spawn + attente de disponibilité d'un enfant **que nous possédons**.
+ *
+ * Extrait de `startNextServer()` (étape 7.1) afin que `restartNextServer()`
+ * réutilise **exactement** la même logique : validation d'origine, fusion
+ * d'env, journal des clés injectées (noms seuls), redirection des pipes par
+ * `redactSecrets()`, `waitUntilReady()` puis handle `owned: true`.
+ */
+async function launchOwnedServer(params: LaunchOwnedParams): Promise<NextServerHandle> {
+  const { port, derivedUrl, url } = params
+
   // Avant tout spawn : l'enfant écoutera sur `derivedUrl` (URL réellement prête).
   // Toute divergence avec `START_URL` (whitelist de window.ts) est une erreur de
   // configuration explicite — jamais une URL morte dans `handle.url`.
@@ -805,8 +832,8 @@ export async function startNextServer(options: StartNextServerOptions = {}): Pro
   // plus `PORT`/`HOSTNAME`/`NODE_ENV` en prod) : les clés injectées l'emportent,
   // le reste de l'environnement parent est conservé tel quel.
   const spec: LaunchSpec =
-    options.env === undefined ? baseSpec : { ...baseSpec, env: { ...baseSpec.env, ...options.env } }
-  const injected = options.env
+    params.env === undefined ? baseSpec : { ...baseSpec, env: { ...baseSpec.env, ...params.env } }
+  const injected = params.env
   if (injected !== undefined) {
     // Noms de clés **seulement**, et **delta uniquement** (étape 2.2b, revue
     // C1) : `buildNextEnv()` reconstruit l'env sur tout l'héritage de
@@ -885,6 +912,140 @@ export async function stopNextServer(handle: NextServerHandle | null | undefined
     return
   }
   await handle.stop()
+}
+
+/* -------------------------------------------------------------------------- */
+/* Redémarrage avec un nouvel env (tâche 7.1 — reconnexion au central)         */
+/* -------------------------------------------------------------------------- */
+
+/** Délai d'attente de libération du port **après** l'arrêt de l'ancien enfant. */
+const PORT_RELEASE_TIMEOUT_MS = 5_000
+
+export interface RestartNextServerOptions {
+  /**
+   * Env **complet** du nouvel enfant — reconstruit par `main.ts` via
+   * `buildNextEnv()` après persistance du jeton (`SYNC_TOKEN` à jour).
+   */
+  readonly env: NodeJS.ProcessEnv
+  /**
+   * Handle courant retourné par `startNextServer()` — permet de distinguer un
+   * enfant **possédé** (à arrêter puis relancer) d'un serveur **réutilisé**
+   * (à ne jamais toucher). `null` inconnu → repli sur `ownedChild`.
+   */
+  readonly previous?: NextServerHandle | null
+}
+
+export interface RestartNextServerResult {
+  /** Handle **actuel** (nouveau si redémarré, inchangé si réutilisé). */
+  readonly handle: NextServerHandle
+  /**
+   * `false` = rien n'a été redémarré (serveur préexistant réutilisé) : l'env
+   * — dont `SYNC_TOKEN` — **n'a PAS été appliqué**, l'enfant conserve sa
+   * configuration initiale. Avertissement journalisé, jamais de kill.
+   */
+  readonly restarted: boolean
+}
+
+/** Redémarrage en cours (garde d'idempotence : jamais deux spawns concurrents). */
+let restartInFlight: Promise<RestartNextServerResult> | null = null
+
+/**
+ * Redémarre l'enfant Next avec un **nouvel env** (tâche 7.1).
+ *
+ * Contrats :
+ *  - **jamais de kill d'un serveur réutilisé** (`owned: false`) : rien n'est
+ *    arrêté, `{ handle: previous, restarted: false }` est renvoyé et le fait
+ *    que l'env n'ait **pas** pu être appliqué est journalisé (`log.warn`) ;
+ *  - **`stop()` du vieux handle AVANT le nouveau spawn** (le port doit être
+ *    libéré — `waitPortReleased()` borne l'attente à 5 s) ;
+ *  - **idempotent** : appel concurrent → même promesse en vol ; appel séquentiel
+ *    → arrêt du handle courant puis relance propre (aucun enfant orphelin) ;
+ *  - **échecs** : rejet explicite (aucun démarrage silencieux d'un second
+ *    enfant) — `main.ts` absorbe et journalise, l'app reste utilisable.
+ *
+ * @throws si aucun enfant possédé n'existe (rien à redémarrer) ou si le
+ *         nouveau spawn échoue (timeout / EADDRINUSE — message d'actionnable).
+ */
+export function restartNextServer(
+  options: RestartNextServerOptions,
+): Promise<RestartNextServerResult> {
+  if (restartInFlight !== null) {
+    log.info('[next] redémarrage déjà en cours : promesse en vol réutilisée (aucun double spawn)')
+    return restartInFlight
+  }
+  const run = restartNextServerUnsafe(options).finally(() => {
+    restartInFlight = null
+  })
+  restartInFlight = run
+  return run
+}
+
+async function restartNextServerUnsafe(
+  options: RestartNextServerOptions,
+): Promise<RestartNextServerResult> {
+  const previous = options.previous ?? null
+  const owned = previous !== null ? previous.owned : ownedChild !== null
+
+  // (1) Serveur réutilisé : **rien** à notre charge — on ne tue jamais le
+  //     `next dev` d'un autre terminal, mais on ne prétend pas non plus avoir
+  //     appliqué l'env.
+  if (!owned) {
+    log.warn(
+      '[next] redémarrage impossible : serveur préexistant réutilisé (owned: false) — le nouvel env ' +
+        '(SYNC_TOKEN) n’a PAS été appliqué, l’enfant conserve sa configuration initiale. ' +
+        'Redémarrez ce serveur manuellement pour lui transmettre le jeton.',
+    )
+    if (previous !== null) {
+      return { handle: previous, restarted: false }
+    }
+    throw new Error(
+      'restartNextServer : aucun serveur Next possédé à redémarrer (aucun enfant lancé par l’application).',
+    )
+  }
+
+  const port = resolveNextPort()
+  const derivedUrl = `http://localhost:${port}`
+  const url = resolveServerUrl(derivedUrl, port)
+
+  // (2) Arrêt de l'ancien enfant AVANT tout nouveau spawn (`stop()` idempotent
+  //     du handle ; repli sur `ownedChild` si le handle est inconnu).
+  log.info('[next] redémarrage demandé : arrêt de l’enfant courant avant relance')
+  if (previous !== null && previous.owned) {
+    await previous.stop()
+  } else if (ownedChild !== null) {
+    await killChild(ownedChild)
+  }
+  await waitPortReleased(url)
+
+  // (3) Nouveau spawn avec le nouvel env — logique strictement identique au
+  //     démarrage (validation d'origine, delta de clés journalisé, readiness).
+  const handle = await launchOwnedServer({ port, derivedUrl, url, env: options.env })
+  log.info(`[next] serveur redémarré sur ${redactSecrets(handle.url)} (env appliqué, port ${handle.port})`)
+  return { handle, restarted: true }
+}
+
+/**
+ * Attend que le port se libère après l'arrêt de notre enfant (borné à
+ * `PORT_RELEASE_TIMEOUT_MS`) : un spawn immédiat sur un socket encore ouvert
+ * échouerait en `EADDRINUSE`. Un serveur **toujours actif** après le délai est
+ * simplement signalé — `waitUntilReady()` remontera un `EADDRINUSE` explicite
+ * si le nouveau spawn échoue, jamais un démarrage silencieux à côté.
+ */
+async function waitPortReleased(url: string): Promise<void> {
+  const deadline = Date.now() + PORT_RELEASE_TIMEOUT_MS
+  for (;;) {
+    if (!(await probe(url))) {
+      return
+    }
+    if (Date.now() >= deadline) {
+      log.warn(
+        `[next] port toujours actif après ${PORT_RELEASE_TIMEOUT_MS} ms (${redactSecrets(url)}) : ` +
+          'poursuite du redémarrage (EADDRINUSE explicite en cas de conflit)',
+      )
+      return
+    }
+    await delay(PROBE_INTERVAL_MS)
+  }
 }
 
 /* -------------------------------------------------------------------------- */
