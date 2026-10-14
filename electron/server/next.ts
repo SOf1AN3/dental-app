@@ -382,6 +382,25 @@ async function probeReuse(url: string): Promise<ReuseProbeOutcome> {
   }
 }
 
+/**
+ * « Un **serveur Next.js** répond-il encore sur cette origine ? » — verdict
+ * réutilisé par `main.ts` (tâche 7.1c) pour statuer, **après** un redémarrage
+ * échoué et sa relance de secours, si le renderer dispose encore d'une API
+ * locale. Réutilise {@link probeReuse} (en-tête `x-nextjs-*` / marqueurs
+ * `__NEXT_DATA__`, `/_next/`) : un service étranger qui répondrait sur le port
+ * n'est **jamais** compté comme serveur local (→ verdict `down`).
+ *
+ * Toute erreur interne est absorbée en `false` (échec fermé : un doute vaut
+ * « pas de serveur », jamais l'inverse).
+ */
+export async function isNextServerServing(url: string): Promise<boolean> {
+  try {
+    return (await probeReuse(url)).verdict === 'nextjs'
+  } catch {
+    return false
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Résolution des chemins                                                     */
 /* -------------------------------------------------------------------------- */
@@ -961,7 +980,14 @@ let restartInFlight: Promise<RestartNextServerResult> | null = null
  *  - **idempotent** : appel concurrent → même promesse en vol ; appel séquentiel
  *    → arrêt du handle courant puis relance propre (aucun enfant orphelin) ;
  *  - **échecs** : rejet explicite (aucun démarrage silencieux d'un second
- *    enfant) — `main.ts` absorbe et journalise, l'app reste utilisable.
+ *    enfant). **Garantie côté appelant (tâche 7.1c)** : ce rejet ne conclut
+ *    **jamais** par un succès. `main.ts` (a) borne son attente à 30 s
+ *    (`restart-timeout`), (b) tente **une** relance de secours
+ *    (`startNextServer({ env })`) après chaque rejet, puis (c) vérifie via
+ *    {@link isNextServerServing} qu'un serveur répond **réellement** : sans
+ *    serveur, le renderer reçoit `ok: false` / `local-server-down`
+ *    (« serveur local non redémarré — redémarrez l'application ») — jamais
+ *    `ok: true`, jamais un handle mort laissé pour seul état.
  *
  * @throws si aucun enfant possédé n'existe (rien à redémarrer) ou si le
  *         nouveau spawn échoue (timeout / EADDRINUSE — message d'actionnable).

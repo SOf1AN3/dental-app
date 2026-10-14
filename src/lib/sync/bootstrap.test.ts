@@ -521,4 +521,94 @@ describe("password_hash", () => {
     ]);
     expect(writes).toEqual([{ userId: "u-1", hash: BCRYPT_HASH }]);
   });
+
+  /* -------- Filtrage avant écriture (tâche 7.1c — mineur 2) -------------- */
+
+  it("ligne `user` SKIPPED-PENDING (A1) : son hash tiré n'est JAMAIS écrit", async () => {
+    const writes: UserPasswordHashWrite[] = [];
+    const pendingUserId = "user-en-attente";
+    const freshUserId = "user-frais";
+    const changes = [
+      makeOp({
+        table: "user",
+        rowId: pendingUserId,
+        payload: { email: "ada@example.dz", passwordHash: BCRYPT_HASH },
+      }),
+      makeOp({
+        table: "user",
+        rowId: freshUserId,
+        payload: { email: "bob@example.dz", passwordHash: BCRYPT_HASH },
+      }),
+    ];
+    const { fetchImpl } = createFetchStub(() => makePage(changes, false, "c-1"));
+
+    const handler = createSyncBootstrapHandler(
+      baseDeps({
+        fetchImpl,
+        // Règle A1 : le premier utilisateur porte un changement local en attente
+        // de push, le second non.
+        isRowLocallyPending: async (table, rowId) =>
+          table === "user" && rowId === pendingUserId,
+        writeUserPasswordHashes: async (items) => {
+          writes.push(...items);
+        },
+      }),
+    );
+
+    const res = await handler(postJson({ clinicIds: [CLINIC] }));
+
+    expect(res.status).toBe(200);
+    // Le hash central n'ÉCRASE PAS l'utilisateur ayant un travail local en
+    // attente, alors que l'autre reçoit bien le sien (filtre sélectif).
+    expect(writes).toEqual([{ userId: freshUserId, hash: BCRYPT_HASH }]);
+  });
+
+  it("ligne `user` en ERREUR d'application : son hash tiré n'est pas écrit", async () => {
+    const writes: UserPasswordHashWrite[] = [];
+    const brokenUserId = "user-echec";
+    const okUserId = "user-ok";
+    const changes = [
+      makeOp({
+        table: "user",
+        rowId: brokenUserId,
+        payload: { email: "eve@example.dz", passwordHash: BCRYPT_HASH },
+      }),
+      makeOp({
+        table: "user",
+        rowId: okUserId,
+        payload: { email: "bob@example.dz", passwordHash: BCRYPT_HASH },
+      }),
+    ];
+    const { fetchImpl } = createFetchStub(() => makePage(changes, false, "c-1"));
+    // Repo dont l'écriture de `brokenUserId` échoue → `applied.errors[].rowId`.
+    const repo: LocalApplyRepo = {
+      async transaction<T>(fn: (tx: LocalApplyTx) => Promise<T>): Promise<T> {
+        return fn({
+          async upsertRow(table, rowId) {
+            if (rowId === brokenUserId) {
+              throw new Error("écriture locale refusée");
+            }
+            void table;
+          },
+        });
+      },
+    };
+
+    const handler = createSyncBootstrapHandler(
+      baseDeps({
+        fetchImpl,
+        createRepo: () => repo,
+        writeUserPasswordHashes: async (items) => {
+          writes.push(...items);
+        },
+      }),
+    );
+
+    const res = await handler(postJson({ clinicIds: [CLINIC] }));
+
+    expect(res.status).toBe(200);
+    // Une ligne dont l'application a échoué n'est JAMAIS « réalignée » par un
+    // hash : seuls les compteurs remontent, l'échec reste visible.
+    expect(writes).toEqual([{ userId: okUserId, hash: BCRYPT_HASH }]);
+  });
 });

@@ -64,6 +64,19 @@ export interface LoginToCentralOptions {
  *
  * La liste est fermée : aucune raison du serveur central hors de cette union
  * n'est jamais réexposée (pas d'oracle, pas d'écho de message serveur).
+ *
+ * ## Deux familles, une seule union (tâche 7.1c)
+ *
+ *  - les raisons **centrales** (échec de l'échange `POST /api/sync/token`) :
+ *    déduites du statut/corps central ou locales à la saisie — seules ces
+ *    raisons peuvent être dictées par le central, et {@link CENTRAL_REASONS}
+ *    (liste blanche du corps `{ error }`) n'en contient **jamais** les deux
+ *    suivantes ;
+ *  - les raisons **postes** (`local-server-down`, `restart-timeout`) : l'échange
+ *    a **réussi** (jeton persisté) mais l'application locale n'a pas pu appliquer
+ *    la suite (relance de l'enfant Next). Elles vivent ici pour que le pont IPC
+ *    (`preload.ts`) expose **une** union fermée au renderer, qui peut alors
+ *    épuiser les cas (`switch` exhaustif) sans repli muet.
  */
 export type CentralLoginFailureReason =
   /** `SYNC_BASE_URL` absente, illisible ou schéma non `http(s)`. */
@@ -86,6 +99,18 @@ export type CentralLoginFailureReason =
   | 'central-unreachable'
   /** Échec local (deviceId illisible, persistance du jeton impossible). */
   | 'storage-error'
+  /**
+   * **Poste** (tâche 7.1c) — échange réussi mais le serveur Next local n'a pas
+   * pu être relancé **et aucun serveur ne répond** : le renderer est prévenu
+   * qu'il n'a plus d'API locale. Jamais produit par le central.
+   */
+  | 'local-server-down'
+  /**
+   * **Poste** (tâche 7.1c) — échange réussi mais le redémarrage a dépassé le
+   * budget de 30 s côté main : réponse bornée, filet de secours armé en
+   * arrière-plan. Jamais produit par le central.
+   */
+  | 'restart-timeout'
 
 export type LoginToCentralResult =
   | { readonly ok: true; readonly trustExpiresAt: string }
@@ -107,9 +132,26 @@ const FAILURE_MESSAGES: Readonly<Record<CentralLoginFailureReason, string>> = {
   'central-error': 'Le serveur central a répondu de façon inattendue.',
   'central-unreachable': 'Serveur central injoignable (réseau ou délai dépassé).',
   'storage-error': 'Stockage local indisponible : le jeton n’a pas pu être conservé.',
+  'local-server-down': 'Serveur local non redémarré — redémarrez l’application.',
+  'restart-timeout':
+    'Redémarrage du serveur local trop long (plus de 30 s) : redémarrez l’application.',
 }
 
-/** Raisons que le central est autorisé à nous dicter (corps `{ error }`). */
+/**
+ * Message court associé à une raison fermée — **source unique** consommée par
+ * `main.ts` (tâche 7.1c) : le texte affiché au renderer et le texte testé par
+ * le main ne peuvent pas diverger.
+ */
+export function centralLoginFailureMessage(reason: CentralLoginFailureReason): string {
+  return FAILURE_MESSAGES[reason]
+}
+
+/** Raisons que le central est autorisé à nous dicter (corps `{ error }`).
+ *
+ * **Exclues volontairement** : `local-server-down` et `restart-timeout`
+ * (pannes **poste**, jamais centrales) — un central qui prétendrait l'une de
+ * ces valeurs serait remballée dans un repli `reasonFromStatus`, pas exécutée.
+ */
 const CENTRAL_REASONS: ReadonlySet<string> = new Set<CentralLoginFailureReason>([
   'invalid-credentials',
   'no-membership',

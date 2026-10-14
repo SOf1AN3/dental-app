@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-// Type seulement (effacé à la compilation) : le preload sandboxé n'embarque
-// **aucun** code applicatif — seule l'union `SyncCycleResult` est référencée.
+// Types seulement (effacés à la compilation) : le preload sandboxé n'embarque
+// **aucun** code applicatif — seules les unions `SyncCycleResult` et
+// `CentralLoginFailureReason` sont référencées (jamais importées en valeur :
+// `import type` n'est jamais émis dans le bundle du preload).
 import type { SyncCycleResult } from '../src/lib/sync/runner-core'
+import type { CentralLoginFailureReason } from './sync/auth'
 
 /**
  * Pont renderer ⇄ main (Electron).
@@ -52,25 +55,31 @@ export interface SyncStatus {
 export type SyncTriggerResult = SyncCycleResult
 
 /**
- * Résultat de `loginToSync(email, password)` (tâche 7.1 — bootstrap).
+ * Résultat de `loginToSync(email, password)` (tâche 7.1).
  *
  *  - `ok: true`  : jeton d'appareil **acquis et persisté** chiffré côté main ;
- *  - `ok: false` : échec de l'échange — `reason` est un motif **générique**
- *    (union fermée) et `message` un texte court à afficher ; **aucun** détail
- *    du serveur central, aucun mot de passe, aucun jeton n'y figurent ;
- *  - `serverRestarted` : `true` = l'enfant Next a bien été **redémarré** avec
- *    le nouvel env `SYNC_TOKEN` (le serveur local peut donc réserver des blocs
- *    et servir `/api/sync/bootstrap`) ;
+ *  - `ok: false` : échec — `reason` est un motif **générique** et `message` un
+ *    texte court à afficher ; **aucun** détail du serveur central, aucun mot de
+ *    passe, aucun jeton n'y figurent ;
+ *  - `reason` : **union fermée** {@link CentralLoginFailureReason} (importée
+ *    depuis `electron/sync/auth`) — côté renderer, un `switch` sur `reason`
+ *    peut être épuisé (échec d'échange central **et** panne locale
+ *    `local-server-down` / `restart-timeout`) sans repli muet (tâche 7.1c) ;
+ *  - `serverRestarted` : `true` = l'enfant Next a bien été **redémarré** (ou
+ *    relancé par le filet de secours) avec l'env `SYNC_TOKEN` à jour (le
+ *    serveur local peut donc réserver des blocs et servir
+ *    `/api/sync/bootstrap`) ;
  *  - `warning` : avertissement non bloquant quand `ok: true` mais que l'env n'a
  *    pas pu être appliqué (`env-unavailable`, `env-rebuild-failed`,
- *    `restart-failed`, `server-not-restartable`).
+ *    `restart-failed`, `server-not-restartable`). **Jamais** `ok: true` sans au
+ *    moins un serveur Next local joignable (garantie 7.1c).
  *
  * ⚠️ Le mot de passe **ne transite** que dans le message IPC `sync:login` :
  * il n'est jamais journalisé, ni persisté, côté main.
  */
 export interface SyncLoginResult {
   readonly ok: boolean
-  readonly reason?: string
+  readonly reason?: CentralLoginFailureReason
   readonly message?: string
   readonly serverRestarted: boolean
   readonly warning?: string

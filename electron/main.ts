@@ -8,18 +8,30 @@ import { registerIpcHandlers } from './ipc'
 import type { SyncLoginResult } from './preload'
 import {
   forceKillNextServer,
+  isNextServerServing,
   redactSecrets,
   restartNextServer,
   startNextServer,
   stopNextServer,
   type NextServerHandle,
+  type RestartNextServerResult,
 } from './server/next'
-import { loginToCentral, type LoginToCentralResult } from './sync/auth'
+import { centralLoginFailureMessage, loginToCentral, type LoginToCentralResult } from './sync/auth'
 import { startSyncRunner, type SyncRunnerHandle } from './sync/runner'
 import { createMainWindow, START_URL } from './window'
 
 /** Délai de secours au-delà duquel l'arrêt du serveur est forcé (tâche 1.4). */
 const SERVER_SHUTDOWN_TIMEOUT_MS = 5_000
+/**
+ * Plafond du **redémarrage** déclenché par `sync:login` (tâche 7.1c) : stop de
+ * l'ancien enfant (≤ 5 s) + libération du port (≤ 5 s) + spawn + readiness
+ * (60 s standalone / 90 s dev) peuvent monter à 60-90 s — inacceptable pour un
+ * appel IPC qui retient l'UI. Au-delà de ce budget, on répond **immédiatement**
+ * avec la raison fermée `restart-timeout` et l'on laisse le filet de secours
+ * (voir {@link armLocalServerRescue}) suivre le redémarrage en vol : l'application
+ * n'est jamais laissée sans suivi.
+ */
+const SYNC_LOGIN_RESTART_BUDGET_MS = 30_000
 /** Délai de secours au-delà duquel l'arrêt de la base locale est forcé (tâche 2.2a). */
 const DB_SHUTDOWN_TIMEOUT_MS = 5_000
 
@@ -46,6 +58,36 @@ let desktopDbShutdown: Promise<void> | null = null
  * complet. `null` tant que le démarrage n'a pas atteint cette étape.
  */
 let rebuildNextEnv: (() => NodeJS.ProcessEnv) | null = null
+/**
+ * **Env initial** de l'enfant Next, capturé au démarrage (tâche 7.1c) : c'est
+ * la dernière configuration **prouvée fonctionnelle** (elle a servi à lancer le
+ * serveur que l'utilisateur a réellement utilisé). En cas de redémarrage
+ * échoué, la relance de secours part de cet env si — et seulement si — la
+ * reconstruction avec le jeton frais a produit un env vide ; sinon c'est l'env
+ * neuf (jeton à jour) qui est préféré.
+ */
+let initialNextEnv: NodeJS.ProcessEnv | null = null
+/**
+ * Relance de secours en cours (tâche 7.1c) : garde d'idempotence — deux
+ * `sync:login` (ou un timeout suivant d'un échec) ne déclenchent **jamais**
+ * deux spawns concurrents sur le même port.
+ */
+let rescueInFlight: Promise<RescueOutcome> | null = null
+
+/** Verdict de la relance de secours après un redémarrage échoué. */
+type RescueOutcome =
+  /** Le secours a lancé **notre** enfant : env (donc `SYNC_TOKEN`) appliqué. */
+  | 'applied'
+  /** Un serveur Next répond, mais l'env n'a pas pu être appliqué (réutilisé). */
+  | 'not-applied'
+  /** **Aucun** serveur Next joignable → `ok: false` / `local-server-down`. */
+  | 'down'
+
+/** Issue d'une course `restartNextServer` contre le budget IPC. */
+type RestartRaceOutcome =
+  | { readonly kind: 'settled'; readonly value: RestartNextServerResult }
+  | { readonly kind: 'failed'; readonly error: unknown }
+  | { readonly kind: 'timeout' }
 
 async function openMainWindow(url: string): Promise<void> {
   const win = createMainWindow()
@@ -210,16 +252,31 @@ function shutdownDesktopDb(): Promise<void> {
  *     figure désormais (jeton frais, non expiré) ;
  *  3. `restartNextServer()` : l'enfant Next **redémarre** avec ce nouvel env —
  *     seul moyen de lui transmettre un `SYNC_TOKEN` (indispensable à la
- *     réservation de blocs, tâche 6.1c) ;
+ *     réservation de blocs, tâche 6.1c) — **borné** à
+ *     `SYNC_LOGIN_RESTART_BUDGET_MS` (30 s) pour ne jamais figer l'UI ;
  *  4. déclenchement immédiat du runner (`triggerNow`) : le cœur **relit** le
  *     jeton persisté à chaque cycle (`deps.token.read` → `readSyncToken()`),
  *     aucune configuration n'a donc à être poussée — d'où l'absence de
  *     `setSyncToken` sur le handle du runner.
  *
- * **Aucune défaillance ne casse l'application** : chaque étape est encapsulée
- * et se termine par un `SyncLoginResult` typé pour le renderer (échec du login
- * → `ok: false` ; jeton acquis mais env non appliqué → `ok: true` +
- * `warning`). Aucun message ne contient de mot de passe ni de jeton.
+ * ## Garantie « jamais de succès sans serveur » (tâche 7.1c)
+ *
+ * `restartNextServer()` **arrête l'ancien enfant avant** de relancer : s'il
+ * échoue ensuite (EADDRINUSE, exit prématuré, timeout de readiness), le renderer
+ * se retrouverait sans aucune API. Trois filets s'appliquent donc, dans l'ordre :
+ *
+ *  1. **échec du redémarrage** → {@link armLocalServerRescue} tente **une**
+ *     relance de secours (`startNextServer({ env })`) avant de conclure ;
+ *  2. **dépassement du budget de 30 s** → réponse **immédiate** `ok: false` /
+ *     `restart-timeout` + filet armé en arrière-plan sur le redémarrage en vol
+ *     (succès → handle + runner ; échec → relance de secours) ;
+ *  3. **verdict final** : `isNextServerServing()` doit prouver qu'un serveur
+ *     Next répond. Sans serveur → `ok: false` / `local-server-down`
+ *     (« serveur local non redémarré — redémarrez l'application ») et **jamais**
+ *     `ok: true`.
+ *
+ * Chaque étape est encapsulée et se termine par un `SyncLoginResult` typé. Aucun
+ * message ne contient de mot de passe ni de jeton.
  */
 async function handleSyncLogin(email: string, password: string): Promise<SyncLoginResult> {
   // 1 — échange d'identifiants (garde anti-throw : `loginToCentral` se veut
@@ -256,29 +313,197 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
     return { ok: true, serverRestarted: false, warning: 'env-rebuild-failed' }
   }
 
-  // 3 — redémarrage de l'enfant avec le nouvel env (serveur réutilisé →
-  //     `restarted: false` + avertissement journalisé côté `next.ts`).
-  try {
-    const restarted = await restartNextServer({ env, previous: nextServer })
-    nextServer = restarted.handle
-    if (!restarted.restarted) {
-      log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle')
-      return { ok: true, serverRestarted: false, warning: 'server-not-restartable' }
+  // 3 — redémarrage de l'enfant, COURSU contre `SYNC_LOGIN_RESTART_BUDGET_MS`
+  //     (tâche 7.1c) : stop + libération du port + spawn + readiness peuvent
+  //     monter à 60-90 s, inacceptable pour un appel IPC qui retient l'UI.
+  //     `Promise.resolve().then(...)` normalise une éventuelle throw synchrone
+  //     en rejet (aucune branche d'échec non couverte ci-dessous).
+  const previous = nextServer
+  const restartPromise = Promise.resolve().then(() => restartNextServer({ env, previous }))
+  let budgetTimer: NodeJS.Timeout | undefined
+  const raced = await Promise.race<RestartRaceOutcome>([
+    restartPromise.then(
+      (value): RestartRaceOutcome => ({ kind: 'settled', value }),
+      (error: unknown): RestartRaceOutcome => ({ kind: 'failed', error }),
+    ),
+    new Promise<RestartRaceOutcome>((resolve) => {
+      budgetTimer = setTimeout(() => resolve({ kind: 'timeout' }), SYNC_LOGIN_RESTART_BUDGET_MS)
+    }),
+  ])
+  if (budgetTimer !== undefined) {
+    clearTimeout(budgetTimer)
+  }
+
+  if (raced.kind === 'timeout') {
+    // 3bis — plafond IPC (tâche 7.1c) : réponse **bornée** avec une raison
+    //     fermée, mais le filet n'est **pas** désarmé — le redémarrage en vol
+    //     reste suivi et déclenche, s'il échoue, la relance de secours. On ne
+    //     lance JAMAIS un second spawn pendant qu'un redémarrage est en vol
+    //     (double occupation du port).
+    log.warn(
+      `[main] redémarrage du serveur local dépassé (${SYNC_LOGIN_RESTART_BUDGET_MS} ms) : ` +
+        'réponse bornée `restart-timeout` + suivi en arrière-plan',
+    )
+    void restartPromise.then(
+      (restarted) => {
+        nextServer = restarted.handle
+        if (restarted.restarted) {
+          log.info('[main] serveur Next redémarré après réponse `restart-timeout` : env de connexion appliqué')
+          triggerFirstSyncCycle()
+          return
+        }
+        log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle (après timeout)')
+      },
+      (error: unknown) => {
+        void armLocalServerRescue(env, messageOf(error)).then((outcome) => {
+          if (outcome === 'applied') {
+            log.info('[main] relance de secours différée réussie : env de connexion appliqué')
+            triggerFirstSyncCycle()
+          } else if (outcome === 'down') {
+            log.error('[main] AUCUN serveur local après le secours différé : l’application est sans API')
+          } else {
+            log.warn('[main] serveur local joignable mais env de connexion non appliqué (secours différé)')
+          }
+        })
+      },
+    )
+    return {
+      ok: false,
+      reason: 'restart-timeout',
+      message: centralLoginFailureMessage('restart-timeout'),
+      serverRestarted: false,
     }
-  } catch (error) {
-    log.warn(redactSecrets(`[main] redémarrage du serveur Next impossible : ${messageOf(error)}`))
-    return { ok: true, serverRestarted: false, warning: 'restart-failed' }
+  }
+
+  if (raced.kind === 'failed') {
+    // 3ter — **BLOQUANT** (tâche 7.1c) : l'ancien enfant est déjà arrêté, donc
+    //     un rejet direct laisserait `nextServer` sur un handle mort ET ferait
+    //     croire à l'utilisateur que tout va bien. On tente donc **une** relance
+    //     de secours avant de conclure, puis on n'annonce `ok: true` que si un
+    //     serveur Next répond vraiment.
+    return finishAfterFailedRestart(env, raced.error)
+  }
+
+  const restarted = raced.value
+  nextServer = restarted.handle
+  if (!restarted.restarted) {
+    log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle')
+    return { ok: true, serverRestarted: false, warning: 'server-not-restartable' }
   }
   log.info('[main] serveur Next redémarré avec le jeton d’appareil à jour')
 
   // 4 — runner : premier cycle immédiat (jamais bloquant pour l'UI).
+  return triggerFirstSyncCycle()
+}
+
+/**
+ * Env de la relance de secours : l'env **neuf** (jeton fraîchement persisté) en
+ * priorité — c'est tout l'objectif du redémarrage. Repli sur l'**env initial**
+ * capturé au démarrage ({@link initialNextEnv}) si la reconstruction a livré un
+ * objet vide : relancer un enfant sans `DATABASE_URL`/`AUTH_SECRET` ne produirait
+ * qu'un serveur en échec, alors que l'env initial a déjà prouvé qu'il lançait un
+ * serveur utilisable.
+ */
+function resolveRescueEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (Object.keys(env).length > 0) {
+    return env
+  }
+  if (initialNextEnv !== null && Object.keys(initialNextEnv).length > 0) {
+    log.warn('[main] env de secours : repli sur l’env initial capturé au démarrage (env neuf vide)')
+    return initialNextEnv
+  }
+  return env
+}
+
+/**
+ * **Une** relance de secours après un redémarrage échoué (tâche 7.1c) :
+ * `startNextServer({ env })` — exactement la logique du démarrage d'ouverture
+ * (probe de réutilisation, fusion d'env, readiness). Le probe **précède** le
+ * spawn : si un serveur Next répond déjà sur le port (réutilisé, ou notre propre
+ * enfant arrivé à bon port), aucun second enfant n'est lancé et le verdict vaut
+ * `not-applied`.
+ *
+ * Idempotent : les appels concurrents partagent la même promesse — jamais deux
+ * spawns simultanés sur le même port. **Ne rejette jamais** : toute défaillance
+ * imprévue devient `down` (échec fermé, jamais de succès inventé).
+ *
+ * @param cause motif rédigé (appelant : `messageOf`, redaction appliquée ici).
+ */
+function armLocalServerRescue(env: NodeJS.ProcessEnv, cause: string): Promise<RescueOutcome> {
+  if (rescueInFlight !== null) {
+    return rescueInFlight
+  }
+  log.warn(redactSecrets(`[main] relance de secours du serveur local armée (cause : ${cause})`))
+  const run = (async (): Promise<RescueOutcome> => {
+    const rescueEnv = resolveRescueEnv(env)
+    try {
+      const handle = await startNextServer({ env: rescueEnv })
+      nextServer = handle
+      if (handle.owned) {
+        return 'applied'
+      }
+      log.warn('[main] relance de secours : serveur Next préexistant réutilisé, env de connexion NON appliqué')
+      return 'not-applied'
+    } catch (error) {
+      log.warn(redactSecrets(`[main] relance de secours impossible : ${messageOf(error)}`))
+    }
+    // Verdict **prouvé** : `isNextServerServing` exige les marqueurs Next.js —
+    // un service étranger qui répondrait sur le port ne compte pas comme
+    // serveur local (→ `down`), contrairement à un simple probe HTTP.
+    const serving = await isNextServerServing(nextServer !== null ? nextServer.url : START_URL).catch(
+      (): boolean => false,
+    )
+    return serving ? 'not-applied' : 'down'
+  })()
+    .catch((): RescueOutcome => 'down')
+    .finally(() => {
+      rescueInFlight = null
+    })
+  rescueInFlight = run
+  return run
+}
+
+/**
+ * Échec d'un redémarrage : **un** relance de secours, puis verdict **fermé**.
+ *
+ * Ne renvoie `ok: true` que si un serveur Next a été prouvé joignable (le
+ * relance a réappliqué l'env → `serverRestarted: true`, ou un serveur répond
+ * déjà → `warning: 'restart-failed'`). Sans serveur → `ok: false` /
+ * `local-server-down`, **jamais** `ok: true`.
+ */
+async function finishAfterFailedRestart(
+  env: NodeJS.ProcessEnv,
+  rawError: unknown,
+): Promise<SyncLoginResult> {
+  const cause = messageOf(rawError)
+  log.warn(redactSecrets(`[main] redémarrage du serveur local impossible : ${cause}`))
+  const outcome = await armLocalServerRescue(env, cause)
+  switch (outcome) {
+    case 'applied':
+      log.warn('[main] relance de secours du serveur local réussie : env de connexion appliqué')
+      return triggerFirstSyncCycle()
+    case 'not-applied':
+      log.warn('[main] serveur local joignable mais env de connexion NON appliqué après la relance de secours')
+      return { ok: true, serverRestarted: false, warning: 'restart-failed' }
+    case 'down':
+      log.error('[main] AUCUN serveur local après la relance de secours : application sans API')
+      return {
+        ok: false,
+        reason: 'local-server-down',
+        message: centralLoginFailureMessage('local-server-down'),
+        serverRestarted: false,
+      }
+  }
+}
+
+/** Runner : premier cycle immédiat (jamais bloquant pour l'UI). */
+function triggerFirstSyncCycle(): SyncLoginResult {
   const runner = syncRunner
   if (runner !== null) {
     void runner.triggerNow().catch((error: unknown) => {
       log.warn(`[main] premier cycle après reconnexion impossible (${error instanceof Error ? error.name : 'unknown'})`)
     })
   }
-
   return { ok: true, serverRestarted: true }
 }
 
@@ -340,6 +565,10 @@ async function startApplication(): Promise<void> {
     await runMigrations(localDb.url)
     // 4 — env de l'enfant : construit uniquement une fois PG prêt et migré.
     const env = buildNextEnv(localDb, config)
+    // 4bis — capture de l'**env initial** (tâche 7.1c) : dernière config
+    // prouvé fonctionnelle, conservée comme source du relance de secours si
+    // l'env reconstruit (jeton frais) devait être vide.
+    initialNextEnv = env
     // Fermeture de reconnexion (tâche 7.1) : rejoue **exactement** cette
     // construction plus tard, avec le jeton d'appareil à jour — `buildNextEnv`
     // relit `config.json` (donc `readSyncToken()`) à chaque appel.

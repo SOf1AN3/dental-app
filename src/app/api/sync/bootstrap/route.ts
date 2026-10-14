@@ -6,6 +6,7 @@ import { syncOutbox, users } from "@/lib/db/schema";
 import {
   applyPulledChanges,
   createLocalApplyRepo,
+  type ApplyResult,
   type LocalApplyRepo,
 } from "@/lib/sync/local-apply";
 import {
@@ -80,6 +81,13 @@ import {
  *    écriture dédiée ({@link extractUserPasswordHashes}), **bornée** à une
  *    valeur de forme bcrypt (regex) : aucune écriture de colonne arbitraire,
  *    aucun payload accepté en clair ;
+ *  - **filtrage avant écriture** (tâche 7.1c) : le hash n'est écrit que si la
+ *    ligne a **réellement été appliquée** dans ce lot — `applied.errors[].rowId`
+ *    et la règle A1 (`isRowLocallyPending("user", …)` → `skipped-pending`) en
+ *    sont exclus (voir {@link filterWritableHashWrites}). Sans ce filtre, le
+ *    hash central écraserait un utilisateur ayant un changement local en attente
+ *    de push — perte **définitive**, le protocole interdisant de pousser
+ *    `password_hash` ;
  *  - la requête part **du serveur local vers le central configuré dans son
  *    env** (`SYNC_BASE_URL`) : le corps de l'appelant ne peut pas injecter de
  *    hash (il ne porte que des `clinicId`).
@@ -317,6 +325,57 @@ async function writeUserPasswordHashesDb(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Filtrage des écritures de hash (tâche 7.1c — mineur 2)                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Exclut du lot d'écriture les hashes dont la ligne **n'a pas été appliquée**
+ * par `applyPulledChanges` dans ce même lot.
+ *
+ * Deux exclusions, toutes deux justifiées par « n'écrase jamais une ligne que
+ * le tirage n'a pas alignée » :
+ *
+ *  1. **`applied.errors[].rowId`** (table `user`) : opération en échec — la
+ *     ligne locale n'est pas l'état central, écrire le hash masquerait
+ *     l'échec et donnerait l'illusion d'un compte réaligné ;
+ *  2. **règle A1 (`skipped-pending`)** : `isRowLocallyPending("user", rowId)`
+ *     renvoie `true` → le poste détient un changement **en attente de push**.
+ *     Sans ce filtre, le hash tiré écraserait le hash local d'un utilisateur en
+ *     cours de modification — le push suivant ne le referait pas (le protocole
+ *     interdit de pousser `password_hash`) : la perte serait **définitive**.
+ *
+ * `isRowLocallyPending` n'est donc interrogé ici que pour les utilisateurs
+ * **réellement extraits** (une requête indexée `idx_sync_outbox_status_seq`
+ * par hash retenu — pas pour chaque ligne tirée).
+ */
+async function filterWritableHashWrites(
+  writes: readonly UserPasswordHashWrite[],
+  applied: ApplyResult,
+  isRowLocallyPending: (table: string, rowId: string) => Promise<boolean>,
+): Promise<UserPasswordHashWrite[]> {
+  if (writes.length === 0) {
+    return [];
+  }
+  const failedUserRowIds = new Set<string>();
+  for (const error of applied.errors) {
+    if (error.table === "user") {
+      failedUserRowIds.add(error.rowId);
+    }
+  }
+  const writable: UserPasswordHashWrite[] = [];
+  for (const write of writes) {
+    if (failedUserRowIds.has(write.userId)) {
+      continue;
+    }
+    if (await isRowLocallyPending("user", write.userId)) {
+      continue;
+    }
+    writable.push(write);
+  }
+  return writable;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Tirage paginé (cœur testable, deps injectées)                               */
 /* -------------------------------------------------------------------------- */
 
@@ -446,10 +505,26 @@ export async function runBootstrap(params: BootstrapRunParams): Promise<Bootstra
         );
       }
 
-      // (2) Porte dédiée `password_hash` — table `user` + forme bcrypt uniquement.
+      // (2) Porte dédiée `password_hash` — table `user` + forme bcrypt
+      //     **puis filtrage** (tâche 7.1c) : jamais d'écriture sur une ligne que
+      //     ce tirage n'a PAS appliquée (erreurs + A1 `skipped-pending`) — sinon
+      //     le hash central écraserait un changement local en attente.
       const hashWrites = extractUserPasswordHashes(page.changes);
-      if (hashWrites.length > 0) {
-        await params.writeUserPasswordHashes(hashWrites);
+      const writableHashWrites = await filterWritableHashWrites(
+        hashWrites,
+        applied,
+        params.isRowLocallyPending,
+      );
+      if (writableHashWrites.length > 0) {
+        await params.writeUserPasswordHashes(writableHashWrites);
+      }
+      const withheld = hashWrites.length - writableHashWrites.length;
+      if (withheld > 0) {
+        // Compteurs seuls — ni identifiant ni hash dans le journal.
+        console.warn(
+          `[api/sync/bootstrap] ${withheld} hash(s) de mot de passe non écrit(s) : ` +
+            "ligne ignorée par le tirage (A1 en attente ou échec d'application).",
+        );
       }
 
       pulled += page.changes.length;
