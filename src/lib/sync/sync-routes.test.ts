@@ -8,7 +8,7 @@ import {
 } from "@/app/api/sync/token/route";
 import { createSyncPushHandler } from "@/app/api/sync/push/route";
 import { createSyncPullHandler } from "@/app/api/sync/pull/route";
-import { SyncScopeError } from "./central-store";
+import { SyncScopeError, type FetchChangesOptions } from "./central-store";
 import type {
   TokenThrottleCheckResult,
   TokenThrottleRecordParams,
@@ -647,5 +647,143 @@ describe("POST /api/sync/pull", () => {
     expect(ctxArg).toEqual(CTX);
     expect(reqArg).toEqual(req);
     expect(nowArg).toBeInstanceOf(Date);
+  });
+
+  /* ---------------- Variante « bootstrap » (tâche 7.1b) ------------------ */
+
+  it("sans `variant` → 4ᵉ argument `undefined` : tirage strictement normal", async () => {
+    const pull = vi.fn(
+      async (
+        _ctx: DeviceTokenContext,
+        _req: PullRequest,
+        _now: Date,
+        _options?: FetchChangesOptions,
+      ): Promise<PullResponse> => PULL_RESPONSE,
+    );
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson({ clinicId: "c1", cursor: null }, bearer("jeton-valide")),
+    );
+
+    expect(res.status).toBe(200);
+    const [, reqArg, , optionsArg] = pull.mock.calls[0];
+    expect(reqArg).toEqual({ clinicId: "c1", cursor: null });
+    expect(optionsArg).toBeUndefined();
+    expect(JSON.stringify(reqArg)).not.toContain("variant");
+  });
+
+  it("`variant: \"bootstrap\"` → { includeAuthBootstrap: true } transmis au store", async () => {
+    const pull = vi.fn(
+      async (
+        _ctx: DeviceTokenContext,
+        _req: PullRequest,
+        _now: Date,
+        _options?: FetchChangesOptions,
+      ): Promise<PullResponse> => PULL_RESPONSE,
+    );
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson(
+        { clinicId: "c1", cursor: null, variant: "bootstrap" },
+        bearer("jeton-valide"),
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(PULL_RESPONSE);
+    const [, reqArg, , optionsArg] = pull.mock.calls[0];
+    // `variant` n'est jamais retransmis tel quel au store : il est converti
+    // en option explicite, `PullRequest` ne change pas de forme.
+    expect(reqArg).toEqual({ clinicId: "c1", cursor: null });
+    expect(optionsArg).toEqual({ includeAuthBootstrap: true });
+  });
+
+  it("`variant` inconnu (ex. \"malveillant\") → 400, le store n'est JAMAIS appelé", async () => {
+    const pull = vi.fn();
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson(
+        { clinicId: "c1", cursor: null, variant: "malveillant" },
+        bearer("jeton-valide"),
+      ),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await errorBody(res)).toEqual({ error: "invalid-request" });
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it("401 AVANT la validation : corps `variant: \"malveillant\"` sans jeton → 401", async () => {
+    const pull = vi.fn();
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson({ clinicId: "x", variant: "malveillant" }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(await errorBody(res)).toEqual({ error: "unauthorized" });
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it("401 sans jeton même avec `variant: \"bootstrap\"` (auth avant tout corps)", async () => {
+    const pull = vi.fn();
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson({ clinicId: "c1", cursor: null, variant: "bootstrap" }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(await errorBody(res)).toEqual({ error: "unauthorized" });
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it("403 (anti-IDOR) avec `variant: \"bootstrap\"` sur un clinicId hors portée", async () => {
+    const pull = vi.fn();
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+
+    const res = await handler(
+      postJson(
+        { clinicId: "c2-etranger", cursor: null, variant: "bootstrap" },
+        bearer("jeton-valide"),
+      ),
+    );
+
+    expect(res.status).toBe(403);
+    expect(await errorBody(res)).toEqual({ error: "clinic-out-of-scope" });
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it("journalise une SEULE fois le premier tirage bootstrap par device, sans secret", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const pull = vi.fn(
+      async (
+        _ctx: DeviceTokenContext,
+        _req: PullRequest,
+        _now: Date,
+        _options?: FetchChangesOptions,
+      ): Promise<PullResponse> => PULL_RESPONSE,
+    );
+    const handler = createSyncPullHandler({ verifyToken: async () => CTX, pull });
+    const body = { clinicId: "c1", cursor: null, variant: "bootstrap" };
+
+    const first = await handler(postJson(body, bearer("jeton-valide")));
+    expect(first.status).toBe(200);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("tirage bootstrap émis");
+    expect(line).toContain(CTX.deviceId);
+    // Aucun secret dans le journal : ni hash, ni mot de passe.
+    expect(line).not.toContain("$2b$");
+    expect(line).not.toMatch(/password|hash/i);
+
+    const second = await handler(postJson(body, bearer("jeton-valide")));
+    expect(second.status).toBe(200);
+    // Même device → pas de second journal (traçabilité sans bruit).
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

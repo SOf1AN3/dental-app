@@ -42,7 +42,10 @@
  *  4. **Aucun secret dans un payload (A5/B6)** — `serializeRow` (liste blanche
  *     du registre) est rappelé sur **chaque** payload, en entrée comme en
  *     sortie : `user.password_hash` ne peut figurer ni dans un push appliqué,
- *     ni dans un pull.
+ *     ni dans un pull. **Seule exception, explicite et bornée** : l'option
+ *     `FetchChangesOptions.includeAuthBootstrap` (tâche 7.1b, variante
+ *     « bootstrap » du pull, serveur → poste uniquement) — voir la
+ *     documentation détaillée de `FetchChangesOptions` en section 6.
  *
  * ## Arbitrage des conflits (décision D-4)
  *
@@ -732,6 +735,66 @@ async function journalConflict(
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Options de tirage — **aucune n'est active par défaut** : sans `options`,
+ * `fetchChanges` se comporte exactement comme avant (identité bit à bit des
+ * 587 tests existants).
+ *
+ * ## `includeAuthBootstrap` (tâche 7.1b) — variante « bootstrap » du tirage
+ *
+ * ### Périmètre EXACT (trois gardes **cumulatives**, posées à l'émission)
+ *
+ *  1. **table `user` uniquement** — le test est `candidate.table === "user"` :
+ *     aucune autre table du registre, ni aucun enfant en cascadé, n'est
+ *     touchée. Un tirage bootstrap contient donc les mêmes lignes qu'un
+ *     tirage normal, à la seule différence du champ `passwordHash` porté par
+ *     les ops `user` ;
+ *  2. **ligne vivante uniquement** — `deleted_at` nul : un tombstone (`op`
+ *     `delete`) ne porte **jamais** de hash, quel que soit son état ;
+ *  3. **valeur non vide** — si la colonne `passwordHash` est absente (ou une
+ *     chaîne vide) sur la ligne brute, **rien** n'est ajouté au payload.
+ *
+ * ### Ce que l'option NE fait PAS (invariants intacts)
+ *
+ *  - La liste blanche (`TABLE_REGISTRY`, `FORBIDDEN_PAYLOAD_COLUMNS`) et
+ *    `serializeRow` sont **inchangées** : la projection est appelée en amont
+ *    et l'option ne fait qu'**ajouter** une clé au résultat **déjà projeté**.
+ *    Elle ne court-circuite jamais la liste blanche pour les autres colonnes
+ *    (un `email`, un `image`… passent toujours par `serializeRow`) ;
+ *  - Le **push** (poste → serveur) reste strictement bloqué : `applyOps`
+ *    re-projette chaque payload entrant, aucun poste ne peut rétro-verser un
+ *    hash, et cette option ne s'applique jamais au push ;
+ *  - Le tirage quotidien (`electron/sync/runner`, route sans `variant`) ne
+ *    l'active **jamais** : seules les lignes tirées par
+ *    `POST /api/sync/pull` avec `variant: "bootstrap"` (valeur fermée Zod,
+ *    jeton d'appareil requis, `clinicId ∈ ctx.clinicIds`) passent par là.
+ *
+ * ### Pourquoi c'est acceptable (décision 7.1b)
+ *
+ *  - **La base locale vit sur le poste du cabinet**, déjà détentrice de
+ *    TOUTES les données du cabinet (patients, dossiers, factures) et du
+ *    dossier `userData` chiffré (DPAPI / chiffrement disque) : le hash y est
+ *    exactement aussi exposé que sur le serveur qui l'a généré. Il est de
+ *    surcroît **nécessaire** : `src/lib/auth.ts` exige `user.passwordHash`
+ *    pour vérifier bcrypt — un poste amorcé sans hash ne pourrait **jamais**
+ *    se connecter localement (analyse détaillée dans
+ *    `src/app/api/sync/bootstrap/route.ts`, en-tête) ;
+ *  - **Un central compromis ne gagne aucun droit nouveau** : il détient déjà
+ *    les comptes, vérifie déjà les mots de passe et possède déjà toutes les
+ *    données des cabinets ;
+ *  - **Le sens poste → serveur reste bloqué** : seul le serveur → poste est
+ *    ouvert, une fois, pour l'amorçage (le hash n'est ni journalisé ni
+ *    renvoyé par la route de bootstrap).
+ */
+export interface FetchChangesOptions {
+  /**
+   * Émet `passwordHash` dans le payload des opérations `user` **vivantes**
+   * (variante « bootstrap », serveur → poste uniquement). `undefined` ou
+   * `false` : comportement strictement inchangé, aucun hash émis.
+   */
+  includeAuthBootstrap?: boolean;
+}
+
+/**
  * Tirage paginé des changements du central.
  *
  * - **Curseur composite** `(updated_at, id)` global à toutes les tables de
@@ -748,12 +811,15 @@ async function journalConflict(
  *   la **dernière ligne** du lot (stable si le lot est vide).
  *
  * @param now horloge **serveur** (validée, échec fermé).
+ * @param options **aucune par défaut** — voir {@link FetchChangesOptions}
+ *   (variante « bootstrap » : `passwordHash` des lignes `user` vivantes).
  */
 export async function fetchChanges(
   ctx: DeviceTokenContext,
   req: PullRequest,
   now: Date,
   repo: CentralStoreRepo = getDefaultRepo(),
+  options?: FetchChangesOptions,
 ): Promise<PullResponse> {
   if (!Number.isFinite(now.getTime())) {
     throw new Error("sync/central-store : horloge serveur caduque (now invalide).");
@@ -852,14 +918,31 @@ export async function fetchChanges(
           ? rowId
           : null;
 
+    // B6 : projection liste blanche — `password_hash` ne sort jamais.
+    // La projection est TOUJOURS appelée ; l'option ci-dessous ne fait
+    // qu'ajouter une clé au résultat déjà projeté (jamais l'inverse).
+    const payload = serializeRow(candidate.table, row);
+
+    // 7.1b — variante « bootstrap » : SEULE dérogation au projet, bornée à
+    // `user` + ligne vivante + valeur non vide (voir `FetchChangesOptions`).
+    if (
+      options?.includeAuthBootstrap === true &&
+      candidate.table === "user" &&
+      !deleted
+    ) {
+      const passwordHash = row.passwordHash;
+      if (typeof passwordHash === "string" && passwordHash.length > 0) {
+        payload.passwordHash = passwordHash;
+      }
+    }
+
     changes.push({
       opId: crypto.randomUUID(),
       table: candidate.table,
       rowId,
       // B5 : tombstone → `delete` ; sinon `insert` (upsert côté client).
       op: deleted ? "delete" : "insert",
-      // B6 : projection liste blanche — `password_hash` ne sort jamais.
-      payload: serializeRow(candidate.table, row),
+      payload,
       clinicId,
       updatedAt: toIso(row.updatedAt),
       ...(typeof row.rev === "number" ? { rev: row.rev } : {}),

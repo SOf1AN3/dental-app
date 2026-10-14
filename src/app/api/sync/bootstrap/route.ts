@@ -94,13 +94,22 @@ import {
  * reste **interdite** : le push projette déjà les payloads (`serializeRow`), un
  * poste ne peut donc jamais rétro-verser un hash.
  *
- * ⚠️ **Reste à câbler côté central (hors périmètre de cette tâche — fichiers
- * `central-store.ts` / route `pull` interdits)** : le serveur central doit
- * **émettre** ce champ pour cette requête. En l'état, `fetchChanges()` le
- * projette toujours : le chemin d'écriture existe, sécurisé et testé, mais
- * reste **dormant** tant que le central n'expose pas une variante de tirage
- * « bootstrap » (serveur → poste uniquement, jeton d'appareil + portée
- * cabinet, jamais ré-exposée par `/api/sync/pull`).
+ * ## Câblage côté central — FAIT (tâche 7.1b)
+ *
+ * Le central expose désormais cette variante via `POST /api/sync/pull` :
+ * `pullRequestSchema.extend({ variant: z.literal("bootstrap").optional() })`
+ * → `fetchChanges(..., { includeAuthBootstrap: true })`, qui ajoute
+ * `passwordHash` **après** projection, **uniquement** aux opérations `user`
+ * **vivantes** (voir `FetchChangesOptions` dans `central-store.ts`).
+ *
+ * Ce module envoie donc `variant: "bootstrap"` sur **chaque** page de son
+ * tirage (corps de {@link fetchCentralPage}) — c'est ce qui « réveille » la
+ * porte {@link extractUserPasswordHashes} ci-dessus. Le chemin quotidien de
+ * `runner` reste inchangé : sans `variant`, la liste blanche s'applique
+ * intégralement. Un `variant` inconnu côté central vaudrait **400** (valeur
+ * fermée) → ici absorbé en 500 `internal-error` par la garde `!response.ok`,
+ * donc jamais de silencieux : un central trop ancien refuserait l'amorçage au
+ * lieu de livrer un hash falsifié.
  */
 
 export const dynamic = "force-dynamic";
@@ -341,7 +350,16 @@ class BootstrapCentralError extends Error {
   }
 }
 
-/** Une page `POST /api/sync/pull` auprès du central — jamais de secret en log. */
+/**
+ * Une page `POST /api/sync/pull` auprès du central — jamais de secret en log.
+ *
+ * `variant: "bootstrap"` (tâche 7.1b) demande au central d'émettre
+ * `passwordHash` sur les opérations `user` vivantes ; c'est la contrepartie
+ * de {@link extractUserPasswordHashes}. Valeur **fermée** côté central : un
+ * central qui ne la connaîtrait pas répond 400 et la garde `!response.ok`
+ * convertit l'échec en `BootstrapCentralError` (500 générique) — jamais de
+ * hash falsifié accepté silencieusement.
+ */
 async function fetchCentralPage(
   params: BootstrapRunParams,
   clinicId: string,
@@ -356,7 +374,12 @@ async function fetchCentralPage(
         "content-type": "application/json",
         authorization: `Bearer ${params.env.token}`,
       },
-      body: JSON.stringify({ clinicId, cursor, limit: MAX_PULL_LIMIT }),
+      body: JSON.stringify({
+        clinicId,
+        cursor,
+        limit: MAX_PULL_LIMIT,
+        variant: "bootstrap",
+      }),
       signal: AbortSignal.timeout(CENTRAL_TIMEOUT_MS),
     });
   } catch (error) {

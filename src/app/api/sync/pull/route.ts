@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { SyncScopeError, fetchChanges } from "@/lib/sync/central-store";
+import { z } from "zod";
+import {
+  SyncScopeError,
+  fetchChanges,
+  type FetchChangesOptions,
+} from "@/lib/sync/central-store";
 import { verifyDeviceToken, type DeviceTokenContext } from "@/lib/sync/central-auth";
 import {
   pullRequestSchema,
@@ -18,8 +23,9 @@ import {
  *
  * Contrat :
  *  - `Authorization: Bearer <jeton d'appareil>` — jeton absent / malformé /
- *    inconnu / révoqué / expiré → **401** (message générique) ;
- *  - corps validé par `pullRequestSchema` → sinon **400** ;
+ *    inconnu / révoqué / expiré → **401** (message générique), **avant**
+ *    toute lecture/validation du corps ;
+ *  - corps validé par `pullRequestSchema` + `variant` → sinon **400** ;
  *  - **anti-IDOR au niveau route** : le `clinicId` demandé doit appartenir à
  *    `ctx.clinicIds` → sinon **403** (verrou supplémentaire, en plus du
  *    filtrage SQL et de la re-vérification pure déjà posés dans le store) ;
@@ -28,9 +34,48 @@ import {
  *
  * Invariants : `now` toujours serveur ; zéro `console.log` ; `console.error`
  * uniquement sur les 500, sans secret ; jamais mis en cache (`force-dynamic`).
+ *
+ * ## Tâche 7.1b — `variant: "bootstrap"` (variante amorçage)
+ *
+ * Champ **optionnel et à valeur fermée** : `z.literal("bootstrap")` — toute
+ * autre valeur (`"malveillant"`, `"admin"`, …) échoue la validation → **400**
+ * (une valeur ouverte ne serait pas reconnue ni journalisée correctement).
+ *
+ *  - `variant` absent → appel au store **strictement inchangé** (aucun
+ *    `options`, donc aucun `passwordHash` dans la réponse) ;
+ *  - `variant: "bootstrap"` → `fetchChanges(..., { includeAuthBootstrap: true })`
+ *    : le store ajoute `passwordHash` **uniquement** sur les opérations
+ *    `user` **vivantes** (voir `FetchChangesOptions`) ;
+ *  - le transport reste protégé par le même chemin : **auth (401) → corps
+ *    (400) → anti-IDOR (403)**, aucun ordre n'est modifié ;
+ *  - **journalisation** : le premier tirage bootstrap émis pour un device
+ *    donné lève un `console.warn` **sans secret** (device, clinic, horloge —
+ *    **jamais** le hash ni aucun mot de passe), puis ce device est marqué :
+ *    les tirages suivants ne sont plus journalisés (pas de bruit, acte
+ *    sensible traçable une fois). Choix du **log** plutôt que `audit_log` :
+ *    cette route ne détient aucun `actorUserId` (auth = jeton d'appareil) et
+ *    écrire dans `audit_log` (table `push-only`, créée par les postes)
+ *    imposerait un horodatage/une portée d'audit artificiels — hors périmètre
+ *    de la tâche et non couvert par le dépôt « simplement ».
  */
 
 export const dynamic = "force-dynamic";
+
+/* -------------------------------------------------------------------------- */
+/* Corps (Zod) — `pullRequestSchema` + `variant` fermé (tâche 7.1b)            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Corps exact de cette route : le schéma du protocole (`pullRequestSchema`,
+ * **non modifié** — `protocol.ts` est verrouillé) étendu d'un seul champ à
+ * **valeur fermée**. Toute autre valeur que `"bootstrap"` échoue la
+ * validation → **400 `invalid-request`** ; `variant` absent → tirage normal.
+ */
+const pullBodySchema = pullRequestSchema.extend({
+  variant: z.literal("bootstrap").optional(),
+});
+
+type PullBody = z.infer<typeof pullBodySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Réponses                                                                   */
@@ -60,11 +105,19 @@ export interface SyncPullHandlerDeps {
     token: string,
     now: Date,
   ) => Promise<DeviceTokenContext | null>;
-  /** Tirage paginé — chemin de prod : `fetchChanges`. */
+  /**
+   * Tirage paginé — chemin de prod : `fetchChanges`.
+   *
+   * `options` (4ᵉ argument, **optionnel**) ne porte que la variante
+   * « bootstrap » (`{ includeAuthBootstrap: true }`) ; `undefined` signifie
+   * un tirage strictement normal. Les implémentations sans 4ᵉ paramètre
+   * (tests existants) restent compatibles.
+   */
   pull: (
     ctx: DeviceTokenContext,
     req: PullRequest,
     now: Date,
+    options?: FetchChangesOptions,
   ) => Promise<PullResponse>;
 }
 
@@ -80,11 +133,18 @@ export function createSyncPullHandler(
     ((token: string, now: Date) => verifyDeviceToken(token, now));
   const pull =
     overrides.pull ??
-    ((ctx: DeviceTokenContext, req: PullRequest, now: Date) =>
-      fetchChanges(ctx, req, now));
+    ((ctx: DeviceTokenContext, req: PullRequest, now: Date, options?: FetchChangesOptions) =>
+      fetchChanges(ctx, req, now, undefined, options));
+
+  // Traçabilité (7.1b) : devices déjà journalisés en « tirage bootstrap ».
+  // Portée = cette instance de handler (le `POST` de prod est créé une fois
+  // par chargement de module). Croissance bornée au nombre d'appareils.
+  const bootstrapLoggedDevices = new Set<string>();
 
   return async function POST(request: Request): Promise<Response> {
     // (1) Authentification — échec fermé, réponse générique (pas d'oracle).
+    //     AVANT toute lecture du corps : un `variant` malveillant sans jeton
+    //     reste un 401, jamais un 400 (aucune oracle de validation).
     const token = readBearerToken(request.headers.get("authorization"));
     if (token === null) {
       return jsonError("unauthorized", 401);
@@ -100,18 +160,23 @@ export function createSyncPullHandler(
       return jsonError("unauthorized", 401);
     }
 
-    // (2) Corps — JSON valide puis validation Zod.
+    // (2) Corps — JSON valide puis validation Zod (`variant` fermé → 400).
     let raw: unknown;
     try {
       raw = await request.json();
     } catch {
       return jsonError("invalid-request", 400);
     }
-    const parsed = pullRequestSchema.safeParse(raw);
+    const parsed = pullBodySchema.safeParse(raw);
     if (!parsed.success) {
       return jsonError("invalid-request", 400);
     }
-    const req: PullRequest = parsed.data;
+    // `variant` est consigné SÉPARÉMENT : le store ne reçoit jamais le corps
+    // brut, et `PullRequest` ne change pas de forme.
+    const { variant, ...body }: PullBody = parsed.data;
+    const req: PullRequest = body;
+    const options: FetchChangesOptions | undefined =
+      variant === "bootstrap" ? { includeAuthBootstrap: true } : undefined;
 
     // (3) Anti-IDOR au niveau route : le cabinet réclamé doit être dans la
     //     portée du jeton (`clinic_membership` actif, dérivé à l'émission).
@@ -121,7 +186,16 @@ export function createSyncPullHandler(
 
     // (4) Tirage — `now` horloge serveur ; curseur paginé côté store.
     try {
-      const response: PullResponse = await pull(ctx, req, new Date());
+      const response: PullResponse = await pull(ctx, req, new Date(), options);
+      if (variant === "bootstrap" && !bootstrapLoggedDevices.has(ctx.deviceId)) {
+        // 7.1b — acte sensible, journalisé UNE fois par device, **sans secret** :
+        // ni hash, ni mot de passe, ni payload ne figurent dans ce journal.
+        bootstrapLoggedDevices.add(ctx.deviceId);
+        console.warn(
+          `[api/sync/pull] tirage bootstrap émis pour device ${ctx.deviceId} ` +
+            `(clinic ${req.clinicId})`,
+        );
+      }
       return NextResponse.json(response);
     } catch (error) {
       if (error instanceof SyncScopeError) {

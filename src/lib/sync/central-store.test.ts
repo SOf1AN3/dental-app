@@ -1104,6 +1104,216 @@ describe("fetchChanges — B6 sécurité sérialisation", () => {
     expect(Object.keys(userOp?.payload ?? {})).not.toContain("passwordHash");
     expect(JSON.stringify(userOp?.payload)).not.toContain("password_hash");
     expect(userOp?.payload).toMatchObject({ name: "Dr A", tokenVersion: 2 });
+    // Régression : SANS option, AUCUNE trace de hash (ni clé, ni valeur) dans
+    // l'intégralité de la réponse — y compris les autres tables.
+    expect(JSON.stringify(res)).not.toContain("$2b$12$secret");
+    expect(JSON.stringify(res)).not.toContain("passwordHash");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 3bis. Variante « bootstrap » (tâche 7.1b) — includeAuthBootstrap            */
+/* -------------------------------------------------------------------------- */
+
+/** Forme bcrypt stricte attendue par `extractUserPasswordHashes` : 60 car. */
+const BOOTSTRAP_HASH = `$2b$12$${"a".repeat(53)}`;
+
+describe("fetchChanges — variante bootstrap (includeAuthBootstrap)", () => {
+  it("par défaut (sans option) : JAMAIS de hash, même si la ligne brute en porte un", async () => {
+    const harness = createMemoryRepo({
+      memberships: new Map([["user-1", [CLINIC_A]]]),
+    });
+    harness.seed("user", "user-1", {
+      id: "user-1",
+      name: "Dr A",
+      passwordHash: BOOTSTRAP_HASH,
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+
+    const res = await fetchChanges(
+      makeCtx(),
+      pullRequest({ clinicId: CLINIC_A }),
+      NOW,
+      harness.repo,
+    );
+
+    expect(JSON.stringify(res)).not.toContain(BOOTSTRAP_HASH);
+    expect(JSON.stringify(res)).not.toContain("passwordHash");
+  });
+
+  it("avec l'option : hash émis sur `user` VIVANT, forme bcrypt 60 car., colonnes = liste blanche + hash", async () => {
+    const harness = createMemoryRepo({
+      memberships: new Map([["user-1", [CLINIC_A]]]),
+    });
+    harness.seed("user", "user-1", {
+      id: "user-1",
+      name: "Dr A",
+      email: "a@example.com",
+      tokenVersion: 2,
+      passwordHash: BOOTSTRAP_HASH,
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+
+    const res = await fetchChanges(
+      makeCtx(),
+      pullRequest({ clinicId: CLINIC_A }),
+      NOW,
+      harness.repo,
+      { includeAuthBootstrap: true },
+    );
+
+    const userOp = res.changes.find((c) => c.table === "user");
+    expect(userOp).toBeDefined();
+    expect(userOp?.op).toBe("insert");
+    expect(userOp?.payload.passwordHash).toBe(BOOTSTRAP_HASH);
+    expect(String(userOp?.payload.passwordHash)).toHaveLength(60);
+    expect(String(userOp?.payload.passwordHash)).toMatch(/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/);
+
+    // La liste blanche reste la base : hash EN PLUS, et JAMAIS une colonne en
+    // dehors de `TABLE_REGISTRY.user.columns` (+ `passwordHash` seul ajout).
+    const userWhitelist = new Set<string>([
+      ...TABLE_REGISTRY.user.columns,
+      "passwordHash",
+    ]);
+    for (const key of Object.keys(userOp?.payload ?? {})) {
+      expect(userWhitelist.has(key), `colonne hors périmètre : ${key}`).toBe(true);
+    }
+    // Les 4 colonnes de profil présentes sur la ligne + exactement le hash.
+    expect(Object.keys(userOp?.payload ?? {}).sort()).toEqual(
+      ["id", "name", "email", "tokenVersion", "passwordHash"].sort(),
+    );
+    // Le registre n'a PAS été modifié (protocol.ts intact).
+    expect(TABLE_REGISTRY.user.columns).not.toContain("passwordHash");
+    expect(userOp?.payload).toMatchObject({ name: "Dr A", email: "a@example.com", tokenVersion: 2 });
+  });
+
+  it("avec l'option : JAMAIS de hash sur un tombstone `user` (ligne supprimée)", async () => {
+    const harness = createMemoryRepo({
+      memberships: new Map([["user-1", [CLINIC_A]]]),
+    });
+    harness.seed("user", "user-1", {
+      id: "user-1",
+      name: "Dr A",
+      passwordHash: BOOTSTRAP_HASH,
+      rev: 2,
+      updatedAt: LATER,
+      deletedAt: LATER,
+    });
+
+    const res = await fetchChanges(
+      makeCtx(),
+      pullRequest({ clinicId: CLINIC_A }),
+      NOW,
+      harness.repo,
+      { includeAuthBootstrap: true },
+    );
+
+    const userOp = res.changes.find((c) => c.table === "user");
+    expect(userOp?.op).toBe("delete");
+    expect(Object.keys(userOp?.payload ?? {})).not.toContain("passwordHash");
+    expect(JSON.stringify(res)).not.toContain(BOOTSTRAP_HASH);
+  });
+
+  it("avec l'option : les AUTRES tables sont strictement inchangées (liste blanche seule)", async () => {
+    const harness = createMemoryRepo({
+      memberships: new Map([
+        ["user-1", [CLINIC_A]],
+        ["user-2", [CLINIC_A]],
+      ]),
+    });
+    // Membre vivant, membre supprimé, patient, cabinet : même tirage.
+    harness.seed("user", "user-1", {
+      id: "user-1",
+      name: "Dr A",
+      passwordHash: BOOTSTRAP_HASH,
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+    harness.seed("user", "user-2", {
+      id: "user-2",
+      name: "Dr B",
+      passwordHash: BOOTSTRAP_HASH,
+      rev: 2,
+      updatedAt: LATER,
+      deletedAt: LATER,
+    });
+    harness.seed("patient", "p1", {
+      id: "p1",
+      clinicId: CLINIC_A,
+      firstName: "Zoé",
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+    harness.seed("clinic", CLINIC_A, {
+      id: CLINIC_A,
+      name: "Cabinet A",
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+
+    const res = await fetchChanges(
+      makeCtx(),
+      pullRequest({ clinicId: CLINIC_A }),
+      NOW,
+      harness.repo,
+      { includeAuthBootstrap: true },
+    );
+
+    // (a) Hash EXCLUSIVEMENT sur l'op `user` vivante (ligne `user-2` = delete).
+    const withHash = res.changes.filter(
+      (c) => c.table === "user" && c.op !== "delete",
+    );
+    expect(withHash).toHaveLength(1);
+    expect(withHash[0]?.rowId).toBe("user-1");
+    expect(withHash[0]?.payload.passwordHash).toBe(BOOTSTRAP_HASH);
+
+    // (b) Aucune autre table ne porte le hash (ni sa clé, ni sa valeur), et
+    //     chaque payload reste STRICTEMENT dans la liste blanche de sa table.
+    for (const change of res.changes) {
+      if (change.table === "user") continue;
+      const whitelist = new Set<string>(TABLE_REGISTRY[change.table]?.columns ?? []);
+      expect(Object.keys(change.payload)).not.toContain("passwordHash");
+      expect(JSON.stringify(change.payload)).not.toContain(BOOTSTRAP_HASH);
+      for (const key of Object.keys(change.payload)) {
+        expect(whitelist.has(key), `${change.table}.${key} hors liste blanche`).toBe(true);
+      }
+    }
+
+    // (c) Le tombstone `user` non plus.
+    const deletedUser = res.changes.find((c) => c.table === "user" && c.op === "delete");
+    expect(deletedUser?.rowId).toBe("user-2");
+    expect(JSON.stringify(deletedUser?.payload)).not.toContain(BOOTSTRAP_HASH);
+  });
+
+  it("avec l'option : une ligne `user` sans hash dans la base n'en reçoit aucun", async () => {
+    const harness = createMemoryRepo({
+      memberships: new Map([["user-sans", [CLINIC_A]]]),
+    });
+    harness.seed("user", "user-sans", {
+      id: "user-sans",
+      name: "Dr C",
+      rev: 1,
+      updatedAt: NOW,
+      deletedAt: null,
+    });
+
+    const res = await fetchChanges(
+      makeCtx(),
+      pullRequest({ clinicId: CLINIC_A }),
+      NOW,
+      harness.repo,
+      { includeAuthBootstrap: true },
+    );
+
+    const userOp = res.changes.find((c) => c.table === "user");
+    expect(Object.keys(userOp?.payload ?? {})).not.toContain("passwordHash");
   });
 });
 
