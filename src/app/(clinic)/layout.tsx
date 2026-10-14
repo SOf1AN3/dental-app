@@ -7,6 +7,7 @@ import { getCurrentRole } from "@/lib/auth-utils";
 import { can, NAV_ABILITY, type Role } from "@/lib/permissions";
 import { SearchInput } from "@/components/clinic/search-input";
 import { NotificationBell } from "@/components/clinic/notification-bell";
+import { SyncStatus } from "@/components/offline/sync-status";
 import { SidebarShell } from "@/components/ui/sidebar";
 import { CLINIC_SIDEBAR_LINKS } from "@/lib/sidebar-nav";
 
@@ -104,6 +105,9 @@ export default async function ClinicLayout({
             <SearchInput />
           </div>
           <div className="flex items-center gap-4">
+            {/* Tâche 7.2 — indicateur de synchro : ne rend rien en mode web
+                (pas de `window.desktop`), le layout navigateur est inchangé. */}
+            <SyncStatus />
             <ThemeToggle />
             <NotificationBell clinicId={clinicId} />
             <UserMenu name={userName} email={session?.user?.email} />
