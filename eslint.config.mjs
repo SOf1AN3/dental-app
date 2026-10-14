@@ -21,6 +21,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Artefacts de build du desktop Electron (gitignorés et régénérés à chaque
+    // build) : jamais du code source, et leur contenu dépend des `externals`
+    // d'electron-vite — les lintier ferait varier le résultat selon l'ordre
+    // `lint` / `build`.
+    "dist-electron/**",
   ]),
 ]);
 

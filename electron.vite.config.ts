@@ -47,6 +47,14 @@ const externals: string[] = [
  */
 export default defineConfig({
   main: {
+    // Vite/Rollup ignore les `paths` de `electron/tsconfig.json` : sans cet
+    // alias, le build échouerait sur `@/lib/sync/protocol.ts` (et `@/lib/db/schema`)
+    // importés par le runner de synchronisation (étape 5.5).
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+      },
+    },
     build: {
       lib: {
         entry: resolve(__dirname, 'electron/main.ts'),

@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+// Type seulement (effacé à la compilation) : le preload sandboxé n'embarque
+// **aucun** code applicatif — seule l'union `SyncCycleResult` est référencée.
+import type { SyncCycleResult } from '../src/lib/sync/runner-core'
 
 /**
  * Pont renderer ⇄ main (Electron).
@@ -27,6 +30,28 @@ export interface AppInfo {
 }
 
 /**
+ * État du runner de synchronisation (miroir du contrat servi par
+ * `sync:status` — voir `electron/sync/runner.ts`).
+ *
+ *  - `state`   : `online`/`offline`/`unknown` (dernier probe, via
+ *    l'ordonnanceur) ou `inactive` (aucun runner : démarrage différé, échec de
+ *    construction ou arrêt) ;
+ *  - `lastSyncAt` : ISO du dernier cycle **réussi** (`pushed`/`pulled`) ;
+ *  - `pendingCount` : lignes `pending` de l'outbox local (`null` si la base
+ *    est indisponible) ;
+ *  - `lastError` : dernier motif d'erreur **rédigé** (`null` si aucun).
+ */
+export interface SyncStatus {
+  state: 'online' | 'offline' | 'unknown' | 'inactive'
+  lastSyncAt: string | null
+  pendingCount: number | null
+  lastError: string | null
+}
+
+/** Résultat d'un cycle déclenché via `triggerSync()` — union du cœur pur. */
+export type SyncTriggerResult = SyncCycleResult
+
+/**
  * Canaux IPC autorisés : c'est la allow-list unique du pont.
  *
  * Pour étendre le pont (synchronisation, etc.) :
@@ -37,6 +62,10 @@ export interface DesktopEventMap {
   'app:info': AppInfo
   /** Réservé à l'état réseau — payload typé à l'étape synchronisation. */
   'net:state': unknown
+  /** État courant du runner de synchronisation (`getSyncStatus()`). */
+  'sync:status': SyncStatus
+  /** Cycle déclenché à la demande (`triggerSync()`) — union `SyncCycleResult`. */
+  'sync:trigger': SyncTriggerResult
 }
 
 /** Union des canaux IPC autorisés. */
@@ -49,6 +78,17 @@ export interface DesktopApi {
   readonly isDesktop: true
   /** Récupère des informations fraîches depuis le processus principal. */
   getInfo(): Promise<AppInfo>
+  /**
+   * État courant de la synchronisation : `{ state, lastSyncAt, pendingCount,
+   * lastError }` (runner inactif → `state: "inactive"`).
+   */
+  getSyncStatus(): Promise<SyncStatus>
+  /**
+   * Déclenche immédiatement un cycle de synchronisation et en retourne le
+   * `SyncCycleResult` (un cycle déjà en cours est refusé : `noop` +
+   * `reason: "concurrent-cycle"`).
+   */
+  triggerSync(): Promise<SyncTriggerResult>
   /**
    * S'abonne à un événement émis par le processus principal.
    * @returns fonction de désabonnement.
@@ -69,7 +109,12 @@ function readAppVersionFromArgv(): string {
   return arg === undefined ? 'unknown' : arg.slice(APP_VERSION_ARG.length)
 }
 
-const ALLOWED_CHANNELS: readonly DesktopChannel[] = ['app:info', 'net:state']
+const ALLOWED_CHANNELS: readonly DesktopChannel[] = [
+  'app:info',
+  'net:state',
+  'sync:status',
+  'sync:trigger',
+]
 
 function isAllowedChannel(channel: string): channel is DesktopChannel {
   return (ALLOWED_CHANNELS as readonly string[]).includes(channel)
@@ -105,6 +150,8 @@ const api: DesktopApi = {
   },
   isDesktop: true,
   getInfo: () => invoke('app:info'),
+  getSyncStatus: () => invoke('sync:status'),
+  triggerSync: () => invoke('sync:trigger'),
   onEvent,
 }
 

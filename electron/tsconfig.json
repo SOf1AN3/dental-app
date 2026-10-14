@@ -12,7 +12,14 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     // Types Node.js (`process`, `__dirname`) + typage `import.meta.env` d'electron-vite.
-    "types": ["node", "electron-vite/node"]
+    "types": ["node", "electron-vite/node"],
+    // Alias `@/` identique à la racine (`tsconfig.json`) : le main importe
+    // désormais `src/lib/sync/*` et `src/lib/db/*` (protocol, desktop-db…).
+    // Vite ne lit PAS ce `paths` : l'alias correspondant est dans
+    // `electron.vite.config.ts` (section `main`).
+    "paths": {
+      "@/*": ["../src/*"]
+    }
   },
   "include": ["**/*.ts"]
 }
