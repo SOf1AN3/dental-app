@@ -16,6 +16,15 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/cron")) return NextResponse.next();
   if (publicRoutes.some((r) => pathname.startsWith(r))) return NextResponse.next();
 
+  // Routes du poste desktop (application de bureau) : elles font leur PROPRE
+  // authentification — `Authorization: Bearer` vérifié par verifyDeviceToken
+  // (fail-closed) pour /push et /pull, et email+mot de passe bcrypt avec
+  // limitation de débit pour /token. La session de navigateur n'existe pas
+  // côté serveur central pour un appareil de bureau.
+  const isSyncApiRoute =
+    pathname === "/api/health" || pathname.startsWith("/api/sync/");
+  if (isSyncApiRoute) return NextResponse.next();
+
   const session = await auth();
   if (!session?.user) {
     if (isLanding) return NextResponse.next();

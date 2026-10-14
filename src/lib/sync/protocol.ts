@@ -1030,7 +1030,12 @@ export function serializeRow(
   table: string,
   row: Record<string, unknown>,
 ): Record<string, unknown> {
-  const entry = TABLE_REGISTRY[table];
+  // `Object.hasOwn` (jamais `TABLE_REGISTRY[table]` seul) : un nom hérité du
+  // prototype (`constructor`, `toString`…) serait sinon « truthy » et
+  // produirait une erreur confuse au lieu du refus explicite attendu.
+  const entry = Object.hasOwn(TABLE_REGISTRY, table)
+    ? TABLE_REGISTRY[table]
+    : undefined;
   if (!entry) {
     throw new Error(
       `sync/protocol : table « ${table} » absente du registre de réplication — opération refusée.`,
@@ -1063,7 +1068,11 @@ export function serializeRow(
 export function getReplicatedTable(
   name: string,
 ): ReplicatedTable | undefined {
-  return TABLE_REGISTRY[name];
+  // Lookup sûr : les clés héritées du prototype (`constructor`, …) ne sont
+  // JAMAIS des tables répliquées.
+  return Object.hasOwn(TABLE_REGISTRY, name)
+    ? TABLE_REGISTRY[name]
+    : undefined;
 }
 
 /**

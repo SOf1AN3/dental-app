@@ -47,12 +47,28 @@ export async function proxy(request: NextRequest) {
   const isOwnerRoute = pathname.startsWith("/owner");
   const isPublicAsset =
     pathname.startsWith("/_next") || pathname === "/favicon.ico";
+  // Routes de synchronisation du poste desktop (sonde + échange de jeton +
+  // push/pull). POURQUOI cette exemption est sûre :
+  //  • elles font LEUR PROPRE authentification, échec fermé — `/push` et
+  //    `/pull` exigent `Authorization: Bearer` vérifié par `verifyDeviceToken`
+  //    (jeton inconnu / révoqué / expiré → 401, aucun repli), `/sync/token`
+  //    vérifie email + mot de passe (bcrypt) et limite les tentatives
+  //    (`src/lib/sync/token-throttle.ts`), `/health` ne retourne que
+  //    `status/time/version` sans lecture de base ;
+  //  • elles sont destinées au serveur CENTRAL, où la session de navigateur
+  //    (NextAuth) n'existe pas : sans cette exemption, le middleware
+  //    redirigerait chaque appel anonyme vers /login (307) et aucun poste
+  //    desktop ne pourrait jamais synchroniser.
+  // AUCUNE autre exemption : les pages, `/owner`, la vérification d'email et le
+  // reste du middleware sont strictement inchangés.
+  const isSyncApiRoute =
+    pathname === "/api/health" || pathname.startsWith("/api/sync/");
   // La landing (/) est la SEULE page publique en dehors du parcours
   // d'authentification. Sans cette exemption, le middleware la renverrait
   // vers /login et personne ne pourrait jamais la voir.
   const isLanding = pathname === "/";
 
-  if (isPublicAsset || isApiAuthRoute) {
+  if (isPublicAsset || isApiAuthRoute || isSyncApiRoute) {
     return NextResponse.next();
   }
 

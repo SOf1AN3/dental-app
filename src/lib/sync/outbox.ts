@@ -25,7 +25,13 @@
  */
 
 import { z } from "zod";
-import { cursorSchema, serializeRow, type ChangeOp, type Cursor } from "./protocol";
+import {
+  MAX_PUSH_OPS,
+  cursorSchema,
+  serializeRow,
+  type ChangeOp,
+  type Cursor,
+} from "./protocol";
 
 /* -------------------------------------------------------------------------- */
 /* Clés de `sync_state`                                                        */
@@ -108,17 +114,21 @@ export interface OutboxRepo {
 }
 
 /** Transaction localiste : le repo du callback DOIT écrire dans cette transaction. */
-export interface OutboxTransaction {
-  readonly repo: OutboxRepo;
+export interface OutboxTransaction<TRepo extends OutboxRepo = OutboxRepo> {
+  readonly repo: TRepo;
   /** Annule la transaction entière (mutation métier ET outbox). */
   rollback(): Promise<void>;
   /** Committe la transaction entière. */
   commit(): Promise<void>;
 }
 
-/** Fabrique de transactions (adaptateur Drizzle côté app, jamais importé ici). */
-export interface OutboxDatabase {
-  begin(): Promise<OutboxTransaction>;
+/**
+ * Fabrique de transactions (adaptateur Drizzle côté app, jamais importé ici).
+ * Générique sur le repo : `enqueueInTransaction` l'utilise pour typer le repo
+ * passé au callback `mutate` (écritures métier **via la transaction**).
+ */
+export interface OutboxDatabase<TRepo extends OutboxRepo = OutboxRepo> {
+  begin(): Promise<OutboxTransaction<TRepo>>;
 }
 
 export interface EnqueueParams {
@@ -210,14 +220,19 @@ export async function enqueue(
  * persistent. C'est ce qui garantit « aucune mutation sans journal, aucun
  * journal sans mutation » (plan §4.2, T-7).
  *
+ * `TRepo` est le **type réel** du repo de transaction : `mutate` doit y écrire
+ * les mutations métier **via ce repo** (bindé à la transaction), jamais via le
+ * `db` global — sinon le rollback devient illusoire (la mutation survivrait à
+ * l'annulation de la transaction).
+ *
  * @param db     fabrique de transaction (adaptateur Drizzle injecté par l'appelant)
- * @param paramsjournalisé (ligne brute, projetée par `enqueue`)
+ * @param params journalisé (ligne brute, projetée par `enqueue`)
  * @param mutate mutation métier, exécutée avec `tx.repo` — **même transaction**
  */
-export async function enqueueInTransaction(
-  db: OutboxDatabase,
+export async function enqueueInTransaction<TRepo extends OutboxRepo>(
+  db: OutboxDatabase<TRepo>,
   params: EnqueueParams,
-  mutate: (repo: OutboxRepo) => Promise<void>,
+  mutate: (repo: TRepo) => Promise<void>,
 ): Promise<{ opId: string; seq: number }> {
   const tx = await db.begin();
   try {
@@ -255,6 +270,11 @@ export function toChangeOp(row: OutboxRow): ChangeOp {
  * Prochain lot à pousser, ordre `seq` ASC (parent avant enfant), borné à
  * `limit`. Seules les lignes `pending` sont retournées (`sent` et `failed`
  * sont exclus).
+ *
+ * `limit` est **coupé à `MAX_PUSH_OPS`** : un lot plus grand serait rejeté en
+ * bloc par `pushRequestSchema` (`.max(MAX_PUSH_OPS)`) à chaque tentative,
+ * bloquant définitivement la boucle de retry. Un appeler qui demande plus est
+ * donc servi par tranches successives.
  */
 export async function pendingBatch(
   repo: OutboxRepo,
@@ -265,7 +285,7 @@ export async function pendingBatch(
       `sync/outbox : limit de lot invalide (${limit}) — entier positif attendu.`,
     );
   }
-  const rows = await repo.listPending(limit);
+  const rows = await repo.listPending(Math.min(limit, MAX_PUSH_OPS));
   return rows.map(toChangeOp);
 }
 
@@ -287,8 +307,12 @@ export async function markSent(repo: OutboxRepo, opIds: string[]): Promise<void>
  *
  * La ligne reste `pending` (rejouée au prochain lot) tant que
  * `attempts < MAX_SEND_ATTEMPTS` ; au-delà elle passe `failed` et devient
- * visible dans l'UI de revue (plan §4.2). Une ligne déjà `sent` n'est jamais
- * rétrogradée.
+ * visible dans l'UI de revue (plan §4.2).
+ *
+ * **No-op total** si la ligne est déjà `sent` **ou** `failed` : jamais
+ * d'incrément au-delà de `MAX_SEND_ATTEMPTS` (une ligne `failed` ne peut plus
+ * remonter dans le lot, compter ses échecs ultérieurs ne ferait que noyer le
+ * premier diagnostic), et jamais de rétrogradation d'une ligne déjà `sent`.
  */
 export async function markFailed(
   repo: OutboxRepo,
@@ -296,7 +320,7 @@ export async function markFailed(
   error: string,
 ): Promise<void> {
   const row = await repo.getOutbox(opId);
-  if (!row || row.status === "sent") {
+  if (!row || row.status === "sent" || row.status === "failed") {
     return;
   }
   const attempts = row.attempts + 1;
