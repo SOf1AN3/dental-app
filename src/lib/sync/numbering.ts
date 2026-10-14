@@ -61,11 +61,20 @@
  * divergence, des doublons — exactement le bug que D-4 veut éradiquer.
  * `lastNumber` est donc **le** curseur local du bloc.
  *
- * Module PUR : repo injecté, zéro I/O, zéro `console`, zéro `process.env` —
- * testable hermétiquement (`numbering.test.ts`, repo mémoire).
+ * Module PUR (§3 à §5) : repo injecté, zéro I/O, zéro `console`, zéro
+ * `process.env` — testable hermétiquement (`numbering.test.ts`, repo mémoire).
+ * Le **§6** ajoute l'implémentation Drizzle de {@link NumberingRepo}
+ * (`createNumberingDbRepo`), utilisée par les actions de numérotation
+ * (tâche 6.1c) : toutes ses I/O sont déléguées à la base **injectée** et
+ * toutes ses écritures sont **conditionnelles**, conformément au contrat
+ * « c'est le repo qui garantit l'atomicité » de {@link NumberingRepo}.
  */
 
 import { z } from "zod";
+import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
+import type { PgDatabase } from "drizzle-orm/pg-core";
+import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
+import { documentSequences } from "@/lib/db/schema";
 
 /* -------------------------------------------------------------------------- */
 /* 1. Types de documents numérotables                                          */
@@ -393,4 +402,142 @@ export async function consumeBlockReservation(
   if (row.lastNumber < blockEnd) return; // bloc pas encore vide
 
   await repo.markBlockConsumed(clinicId, type, blockStart, blockEnd);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 6. Implémentation Drizzle de `NumberingRepo` (tâche 6.1c)                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Schéma complet Drizzle — **type seul** : `src/lib/db/db.ts` valide l'env au
+ * chargement et n'est jamais importé ici. La base est **injectée** par
+ * l'appelant (les actions passent l'instance partagée `db`).
+ */
+type FullSchema = typeof import("@/lib/db/schema");
+
+/**
+ * Base exploitable par le repo : l'instance partagée `db`
+ * (`PostgresJsDatabase`) **ou une transaction en cours** —
+ * `PgTransaction extends PgDatabase`, donc une action peut construire le repo
+ * sur son propre `tx` pour inscrire une allocation dans SA transaction.
+ */
+export type NumberingDb = PgDatabase<PostgresJsQueryResultHKT, FullSchema>;
+
+/**
+ * Repo SQL réel de `document_sequence`, utilisé par les actions de création de
+ * documents (tâche 6.1c, mode blocs D-4).
+ *
+ * Contrats respectés à la lettre (identiques au repo mémoire des tests) :
+ *  - `advanceCursor` est un **compare-and-swap** (`last_number = from`, clause
+ *    `WHERE` rejouée SQL) qui refuse toute écriture au-delà de `block_end` ;
+ *  - `writeBlock` est une **upsert conditionnelle** : un bloc `reserved`
+ *    n'est jamais écrasé, un bloc `consumed` n'est remplacé que par un bloc
+ *    strictement plus haut, et le curseur ne recule **jamais**
+ *    (`GREATEST(last_number, …)`) — mêmes règles que {@link storeBlock},
+ *    rejouées sous le verrou implicitement tenu par l'instruction atomique ;
+ *  - `markBlockConsumed` n'agit que sur les bornes exactes du bloc `reserved`.
+ *
+ * Chaque méthode est une **instruction SQL unique**
+ * (`INSERT … ON CONFLICT DO UPDATE … WHERE` / `UPDATE … WHERE … RETURNING`) :
+ * atomicité **et** conditions tiennent dans l'instruction elle-même, sans
+ * transaction englobante. Toutes les requêtes sont **paramétrées** Drizzle
+ * (zéro injection).
+ */
+export function createNumberingDbRepo(database: NumberingDb): NumberingRepo {
+  return {
+    async findSequence(clinicId, type) {
+      const rows = await database
+        .select({
+          clinicId: documentSequences.clinicId,
+          type: documentSequences.type,
+          lastNumber: documentSequences.lastNumber,
+          blockStart: documentSequences.blockStart,
+          blockEnd: documentSequences.blockEnd,
+          blockDeviceId: documentSequences.blockDeviceId,
+          blockStatus: documentSequences.blockStatus,
+          blockReservedAt: documentSequences.blockReservedAt,
+        })
+        .from(documentSequences)
+        .where(
+          and(
+            eq(documentSequences.clinicId, clinicId),
+            eq(documentSequences.type, type),
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+      return row === undefined ? null : row;
+    },
+
+    async advanceCursor(clinicId, type, from, to) {
+      const updated = await database
+        .update(documentSequences)
+        .set({ lastNumber: to })
+        .where(
+          and(
+            eq(documentSequences.clinicId, clinicId),
+            eq(documentSequences.type, type),
+            // Compare-and-swap : la valeur courante doit toujours être `from`.
+            eq(documentSequences.lastNumber, from),
+            // Garde du contrat (identique au repo mémoire) : aucune écriture
+            // au-delà de `block_end`.
+            or(isNull(documentSequences.blockEnd), gte(documentSequences.blockEnd, to)),
+          ),
+        )
+        .returning({ lastNumber: documentSequences.lastNumber });
+      return updated.length > 0;
+    },
+
+    async writeBlock(params) {
+      const values: typeof documentSequences.$inferInsert = {
+        clinicId: params.clinicId,
+        type: params.type,
+        lastNumber: params.cursor,
+        blockStart: params.blockStart,
+        blockEnd: params.blockEnd,
+        blockDeviceId: params.deviceId,
+        blockStatus: "reserved",
+        blockReservedAt: params.reservedAt,
+      };
+      await database
+        .insert(documentSequences)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [documentSequences.clinicId, documentSequences.type],
+          set: {
+            // Jamais de recul de curseur (des numéros ont pu être émis entre
+            // la lecture et cette écriture).
+            lastNumber: sql`GREATEST(${documentSequences.lastNumber}, ${params.cursor})`,
+            blockStart: params.blockStart,
+            blockEnd: params.blockEnd,
+            blockDeviceId: params.deviceId,
+            blockStatus: "reserved",
+            blockReservedAt: params.reservedAt,
+          },
+          // Règles de {@link storeBlock} rejouées SQL (atomicité) :
+          //  - un bloc encore `reserved` n'est JAMAIS écrasé ;
+          //  - un bloc `consumed` n'est remplacé que par un bloc strictement
+          //    plus haut (jamais de rétrécissement).
+          where: sql`(${documentSequences.blockStatus} IS DISTINCT FROM 'reserved')
+            AND (${documentSequences.blockEnd} IS NULL OR ${documentSequences.blockEnd} < ${params.blockEnd})`,
+        });
+    },
+
+    async markBlockConsumed(clinicId, type, blockStart, blockEnd) {
+      const updated = await database
+        .update(documentSequences)
+        .set({ blockStatus: "consumed" })
+        .where(
+          and(
+            eq(documentSequences.clinicId, clinicId),
+            eq(documentSequences.type, type),
+            eq(documentSequences.blockStatus, "reserved"),
+            eq(documentSequences.blockStart, blockStart),
+            eq(documentSequences.blockEnd, blockEnd),
+          ),
+        )
+        .returning({ id: documentSequences.id });
+      return updated.length > 0;
+    },
+  };
 }

@@ -26,8 +26,25 @@ import {
   isSessionStatusTransitionAllowed,
 } from "@/lib/session-rules";
 import { docTotals, lineTotal } from "@/lib/billing-math";
+import { createNumberingDbRepo } from "@/lib/sync/numbering";
+import {
+  allocateDocumentNumber,
+  allocateNumberErrorMessage,
+  createDeviceAllocateDeps,
+  isBlockNumberingMode,
+  type AllocateDeps,
+} from "@/lib/sync/allocate-number";
 
 type DbOrTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Tâche 6.1c — mode blocs (D-4) : deps de l'allocateur de numéros sur la base
+ * partagée. `DEVICE_ID` absent (Vercel / dev classique) → la chimie historique
+ * `last_number + 1` de `closeSession` reste strictement inchangée.
+ */
+function blockNumberingDeps(): AllocateDeps {
+  return createDeviceAllocateDeps(createNumberingDbRepo(db));
+}
 
 type SessionData = typeof clinicalSessions.$inferSelect & {
   patient: typeof patients.$inferSelect | null;
@@ -721,6 +738,24 @@ export async function closeSession(
     // ligne), donc rien à annuler → une seule facture par séance, y compris
     // sous concurrence. (Le verrou DB définitif serait
     // `UNIQUE (invoice.session_id)` — hors périmètre de cette tâche.)
+    // Tâche 6.1c — mode blocs (D-4) : le numéro de facture est réservé AVANT
+    // la transaction (aucun appel réseau sous verrou ; un refus sort ici, sans
+    // rien écrire — y compris le verrou `status`). En cas de course perdue sur
+    // ce verrou, il ne reste qu'un TROU dans la numérotation, jamais un
+    // doublon. Mode web : l'incrément `last_number + 1` reste DANS la
+    // transaction, inchangé.
+    let reservedNumber: number | undefined;
+    if (isBlockNumberingMode()) {
+      const allocated = await allocateDocumentNumber(blockNumberingDeps(), {
+        clinicId,
+        type: "invoice",
+      });
+      if (!allocated.ok) {
+        return { error: allocateNumberErrorMessage(allocated.reason) };
+      }
+      reservedNumber = allocated.number;
+    }
+
     const closed = await db.transaction(async (tx): Promise<boolean> => {
       const [claimed] = await tx
         .update(clinicalSessions)
@@ -736,29 +771,36 @@ export async function closeSession(
 
       if (!claimed) return false;
 
-      // Ensure sequence row exists (ignore if already exists)
-      await tx
-        .insert(documentSequences)
-        .values({
-          clinicId,
-          type: "invoice",
-          lastNumber: 0,
-        })
-        .onConflictDoNothing();
+      let nextNumber: number;
+      if (reservedNumber !== undefined) {
+        // Mode blocs : numéro déjà réservé avant la transaction (D-4).
+        nextNumber = reservedNumber;
+      } else {
+        // Ensure sequence row exists (ignore if already exists)
+        // (mode web — chimie historique inchangée)
+        await tx
+          .insert(documentSequences)
+          .values({
+            clinicId,
+            type: "invoice",
+            lastNumber: 0,
+          })
+          .onConflictDoNothing();
 
-      // Atomic increment
-      const [seq] = await tx
-        .update(documentSequences)
-        .set({ lastNumber: sql`last_number + 1` })
-        .where(
-          and(
-            eq(documentSequences.clinicId, clinicId),
-            eq(documentSequences.type, "invoice"),
-          ),
-        )
-        .returning();
+        // Atomic increment
+        const [seq] = await tx
+          .update(documentSequences)
+          .set({ lastNumber: sql`last_number + 1` })
+          .where(
+            and(
+              eq(documentSequences.clinicId, clinicId),
+              eq(documentSequences.type, "invoice"),
+            ),
+          )
+          .returning();
 
-      const nextNumber = seq?.lastNumber ?? 1;
+        nextNumber = seq?.lastNumber ?? 1;
+      }
       const number = `FAC-${year}-${String(nextNumber).padStart(5, "0")}`;
 
       const [invoice] = await tx

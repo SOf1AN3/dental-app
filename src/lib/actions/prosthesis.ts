@@ -11,6 +11,24 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { logAction } from "@/lib/audit";
 import { isRedirectOrReject } from "./errors";
+import { createNumberingDbRepo } from "@/lib/sync/numbering";
+import {
+  allocateDocumentNumber,
+  allocateNumberErrorMessage,
+  createDeviceAllocateDeps,
+  isBlockNumberingMode,
+  type AllocateDeps,
+} from "@/lib/sync/allocate-number";
+
+/**
+ * Tâche 6.1c — mode blocs (D-4) : deps de l'allocateur de numéros sur la base
+ * partagée. `DEVICE_ID` absent (Vercel / dev classique) → la génération
+ * `GREATEST(last_number + 1, highestIssued)` de `createOrder` reste
+ * strictement inchangée.
+ */
+function blockNumberingDeps(): AllocateDeps {
+  return createDeviceAllocateDeps(createNumberingDbRepo(db));
+}
 
 /**
  * Bornes serveur du n° de dent (Z-42), alignées sur l'existant plutôt que sur
@@ -526,53 +544,71 @@ export async function createOrder(
     const sequenceType = `prosthesis:${year}`;
     const orderNumberPattern = `^PRO-${year}-(\\d+)$`;
 
-    // Plus grand numéro DÉJÀ émis cette année : sert de plancher, ce qui rend
-    // la génération robuste à un compteur perdu, réinitialisé ou à une course
-    // entre deux créations.
-    const [highestRow] = await db
-      .select({
-        highest: sql<number | null>`MAX(CAST(SUBSTRING(${prosthesisOrders.orderNumber} FROM CAST(${orderNumberPattern} AS text)) AS integer))`,
-      })
-      .from(prosthesisOrders)
-      .where(
-        and(
-          eq(prosthesisOrders.clinicId, clinicId),
-          like(prosthesisOrders.orderNumber, `PRO-${year}-%`),
-        ),
-      );
+    // Tâche 6.1c — mode blocs (D-4) : le plancher local
+    // `GREATEST(last_number + 1, highestIssued)` est **remplacé** par
+    // l'allocateur de blocs (le plancher ANTI-DOUBLON du serveur central gère
+    // déjà le risque de compteur rétrogradé). Un refus est explicite et
+    // n'écrit rien. Mode web : la génération historique ci-dessous, inchangée.
+    let lastNumber: number;
+    if (isBlockNumberingMode()) {
+      const allocated = await allocateDocumentNumber(blockNumberingDeps(), {
+        clinicId,
+        type: sequenceType,
+      });
+      if (!allocated.ok) {
+        return { error: { general: [allocateNumberErrorMessage(allocated.reason)] } };
+      }
+      lastNumber = allocated.number;
+    } else {
+      // Plus grand numéro DÉJÀ émis cette année : sert de plancher, ce qui rend
+      // la génération robuste à un compteur perdu, réinitialisé ou à une course
+      // entre deux créations.
+      const [highestRow] = await db
+        .select({
+          highest: sql<number | null>`MAX(CAST(SUBSTRING(${prosthesisOrders.orderNumber} FROM CAST(${orderNumberPattern} AS text)) AS integer))`,
+        })
+        .from(prosthesisOrders)
+        .where(
+          and(
+            eq(prosthesisOrders.clinicId, clinicId),
+            like(prosthesisOrders.orderNumber, `PRO-${year}-%`),
+          ),
+        );
 
-    const lowestAvailable = (highestRow?.highest ?? 0) + 1;
+      const lowestAvailable = (highestRow?.highest ?? 0) + 1;
 
-    // Crée la ligne de séquence si absente ; une erreur réelle remonte
-    // (plus de `catch {}` muet qui l'avalerait).
-    await db
-      .insert(documentSequences)
-      .values({ clinicId, type: sequenceType, lastNumber: 0 })
-      .onConflictDoNothing();
+      // Crée la ligne de séquence si absente ; une erreur réelle remonte
+      // (plus de `catch {}` muet qui l'avalerait).
+      await db
+        .insert(documentSequences)
+        .values({ clinicId, type: sequenceType, lastNumber: 0 })
+        .onConflictDoNothing();
 
-    // Incrément atomique sous verrou de ligne, plané sur le numéro le plus
-    // élevé déjà émis : deux créations concurrentes obtiennent deux valeurs
-    // distinctes.
-    const [seq] = await db
-      .update(documentSequences)
-      .set({
-        lastNumber: sql`GREATEST(${documentSequences.lastNumber} + 1, ${lowestAvailable})`,
-      })
-      .where(
-        and(
-          eq(documentSequences.clinicId, clinicId),
-          eq(documentSequences.type, sequenceType),
-        ),
-      )
-      .returning({ lastNumber: documentSequences.lastNumber });
+      // Incrément atomique sous verrou de ligne, plané sur le numéro le plus
+      // élevé déjà émis : deux créations concurrentes obtiennent deux valeurs
+      // distinctes.
+      const [seq] = await db
+        .update(documentSequences)
+        .set({
+          lastNumber: sql`GREATEST(${documentSequences.lastNumber} + 1, ${lowestAvailable})`,
+        })
+        .where(
+          and(
+            eq(documentSequences.clinicId, clinicId),
+            eq(documentSequences.type, sequenceType),
+          ),
+        )
+        .returning({ lastNumber: documentSequences.lastNumber });
 
-    if (!seq) {
-      return {
-        error: { general: ["Erreur lors de la génération du numéro de commande"] },
-      };
+      if (!seq) {
+        return {
+          error: { general: ["Erreur lors de la génération du numéro de commande"] },
+        };
+      }
+      lastNumber = seq.lastNumber;
     }
 
-    const orderNumber = `PRO-${year}-${String(seq.lastNumber).padStart(5, "0")}`;
+    const orderNumber = `PRO-${year}-${String(lastNumber).padStart(5, "0")}`;
 
     const [created] = await db.insert(prosthesisOrders).values({
       clinicId,

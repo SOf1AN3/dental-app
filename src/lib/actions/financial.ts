@@ -30,6 +30,31 @@ import { docTotals, lineTotal, recalcInvoiceStatus } from "@/lib/billing-math";
 import { isSessionStatusTransitionAllowed } from "@/lib/session-rules";
 import { isRedirectOrReject } from "./errors";
 import { requireOwnedPatient, requirePatientOwnership } from "@/lib/guards";
+import { createNumberingDbRepo } from "@/lib/sync/numbering";
+import {
+  allocateDocumentNumber,
+  allocateNumberErrorMessage,
+  createDeviceAllocateDeps,
+  isBlockNumberingMode,
+  type AllocateDeps,
+} from "@/lib/sync/allocate-number";
+
+/**
+ * Tâche 6.1c — **bifurcation de numérotation** (décision D-4), identique aux
+ * 5 sites du dépôt (`createQuote`, `convertQuoteToInvoice`, `createInvoice`,
+ * `closeSession`, `createOrder`) — détectée par {@link isBlockNumberingMode} :
+ *  - `DEVICE_ID` **absent** (Vercel / dev classique) → chimie historique
+ *    `last_number + 1`, strictement inchangée (aucune régression) ;
+ *  - `DEVICE_ID` **présent** (poste desktop) → {@link allocateDocumentNumber}
+ *    (blocs réservés), qui peut refuser explicitement — le refus est remonté
+ *    dans le mécanisme d'erreur **existant** de chaque action, sans changer son
+ *    contrat de retour.
+ *
+ * Deps de l'allocateur sur la base partagée — appelés en mode blocs uniquement.
+ */
+function blockNumberingDeps(): AllocateDeps {
+  return createDeviceAllocateDeps(createNumberingDbRepo(db));
+}
 
 /**
  * Line items arrive as JSON from the browser; they are validated here and ALL
@@ -438,30 +463,45 @@ export async function createQuote(
 
   const totals = docTotals(items);
 
-  // Ensure sequence row exists (ignore if already exists)
-  try {
-    await db.insert(documentSequences).values({
+  // Tâche 6.1c — mode blocs (D-4) : numéro tiré d'un BLOC réservé ; le refus
+  // est explicite et n'écrit AUCUNE ligne de séquence (zéro numéro improvisé).
+  // Mode web : chimie historique `last_number + 1` ci-dessous, inchangée.
+  let nextNumber: number;
+  if (isBlockNumberingMode()) {
+    const allocated = await allocateDocumentNumber(blockNumberingDeps(), {
       clinicId,
       type: "quote",
-      lastNumber: 0,
     });
-  } catch {
-    // Row already exists, ignore
+    if (!allocated.ok) {
+      return { error: { general: [allocateNumberErrorMessage(allocated.reason)] } };
+    }
+    nextNumber = allocated.number;
+  } else {
+    // Ensure sequence row exists (ignore if already exists)
+    try {
+      await db.insert(documentSequences).values({
+        clinicId,
+        type: "quote",
+        lastNumber: 0,
+      });
+    } catch {
+      // Row already exists, ignore
+    }
+
+    // Atomic increment
+    const [seq] = await db
+      .update(documentSequences)
+      .set({ lastNumber: sql`last_number + 1` })
+      .where(
+        and(
+          eq(documentSequences.clinicId, clinicId),
+          eq(documentSequences.type, "quote"),
+        ),
+      )
+      .returning();
+
+    nextNumber = seq?.lastNumber ?? 1;
   }
-
-  // Atomic increment
-  const [seq] = await db
-    .update(documentSequences)
-    .set({ lastNumber: sql`last_number + 1` })
-    .where(
-      and(
-        eq(documentSequences.clinicId, clinicId),
-        eq(documentSequences.type, "quote"),
-      ),
-    )
-    .returning();
-
-  const nextNumber = seq?.lastNumber ?? 1;
   const number = `DEV-${year}-${String(nextNumber).padStart(4, "0")}`;
 
   // Z-20 : le devis, ses lignes et l'audit sont écrits dans UNE transaction.
@@ -629,6 +669,23 @@ export async function convertQuoteToInvoice(
     if (!quoteCheck) throw new Error("Devis introuvable");
     await requireOwnedPatient(clinicId, quoteCheck.patientId);
 
+    // Tâche 6.1c — mode blocs (D-4) : le numéro de facture est réservé AVANT
+    // la transaction (aucun appel réseau sous verrou ; un refus sort ici, sans
+    // rien écrire). ⚠️ Le numéro du devis (`DEV-…`) n'est **PAS** réutilisé :
+    // la facture tire un numéro NEUF dans la séquence `invoice`, comme en mode
+    // web — seul le numéro est attribué autrement.
+    let reservedNumber: number | undefined;
+    if (isBlockNumberingMode()) {
+      const allocated = await allocateDocumentNumber(blockNumberingDeps(), {
+        clinicId,
+        type: "invoice",
+      });
+      if (!allocated.ok) {
+        return { error: allocateNumberErrorMessage(allocated.reason) };
+      }
+      reservedNumber = allocated.number;
+    }
+
     const invoiceId = await db.transaction(async (tx) => {
       // Z-22 : lecture VERROUILLÉE du devis. Une simple lecture laissait un
       // check-then-act : deux transactions concurrentes lisaient toutes les deux
@@ -652,19 +709,26 @@ export async function convertQuoteToInvoice(
         .from(quoteItems)
         .where(eq(quoteItems.quoteId, quoteId));
 
-      // Ensure sequence row exists, then atomically increment it.
-      await tx
-        .insert(documentSequences)
-        .values({ clinicId, type: "invoice", lastNumber: 0 })
-        .onConflictDoNothing();
+      let nextNumber: number;
+      if (reservedNumber !== undefined) {
+        // Mode blocs : numéro déjà réservé avant la transaction (D-4).
+        nextNumber = reservedNumber;
+      } else {
+        // Ensure sequence row exists, then atomically increment it.
+        // (mode web — chimie historique inchangée)
+        await tx
+          .insert(documentSequences)
+          .values({ clinicId, type: "invoice", lastNumber: 0 })
+          .onConflictDoNothing();
 
-      const [seq] = await tx
-        .update(documentSequences)
-        .set({ lastNumber: sql`last_number + 1` })
-        .where(and(eq(documentSequences.clinicId, clinicId), eq(documentSequences.type, "invoice")))
-        .returning();
+        const [seq] = await tx
+          .update(documentSequences)
+          .set({ lastNumber: sql`last_number + 1` })
+          .where(and(eq(documentSequences.clinicId, clinicId), eq(documentSequences.type, "invoice")))
+          .returning();
 
-      const nextNumber = seq?.lastNumber ?? 1;
+        nextNumber = seq?.lastNumber ?? 1;
+      }
       const number = `FAC-${new Date().getFullYear()}-${String(nextNumber).padStart(5, "0")}`;
 
       // Recompute totals from stored items (server-side authority).
@@ -821,30 +885,45 @@ export async function createInvoice(
 
   const totals = docTotals(items);
 
-  // Ensure sequence row exists (ignore if already exists)
-  try {
-    await db.insert(documentSequences).values({
+  // Tâche 6.1c — mode blocs (D-4) : numéro tiré d'un BLOC réservé ; le refus
+  // est explicite et n'écrit AUCUNE ligne de séquence. Mode web : chimie
+  // historique `last_number + 1` ci-dessous, inchangée.
+  let nextNumber: number;
+  if (isBlockNumberingMode()) {
+    const allocated = await allocateDocumentNumber(blockNumberingDeps(), {
       clinicId,
       type: "invoice",
-      lastNumber: 0,
     });
-  } catch {
-    // Row already exists, ignore
+    if (!allocated.ok) {
+      return { error: { general: [allocateNumberErrorMessage(allocated.reason)] } };
+    }
+    nextNumber = allocated.number;
+  } else {
+    // Ensure sequence row exists (ignore if already exists)
+    try {
+      await db.insert(documentSequences).values({
+        clinicId,
+        type: "invoice",
+        lastNumber: 0,
+      });
+    } catch {
+      // Row already exists, ignore
+    }
+
+    // Atomic increment
+    const [seq] = await db
+      .update(documentSequences)
+      .set({ lastNumber: sql`last_number + 1` })
+      .where(
+        and(
+          eq(documentSequences.clinicId, clinicId),
+          eq(documentSequences.type, "invoice"),
+        ),
+      )
+      .returning();
+
+    nextNumber = seq?.lastNumber ?? 1;
   }
-
-  // Atomic increment
-  const [seq] = await db
-    .update(documentSequences)
-    .set({ lastNumber: sql`last_number + 1` })
-    .where(
-      and(
-        eq(documentSequences.clinicId, clinicId),
-        eq(documentSequences.type, "invoice"),
-      ),
-    )
-    .returning();
-
-  const nextNumber = seq?.lastNumber ?? 1;
   const number = `FAC-${year}-${String(nextNumber).padStart(5, "0")}`;
 
   // Z-19 : la facture, ses lignes et l'audit sont écrits dans UNE transaction.

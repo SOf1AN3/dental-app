@@ -1297,10 +1297,16 @@ export function clearSyncToken(): void {
  *   refusé (jamais de fail-open silencieux) ;
  * - `TRUST_DAYS` (étape 3.2) : entier positif, défaut 30, invalide → refus au
  *   démarrage ;
+ * - `SYNC_TOKEN` (tâche 6.1c) : jeton d'appareil, **uniquement s'il est présent
+ *   et non expiré** (jamais de jeton périmé transmis) — sert à réserver des
+ *   blocs de numéros via `POST /api/sync/blocks` ; la valeur n'est jamais
+ *   journalisée (seule sa présence l'est). Le jeton change au plus tous les
+ *   30 jours ou à la reconnexion ; un changement nécessite le redémarrage de
+ *   l'enfant Next (géré à l'étape 7) ;
  * - **reste de `process.env` conservé** (héritage du parent) — les secrets qui
  *   y traînent sont signalés (noms seuls) par `warnInheritedSecrets()`.
  *
- * Ni `DATABASE_URL` ni `AUTH_SECRET` ne sont jamais journalisés.
+ * Ni `DATABASE_URL`, ni `AUTH_SECRET`, ni `SYNC_TOKEN` ne sont jamais journalisés.
  */
 export function buildNextEnv(db: LocalDbHandle, config: DbConfig): NodeJS.ProcessEnv {
   // Garde `fileCorrupt` (étape 2.2b, revue A1-i) : `config.json` était corrompu
@@ -1362,12 +1368,34 @@ export function buildNextEnv(db: LocalDbHandle, config: DbConfig): NodeJS.Proces
   }
   env.TRUST_DAYS = String(resolveTrustDays(config.mode))
 
+  // Jeton d'appareil (tâche 6.1c) : injecté pour la réservation de BLOCS de
+  // numéros (`POST /api/sync/blocks` depuis l'enfant Next). Le jeton vit dans
+  // `config.json` chiffré DPAPI — inaccessibles au serveur Next, d'où cette
+  // injection en env. Discipline :
+  //  - **jamais de jeton périmé transmis** : `readSyncToken()` renvoie aussi un
+  //    jeton expiré (documenté) ; seul un couple (jeton, expiration) encore
+  //    valide est posé dans l'env, sinon la clé est **absente** (et une valeur
+  //    héritée de `process.env` est effacée, comme `SYNC_BASE_URL`) ;
+  //  - **jamais journalisé** (voir la liste des clés non loguées ci-dessous) ;
+  //  - ⚠️ le jeton change au plus tous les 30 jours ou à la reconnexion ; un
+  //    changement nécessite le **redémarrage de l'enfant Next** — géré à
+  //    l'étape 7 (ce processus ne lit le `config.json` qu'au démarrage).
+  const syncToken = readSyncToken()
+  const syncTokenValid = syncToken !== null && Date.now() < Date.parse(syncToken.expiresAt)
+  if (syncTokenValid && syncToken !== null) {
+    env.SYNC_TOKEN = syncToken.token
+  } else {
+    // Efface une éventuelle valeur héritée : pas de jeton absent/périmé transmis.
+    delete env.SYNC_TOKEN
+  }
+
   log.info(
     `[env] env du serveur Next : AUTH_URL=${env.AUTH_URL}, PORT=${env.PORT}, HOSTNAME=${env.HOSTNAME}, ` +
       `NODE_ENV=${env.NODE_ENV ?? '(inchangé)'}, UPLOAD_DIR=${env.UPLOAD_DIR}, ` +
       `DEVICE_ID=${env.DEVICE_ID}, TRUST_DAYS=${env.TRUST_DAYS}, ` +
-      `SYNC_BASE_URL=${syncBaseUrl ?? '(absente : confiance non opposable)'} ` +
-      '(DATABASE_URL et AUTH_SECRET jamais journalisés)',
+      `SYNC_BASE_URL=${syncBaseUrl ?? '(absente : confiance non opposable)'}, ` +
+      `SYNC_TOKEN=${syncTokenValid ? 'présent et valide' : '(absent ou expiré : réservation de blocs indisponible)'} ` +
+      '(DATABASE_URL, AUTH_SECRET et SYNC_TOKEN jamais journalisés — seuls la présence et l’expiration du jeton le sont)',
   )
   return env
 }
