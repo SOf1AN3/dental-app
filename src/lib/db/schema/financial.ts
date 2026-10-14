@@ -5,11 +5,53 @@ import { users } from "./auth";
 import { treatmentPlans } from "./clinical";
 import { clinicalSessions } from "./sessions";
 
+/**
+ * Compteur de numérotation des documents (`invoice`, `quote`,
+ * `prosthesis:<année>`), unique par `(clinic_id, type)`.
+ *
+ * ## Décision D-4 — allocation par BLOCS RÉSERVÉS
+ *
+ * `last_number` est un compteur atomique : **aucun poste ne peut l'incrémenter
+ * hors-ligne** (deux postes créant une facture offline inventeraient le même
+ * numéro — irréparable une fois la facture imprimée). Le mécanisme retenu :
+ *
+ *  1. un poste **réserve côté central** (`POST /api/sync/blocks`) un intervalle
+ *     `[block_start … block_end]` dans lequel il a **le droit exclusif** de
+ *     numéroter : le central pousse `last_number` jusqu'à `block_end`, ce qui
+ *     garantit qu'aucun autre poste ne recevra jamais ces numéros ;
+ *  2. le poste consomme ce bloc **localement, sans réseau**
+ *     (`src/lib/sync/numbering.ts`) : le curseur local est `last_number`
+ *     (`last_number + 1 ≤ block_end`) ;
+ *  3. bloc épuisé **hors-ligne** → refus EXPLICITE de créer le document :
+ *     **un numéro ne doit JAMAIS être inventé**, jamais d'incrément au-delà de
+ *     `block_end`, jamais de « compteur local » parallèle.
+ *
+ * `block_*` décrivent le **dernier bloc attribué** à la ligne ; `null` partout
+ * = aucun bloc. `block_status = 'consumed'` est purement traceur (bloc vide).
+ * Un bloc n'est **jamais écrasé** tant qu'il n'est pas épuisé (sinon on perd
+ * des numéros déjà imprimés).
+ *
+ * ⚠️ Colonnes strictement **additives** (migration 0022) : elles ne servent que
+ * par le mécanisme de blocs, le compteur historique reste inchangé.
+ */
 export const documentSequences = pgTable("document_sequence", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   clinicId: text("clinic_id").notNull().references(() => clinics.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   lastNumber: integer("last_number").default(0).notNull(),
+  /** Début (inclus) du bloc réservé **par ce poste**, `null` = aucun bloc. */
+  blockStart: integer("block_start"),
+  /** Fin (incluse) du bloc réservé — dernier numéro allouable du bloc. */
+  blockEnd: integer("block_end"),
+  /** Poste détenteur du bloc (deviceId du jeton ayant réservé). */
+  blockDeviceId: text("block_device_id"),
+  /**
+   * État du bloc : `reserved` (attribué, en cours de consommation) /
+   * `consumed` (épuisé, tracé pour l'audit) / `null` (aucun bloc).
+   */
+  blockStatus: text("block_status").$type<"reserved" | "consumed">(),
+  /** Horodatage serveur de la réservation (jamais l'horloge client). */
+  blockReservedAt: timestamp("block_reserved_at", { mode: "date" }),
 }, (table) => ({
   uniqueClinicType: uniqueIndex("uq_doc_seq_clinic_type").on(table.clinicId, table.type),
 }));
