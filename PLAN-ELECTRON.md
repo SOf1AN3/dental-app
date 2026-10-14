@@ -626,13 +626,18 @@ extraResources:
   4.4 Tables sync_applied, device (serveur central)
       ✅ FAIT SI : migrations appliquées sur les DEUX bases, zéro régression existante.
 
-ÉTAPE 5 — ROUTES CENTRALES + OUTBOX
+ÉTAPE 5 — ROUTES CENTRALES + OUTBOX   [TERMINÉE]
   5.1 /api/sync/push (idempotent, transactionnel, re-validation clinicId)
   5.2 /api/sync/pull (curseur composite, paginé, tombstones)
-  5.3 /api/sync/blocks  +  5.4 /api/health
-  5.5 src/lib/sync/outbox.ts (écriture atomique mutation+journal)
-  5.6 Tests T-1, T-2, T-7
+  5.3 /api/sync/blocks   [RESTE — ÉTAPE 6]
+  5.4 /api/health  ✅   + /api/sync/token (jeton d'appareil, throttle anti brute-force)  ✅
+  5.5 src/lib/sync/outbox.ts (écriture atomique mutation+journal)  ✅
+  5.6 Côté client : net.ts (probe+backoff), local-apply.ts (A1 : jamais
+      d'écrasement du travail local), runner-core.ts + electron/sync/runner.ts
+      (boucle push/pull, mutex, 401 → clear token, curseur écrit même sur échec)
+  5.7 Tests T-1, T-2, T-7  → 466/466
       ✅ FAIT SI : push/pull passent les tests ; aucune donnée perdue en coupure.
+      [Reste : /api/sync/blocks + test E2E 2 postes réels]
 
 ÉTAPE 6 — ORCHESTRATEUR + CONFLITS
   6.1 src/lib/sync/net.ts (double détection + backoff)
