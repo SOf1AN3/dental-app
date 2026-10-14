@@ -681,6 +681,14 @@ extraResources:
       - embedded-pg.ts : logger en `warn` si l'instance `async-exit-hook` diffère (layout non hoisté)
       - embedded-pg.ts : ne cacher que les succès de résolution de `pg_ctl`
       - electron.vite.config.ts : `asarUnpack` des binaires PG + exclusion `.env*`/`pgdata`/`uploads`/`src` (voir 9.0)
+      - proxy.ts : liste blanche des routes sync explicite (au lieu de `startsWith("/api/sync/")`)
+        pour qu'une future route sensible déclenche une revue
+      - /api/sync/token : `.max()` sur email/password/deviceId/deviceName/os (payloads bornés)
+      - /api/sync/token : ne PAS journaliser les tentatives bloquées (aligné sur l'anti-amplification de auth.ts)
+      - test : chemin fail-closed du throttle (lecture DB en échec → 500, jamais de jeton)
+      - **FINDING PRÉEXISTANT À TRAITER** : `src/proxy.ts` est du code mort au runtime (le
+        `proxy.ts` racine est celui qui s'exécute — mesuré). Ses verrous plus stricts
+        (vérification d'email, `isValidActiveClinic`) ne s'appliquent PAS. À consolider.
 ```
 
 > **Principe** : chaque étape se termine par une application **fonctionnelle**. Les Étapes 1-3
