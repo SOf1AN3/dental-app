@@ -19,6 +19,19 @@
  *  3. bloc épuisé → **`block-exhausted`** : le caller doit réserver un nouveau
  *     bloc, ou — hors-ligne — **refuser explicitement de créer le document**.
  *
+ * ### Renvoi d'un bloc épuisé — argument `cursor` (tâche 6.1b)
+ *
+ * Lorsque {@link allocateLocalNumber} retourne `block-exhausted`, le bloc local
+ * est vide : `row.lastNumber === row.blockEnd` (le curseur a atteint la borne
+ * haute). Pour obtenir un **nouveau** bloc sur le central, le caller appelle
+ * `POST /api/sync/blocks` en transmettant **`cursor = row.lastNumber`** (le
+ * `last_number` local) dans le corps. Le serveur compare
+ * `cursor ≥ block_end` : s'ils coincident, il marque l'ancien bloc `consumed`
+ * et découpe un bloc **disjoint** suivant. Sans ce `cursor`, le serveur ne peut
+ * pas distinguer un bloc épuisé d'un bloc encore plein et renverra le même
+ * bloc (idempotence). Ce module n'écrit rien de plus : c'est au caller de
+ * transmettre ce curseur.
+ *
  * ## Invariants garantis par ce module
  *
  *  - **Jamais de numéro inventé** : aucune écriture n'est produite lorsque le
