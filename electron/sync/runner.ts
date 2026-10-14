@@ -11,6 +11,11 @@
  *                        qui plante au top-level hors Next), helpers testés de
  *                        `outbox.ts` pré-liés via `bindOutbox` ;
  *  - application      → `applyPulledChanges(createLocalApplyRepo(db), …)` ;
+ *  - conflits (D-4)   → `recordPushConflicts(createConflictsDbRepo(db), …)` :
+ *                        les `conflicts[]` du push sont journalisés dans
+ *                        `sync_conflict` (base locale) pour la revue humaine ;
+ *                        repo construit **seulement** si `db` existe (base
+ *                        absente → runner inactif, dep non câblée) ;
  *  - jeton            → `readSyncToken` / `writeSyncToken` / `clearSyncToken`
  *                        (`config.json` chiffré `safeStorage`) ;
  *  - journal          → `electron-log` **uniquement**, messages passés par
@@ -46,6 +51,7 @@ import type { DesktopDb } from '@/lib/db/desktop-db'
 import { getDesktopDb } from '@/lib/db/desktop-db'
 import { syncOutbox, syncState } from '@/lib/db/schema'
 import { applyPulledChanges, createLocalApplyRepo } from '@/lib/sync/local-apply'
+import { createConflictsDbRepo, recordPushConflicts } from '@/lib/sync/conflict'
 import { createBackoff, createCentralProbe, SyncScheduler } from '@/lib/sync/net'
 import {
   OUTBOX_SEQ_KEY,
@@ -391,6 +397,11 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
     delete process.env.SYNC_BASE_URL
   }
 
+  // Journal des conflits (D-4) : repo lié à la base du poste. Construit
+  // UNIQUEMENT ici (base non nulle) : sans base, ce bloc n'est pas atteint et
+  // le runner reste inactif — comportement inchangé.
+  const conflictsRepo = createConflictsDbRepo(db)
+
   const deps: SyncRunnerDeps = {
     baseUrl,
     clinicId: options.clinicId ?? null,
@@ -404,6 +415,12 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
       clear: () => clearSyncToken(),
     },
     applyChanges: (ops) => applyChanges(db, ops),
+    // D-4 : `conflicts[]` du push → `sync_conflict` locale (idempotent,
+    // payloads projetés). `now` pris à l'écriture : `decided_at` = réception
+    // réelle de la réponse. Jamais de jeton ni d'URL d'origine transmis.
+    recordConflicts: async (entries) => {
+      await recordPushConflicts(conflictsRepo, entries, new Date())
+    },
     fetchImpl: fetch,
     now: () => new Date(),
     logger: {

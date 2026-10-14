@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBackoff, SyncScheduler } from "./net";
+import type { ConflictEntry } from "./conflict";
 import type { ChangeOp, Cursor } from "./protocol";
 import { isSyncCycleRunning, runSyncCycle } from "./runner-core";
 import type {
@@ -27,7 +28,10 @@ import type {
  *  - pull → `applyChanges` appelé **puis** `writeCursor`, **même si**
  *    `applyChanges` rejette ;
  *  - mutex : second cycle refusé (`noop` + `concurrent-cycle`) ;
- *  - **aucun message de journal ne contient le jeton**.
+ *  - **aucun message de journal ne contient le jeton** ;
+ *  - `conflicts[]` du push → dep optionnelle `recordConflicts` appelée avec les
+ *    bonnes entrées, **absente** de la dep → cycle strictement inchangé, et un
+ *    échec de la dep n'interrompt jamais le cycle (6.2 / D-4).
  */
 
 /* -------------------------------------------------------------------------- */
@@ -553,5 +557,103 @@ describe("runSyncCycle — mutex", () => {
     const third = await runSyncCycle(harness.deps);
     expect(third.status === "noop" || third.status === "pulled").toBe(true);
     expect(isSyncCycleRunning()).toBe(false);
+  });
+});
+
+describe("runSyncCycle — journal des conflits du push (D-4, tâche 6.2)", () => {
+  /** Réponse de push portant des `conflicts[]` + tirage vide (cycle `pushed`). */
+  function pushWithConflicts(ops: ChangeOp[]) {
+    return (url: string): Response => {
+      if (url.endsWith("/api/sync/push")) {
+        return json({
+          accepted: ops.map((op) => op.opId),
+          rejected: [],
+          conflicts: [
+            { table: "patient", rowId: "p-9", reason: "base-rev-mismatch" },
+            { table: "invoice", rowId: "i-3", reason: "protected-amounts" },
+          ],
+        });
+      }
+      return json({ changes: [], cursor: PULL_CURSOR, hasMore: false });
+    };
+  }
+
+  it("conflicts renvoyés → `recordConflicts` appelé avec les bonnes entrées", async () => {
+    const ops = [makeOp(1)];
+    const harness = createHarness({
+      batch: ops,
+      fetchHandler: pushWithConflicts(ops),
+    });
+    const recorded: ConflictEntry[][] = [];
+    harness.deps.recordConflicts = async (entries) => {
+      recorded.push(entries);
+    };
+
+    const result = await runSyncCycle(harness.deps);
+
+    expect(result).toEqual({ status: "pushed", accepted: 1, rejected: 0 });
+    // Triples `(table, rowId, reason)` seuls : aucun payload ne quitte le cœur.
+    expect(recorded).toEqual([
+      [
+        { table: "patient", rowId: "p-9", reason: "base-rev-mismatch" },
+        { table: "invoice", rowId: "i-3", reason: "protected-amounts" },
+      ],
+    ]);
+    expect(harness.logs.some((line) => line.includes("journal local alimenté"))).toBe(true);
+    // Le sort des opérations reste prioritaire : marquages inchangés.
+    expect(harness.sent).toEqual([[ops[0].opId]]);
+    expect(harness.failed).toHaveLength(0);
+  });
+
+  it("dep ABSENTE → cycle strictement inchangé (conflits comptés, jamais persistés)", async () => {
+    const ops = [makeOp(1)];
+    const harness = createHarness({
+      batch: ops,
+      fetchHandler: pushWithConflicts(ops),
+    });
+
+    const result = await runSyncCycle(harness.deps);
+
+    expect(result).toEqual({ status: "pushed", accepted: 1, rejected: 0 });
+    expect(harness.deps.recordConflicts).toBeUndefined();
+    expect(harness.logs.some((line) => line.includes("journal local non alimenté"))).toBe(true);
+    // Aucune erreur : l'absence de dep n'est pas une défaillance.
+    expect(harness.logs.filter((line) => line.startsWith("error"))).toHaveLength(0);
+    expect(harness.cursorWrites).toEqual([PULL_CURSOR]);
+    expect(harness.deps.scheduler.state).toBe("online");
+  });
+
+  it("dep en échec → le cycle se poursuit (journal best-effort, erreur bornée)", async () => {
+    const ops = [makeOp(1)];
+    const harness = createHarness({
+      batch: ops,
+      fetchHandler: pushWithConflicts(ops),
+    });
+    harness.deps.recordConflicts = () => Promise.reject(new Error("repo hors service"));
+
+    const result = await runSyncCycle(harness.deps);
+
+    expect(result).toEqual({ status: "pushed", accepted: 1, rejected: 0 });
+    const errors = harness.logs.filter((line) => line.startsWith("error"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("journalisation des conflits impossible");
+    expect(errors[0]).toContain("repo hors service");
+    // Le tirage a eu lieu malgré tout : la trace n'est jamais bloquante.
+    expect(harness.cursorWrites).toEqual([PULL_CURSOR]);
+    expect(harness.deps.scheduler.state).toBe("online");
+  });
+
+  it("aucun conflit → `recordConflicts` n'est même pas appelé", async () => {
+    const ops = [makeOp(1)];
+    const harness = createHarness({ batch: ops });
+    let calls = 0;
+    harness.deps.recordConflicts = async () => {
+      calls += 1;
+    };
+
+    const result = await runSyncCycle(harness.deps);
+
+    expect(result.status === "pushed" || result.status === "pulled").toBe(true);
+    expect(calls).toBe(0);
   });
 });

@@ -29,9 +29,13 @@
  *     **Le jeton n'est jamais journalisé** (pas sa valeur, pas son hash) ;
  *  6. **push** : `pendingBatch(MAX_PUSH_OPS)` → `POST {baseUrl}/api/sync/push`
  *     (`Authorization: Bearer <jeton>`) → chaque `accepted` → `markSent`,
- *     chaque `rejected` → `markFailed(reason)`. **401** → `token.clear()` +
- *     `needs-auth`. Erreur réseau/HTTP → `markFailed` sur **tout le lot** +
- *     `registerFailure()` ;
+ *     chaque `rejected` → `markFailed(reason)`, puis les `conflicts[]`
+ *     renvoyés par le central sont **journalisés** localement via la dep
+ *     optionnelle `recordConflicts` (D-4 — voir `conflict.ts`) ; une
+ *     défaillance de journalisation n'interrompt jamais le cycle (best-effort)
+ *     et l'absence de dep laisse le cycle strictement inchangé. **401** →
+ *     `token.clear()` + `needs-auth`. Erreur réseau/HTTP → `markFailed` sur
+ *     **tout le lot** + `registerFailure()` ;
  *  7. **pull** : `readCursor()` → `POST {baseUrl}/api/sync/pull` →
  *     `applyChanges(changes)` → **`writeCursor` TOUJOURS après**, quoi qu'il
  *     arrive (y compris si `applyChanges` rejette : une ligne empoisonnée qui
@@ -66,6 +70,7 @@
  */
 
 import type { NetProbe, SyncScheduler } from "./net";
+import type { ConflictEntry } from "./conflict";
 import { redactError } from "./outbox";
 import {
   DEFAULT_PULL_LIMIT,
@@ -75,6 +80,7 @@ import {
   type ChangeOp,
   type Cursor,
   type PushRequest,
+  type PushResponse,
 } from "./protocol";
 
 /* -------------------------------------------------------------------------- */
@@ -138,6 +144,16 @@ export interface SyncRunnerDeps {
   outbox: SyncOutboxApi;
   token: SyncTokenStore;
   applyChanges(ops: ChangeOp[]): Promise<ApplyResultLike>;
+  /**
+   * Journalisation des `conflicts[]` d'une réponse de push (D-4, tâche 6.2).
+   *
+   * **Optionnelle** : un appelant sans dep (poste sans base locale, tests)
+   * conserve un cycle strictement inchangé — les conflits sont alors seulement
+   * comptés/relevés par le journal du cœur. Une défaillance de la dep est
+   * **isolée** (log + poursuite du cycle) : le journal des conflits est
+   * best-effort, il ne doit jamais faire échouer une synchronisation.
+   */
+  recordConflicts?(entries: ConflictEntry[]): Promise<void>;
   fetchImpl: typeof fetch;
   now(): Date;
   logger: SyncLogger;
@@ -245,6 +261,48 @@ async function markBatchFailed(
   }
 }
 
+/**
+ * Journalise les `conflicts[]` d'une réponse de push dans `sync_conflict`
+ * (D-4, tâche 6.2) via la dep optionnelle `recordConflicts`.
+ *
+ * Contrats :
+ *  - dep **absente** → aucun effet de bord, seulement un avertissement
+ *    honnête : le cycle reste strictement identique à l'avant 6.2 ;
+ *  - dep en **échec** → motif borné par `redactError` + **poursuite du cycle**
+ *    : perdre la trace d'un conflit est dommageable, faire échouer une
+ *    synchronisation entière à cause de cette trace le serait davantage ;
+ *  - seules les triples `(table, rowId, reason)` quittent le cœur : la
+ *    projection des payloads et le retrait des secrets sont opérés par
+ *    `recordPushConflicts` (jamais de payload brut ici).
+ */
+async function persistPushConflicts(
+  deps: SyncRunnerDeps,
+  conflicts: PushResponse["conflicts"],
+): Promise<void> {
+  if (conflicts.length === 0) {
+    return;
+  }
+  const entries: ConflictEntry[] = conflicts.map((conflict) => ({
+    table: conflict.table,
+    rowId: conflict.rowId,
+    reason: conflict.reason,
+  }));
+  if (deps.recordConflicts === undefined) {
+    deps.logger.warn(
+      `push : ${conflicts.length} conflit(s) arbitré(s) côté central — journal local non alimenté (recordConflicts absente)`,
+    );
+    return;
+  }
+  try {
+    await deps.recordConflicts(entries);
+    deps.logger.warn(
+      `push : ${conflicts.length} conflit(s) arbitré(s) côté central — journal local alimenté (revue D-4)`,
+    );
+  } catch (error) {
+    deps.logger.error(redactedReason("journalisation des conflits impossible", error));
+  }
+}
+
 async function runPush(
   deps: SyncRunnerDeps,
   base: string,
@@ -342,6 +400,10 @@ async function runPush(
     logger.error(reason);
     return { kind: "stop", result: { status: "error", reason } };
   }
+
+  /* Conflits d'arbitrage (D-4) : journal local, best-effort, après la prise
+     de note des statuts (le sort des opérations prime sur leur trace). */
+  await persistPushConflicts(deps, parsed.data.conflicts);
 
   logger.info(
     `push : ${accepted.length} acceptée(s), ${rejected.length} rejetée(s) sur ${batch.length} (central ${safeOrigin(base)})`,
