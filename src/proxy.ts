@@ -1,129 +1,32 @@
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db/db";
-import { clinicMemberships } from "@/lib/db/schema";
-import { and, eq, isNotNull } from "drizzle-orm";
-import { isEmailVerificationRequired } from "@/lib/email-verification";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+/**
+ * RÉ-EXPORT DU MIDDLEWARE UNIQUE — AUCUNE LOGIQUE ICI.
+ *
+ * Toute la logique (exemptions, verrou de vérification d'email,
+ * `isValidActiveClinic`) vit dans `../proxy.ts`, fichier unique source de
+ * vérité. Sa COPIE divergente — qui contenait les deux verrous plus stricts
+ * mais ne s'appliquait JAMAIS — a été supprimée : deux copies EST le bug.
+ *
+ * Pourquoi ce fichier existe encore (et ne contient que ça) : Next 16.2.7 +
+ * Turbopack construit sa liste des fichiers proxy surveillés à partir de
+ * `<appDir>/..` = `src/` uniquement (`setup-dev-bundler.js` →
+ * `getPossibleMiddlewareFilenames(path.join(rootDir, '..'))`, avec
+ * `rootDir = pagesDir || appDir`). Mesuré sur dev server frais :
+ *   • racine SEULE            → middleware DÉSACTIVÉ (aucune redirection) ;
+ *   • racine + ce ré-export   → middleware ACTIF, la racine est exécutée ;
+ *   • `src` seul              → middleware ACTIF, `src` est exécuté.
+ * Ce ré-export existe donc pour ACTIVER le middleware en développement tout
+ * en n'ayant qu'UN SEUL code, à la racine.
+ */
+import { proxy } from "../proxy";
 
-async function isValidActiveClinic(
-  request: NextRequest,
-  sessionUserId: string
-): Promise<boolean> {
-  const clinicId = request.cookies.get("active_clinic_id")?.value;
-  if (!clinicId) return true;
+export { proxy };
 
-  const membership = await db.query.clinicMemberships.findFirst({
-    where: and(
-      eq(clinicMemberships.userId, sessionUserId),
-      eq(clinicMemberships.clinicId, clinicId),
-      isNotNull(clinicMemberships.joinedAt)
-    ),
-    with: { clinic: true },
-  });
-
-  if (!membership?.clinic) return false;
-
-  return (
-    membership.clinic.deletedAt === null &&
-    membership.clinic.status !== "suspended"
-  );
-}
-
-export async function proxy(request: NextRequest) {
-  const session = await auth();
-  const isLoggedIn = !!session?.user;
-  const emailVerified = (session?.user as { emailVerified?: string | null } | undefined)?.emailVerified;
-
-  const { pathname } = request.nextUrl;
-
-  const isAuthPage =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/register") ||
-    pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/reset-password") ||
-    pathname.startsWith("/verify-email");
-  const isApiAuthRoute = pathname.startsWith("/api/auth");
-  const isOwnerRoute = pathname.startsWith("/owner");
-  const isPublicAsset =
-    pathname.startsWith("/_next") || pathname === "/favicon.ico";
-  // Routes de synchronisation du poste desktop (sonde + échange de jeton +
-  // push/pull). POURQUOI cette exemption est sûre :
-  //  • elles font LEUR PROPRE authentification, échec fermé — `/push` et
-  //    `/pull` exigent `Authorization: Bearer` vérifié par `verifyDeviceToken`
-  //    (jeton inconnu / révoqué / expiré → 401, aucun repli), `/sync/token`
-  //    vérifie email + mot de passe (bcrypt) et limite les tentatives
-  //    (`src/lib/sync/token-throttle.ts`), `/health` ne retourne que
-  //    `status/time/version` sans lecture de base ;
-  //  • elles sont destinées au serveur CENTRAL, où la session de navigateur
-  //    (NextAuth) n'existe pas : sans cette exemption, le middleware
-  //    redirigerait chaque appel anonyme vers /login (307) et aucun poste
-  //    desktop ne pourrait jamais synchroniser.
-  // AUCUNE autre exemption : les pages, `/owner`, la vérification d'email et le
-  // reste du middleware sont strictement inchangés.
-  const isSyncApiRoute =
-    pathname === "/api/health" || pathname.startsWith("/api/sync/");
-  // La landing (/) est la SEULE page publique en dehors du parcours
-  // d'authentification. Sans cette exemption, le middleware la renverrait
-  // vers /login et personne ne pourrait jamais la voir.
-  const isLanding = pathname === "/";
-
-  if (isPublicAsset || isApiAuthRoute || isSyncApiRoute) {
-    return NextResponse.next();
-  }
-
-  if (!isLoggedIn && !isAuthPage && !isLanding) {
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
-
-  // Un compte déjà connecté ne doit pas se retrouver sur le discours
-  // commercial : on le renvoie à son tableau de bord. La landing reste donc
-  // exclusive aux visiteurs anonymes.
-  if (isLoggedIn && isLanding) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
-
-  if (isLoggedIn && isAuthPage && !pathname.startsWith("/verify-email")) {
-    return NextResponse.redirect(new URL("/select-clinic", request.url));
-  }
-
-  // Le verrou de vérification n'est exigé QUE si un canal d'envoi existe
-  // (cf. `isEmailVerificationRequired`). Sans clé Resend, rediriger vers
-  // /verify-email enferme l'utilisateur : aucun email ne part, et le bouton
-  // « Renvoyer » passe par le même canal muet. C'est exactement ce qui
-  // bloquait les 9 comptes en production.
-  if (
-    isLoggedIn &&
-    isEmailVerificationRequired() &&
-    !emailVerified &&
-    pathname !== "/verify-email" &&
-    !pathname.startsWith("/api/auth") &&
-    pathname !== "/select-clinic"
-  ) {
-    return NextResponse.redirect(new URL("/verify-email", request.url));
-  }
-
-  const sessionUserId = session?.user?.id;
-  const isClinicArea =
-    isLoggedIn &&
-    !!sessionUserId &&
-    !isAuthPage &&
-    !isOwnerRoute &&
-    pathname !== "/select-clinic";
-
-  if (isClinicArea && sessionUserId) {
-    if (!(await isValidActiveClinic(request, sessionUserId))) {
-      const response = NextResponse.redirect(
-        new URL("/select-clinic", request.url)
-      );
-      response.cookies.delete({ name: "active_clinic_id", path: "/" });
-      return response;
-    }
-  }
-
-  return NextResponse.next();
-}
-
+/**
+ * Miroir LITTÉRAL du `config` de `../proxy.ts` (à maintenir identique) :
+ * Next lit le `config` par analyse statique DANS ce fichier — sans littéral,
+ * le matcher par défaut `(.*)` intercepterait les assets statiques et le
+ * middleware redirigerait les JS/CSS anonymes vers /login.
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };
