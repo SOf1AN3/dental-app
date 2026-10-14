@@ -1,5 +1,4 @@
 import { requireAuth } from "@/lib/auth-utils";
-import { requireCurrentClinic } from "@/lib/multi-tenant";
 import { getSyncOverview } from "@/lib/actions/sync";
 import { SyncControls } from "@/components/offline/sync-controls";
 import { ConflictList } from "@/components/offline/conflict-list";
@@ -8,18 +7,22 @@ import { MergeReview } from "@/components/offline/merge-review";
 /**
  * Tâche 7.2 — `/settings/sync` : interface de synchronisation.
  *
- * Server Component : session + garde multi-tenant (`requireCurrentClinic`),
- * puis lecture via la server action `getSyncOverview` (conflits, revues de
- * fusion, comptages de la file — sans secret). Les boutons IPC (`triggerSync`,
- * `loginToSync`) vivent dans les Client Components voisins.
+ * Server Component : session, puis lecture via la server action
+ * `getSyncOverview` (conflits, revues de fusion, comptages de la file — sans
+ * secret). La garde multi-tenant (cookie `active_clinic_id` revalidé contre
+ * `clinicMemberships`) est exécutée **par l'action** et son résultat est renvoyé
+ * dans `overview.clinicId` : la page ne ré-exécute donc pas
+ * `requireCurrentClinic` (une seule requête membership par requête). Les
+ * boutons IPC (`triggerSync`, `loginToSync`) vivent dans les Client Components
+ * voisins.
  *
  * Mode web : les sections de revue restent servies (données locales vides en
  * pratique) et le panneau de contrôle affiche un état neutre — jamais d'erreur.
  */
 export default async function SyncSettingsPage() {
   await requireAuth();
-  const clinicId = await requireCurrentClinic();
   const overview = await getSyncOverview();
+  const clinicId = overview.clinicId;
 
   return (
     <div className="space-y-8">

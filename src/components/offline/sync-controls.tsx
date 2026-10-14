@@ -243,6 +243,8 @@ export function SyncControls({
     );
   }
 
+  // Relevé encore `null` au premier rendu → `describeSyncBadge` rend l'état
+  // `unknown` (« Statut indisponible », gris) : jamais un faux « Erreur » rouge.
   const descriptor = describeSyncBadge(status);
   const relative = formatRelativeSync(status?.lastSyncAt ?? null);
 

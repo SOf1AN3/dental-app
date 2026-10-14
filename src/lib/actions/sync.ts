@@ -8,14 +8,27 @@
  *    cabinet actif (`requireCurrentClinic` — le cookie `active_clinic_id` est
  *    revalidé contre `clinicMemberships`, défense en profondeur PAR-1) ;
  *  - les actions de mutation **multi-tenant** re-valident l'appartenance des
- *    lignes manipulées au cabinet courant avant toute écriture (`mergePatientAction`,
- *    revue des fusions filtrée par `clinicId` dans `getSyncOverview`) ;
+ *    lignes manipulées au cabinet courant avant toute écriture (`mergePatientAction`)
+ *    et toute clôture de revue (`resolveMergeAction`, `closeReview`) : la revue
+ *    est **chargée** et sa paire (candidat + canonique) doit appartenir au
+ *    cabinet actif, sinon réponse générique « introuvable » (pas d'oracle) ;
  *  - aucun secret ni payload de journal n'est renvoyé : la vue de revue se
  *    limite aux colonnes strictement nécessaires (table, ligne, motif, date ;
  *    nom + naissance pour la revue de fusion) ;
+ *  - **fuite d'identité inter-cabinets (D-5)** : le moteur crée délibérément des
+ *    revues `cross-clinic` (paires de deux tenants). `getSyncOverview` n'affiche
+ *    `toParty` (prénom, nom, naissance) QUE si LES DEUX parties — candidat ET
+ *    canonique — sont dans le cabinet courant ; sinon entrée **résumée sans
+ *    identité** (parties `null`, motif générique) ;
  *  - `bootstrapAction` n'appelle **que** `http://127.0.0.1:<port>/api/sync/bootstrap`
  *    (localhost du poste, port tiré de l'env `PORT`) : aucune URL fournie par
- *    l'utilisateur n'est jamais acceptée (anti-SSRF).
+ *    l'utilisateur n'est jamais acceptée (anti-SSRF), et l'appel est **refusé
+ *    sans aucun trafic réseau** quand les marqueurs desktop (`SYNC_TOKEN` ET
+ *    `DEVICE_ID`) sont absents — une session web ne peut pas auto-DoSer le
+ *    serveur local ;
+ *  - la clinic active est résolue **une seule fois** par requête : la page
+ *    `/settings/sync` consomme `overview.clinicId` (résolu + vérifié ici) au
+ *    lieu de re-exécuter `requireCurrentClinic` (double requête membership).
  */
 
 import { z } from "zod";
@@ -37,6 +50,7 @@ import {
   listPendingMerges,
   mergeDuplicatePatients,
   resolveMerge,
+  type PendingMerge,
 } from "@/lib/sync/merge";
 
 /* -------------------------------------------------------------------------- */
@@ -67,6 +81,13 @@ export interface SyncMergeItem {
   readonly canonicalId: string;
   readonly reason: string;
   readonly decidedAt: string;
+  /**
+   * `true` → la paire n'appartient **pas** entièrement au cabinet courant
+   * (revue `cross-clinic` ou revue incomplète) : `candidate`/`existing` sont
+   * alors `null` et `reason` porte un résumé générique. **Jamais** l'identité
+   * (`toParty`) d'un patient d'un autre cabinet n'est exposée.
+   */
+  readonly identityMasked: boolean;
   readonly candidate: SyncMergeParty | null;
   readonly existing: SyncMergeParty | null;
 }
@@ -79,6 +100,12 @@ export interface SyncQueueCounts {
 
 /** Vue d'ensemble lue par `/settings/sync` (lecture seule, sans secret). */
 export interface SyncOverview extends SyncQueueCounts {
+  /**
+   * Cabinet actif, **résolu et vérifié ici** (cookie + membership) : la page
+   * le consomme directement au lieu d'exécuter une seconde fois
+   * `requireCurrentClinic` (une seule requête membership par requête).
+   */
+  readonly clinicId: string;
   readonly conflicts: readonly SyncConflictItem[];
   readonly merges: readonly SyncMergeItem[];
 }
@@ -135,6 +162,10 @@ function toParty(
  * (`sync_outbox`), conflits non résolus (hors revues de fusion) et doublons
  * patients en attente, **bornés au cabinet courant** pour les fusions (le
  * journal des conflits est device-wide et n'expose que des métadonnées).
+ *
+ * La clinic active est résolue **ici, une seule fois** (cookie + membership) et
+ * renvoyée dans `clinicId` : la page n'a plus besoin d'exécuter un second
+ * `requireCurrentClinic` (double requête membership par requête).
  */
 export async function getSyncOverview(): Promise<SyncOverview> {
   await requireAuth();
@@ -171,8 +202,10 @@ export async function getSyncOverview(): Promise<SyncOverview> {
       decidedAt: row.decidedAt.toISOString(),
     }));
 
-  // Enrichissement nom/naissance — **filtré sur le cabinet courant** : une
-  // revue concernant un autre tenant n'est jamais exposée à cet utilisateur.
+  // Enrichissement nom/naissance — **filtré sur LES DEUX parties du cabinet
+  // courant** : une revue concernant un autre tenant n'est jamais exposée à cet
+  // utilisateur (le moteur crée délibérément des revues `cross-clinic`, paires
+  // de deux cabinets distincts — BLOQUANT 1 : fuite d'identité inter-cabinets).
   const patientIds = [
     ...new Set(
       pendingMerges.flatMap((m) => [m.candidateId, m.canonicalId]).filter((id) => id.length > 0),
@@ -193,19 +226,53 @@ export async function getSyncOverview(): Promise<SyncOverview> {
       : [];
   const patientsById = new Map(patientRows.map((row) => [row.id, row]));
 
-  const merges: SyncMergeItem[] = pendingMerges
-    .filter((m) => patientsById.get(m.candidateId)?.clinicId === clinicId)
-    .map((m) => ({
+  const merges: SyncMergeItem[] = pendingMerges.map((m) => {
+    const candidateRow = patientsById.get(m.candidateId);
+    const canonicalRow = patientsById.get(m.canonicalId);
+    // LES DEUX parties (candidat ET canonique) doivent être dans le cabinet
+    // courant pour afficher une identité — sinon : entrée résumée, sans `toParty`.
+    const bothInCurrentClinic =
+      candidateRow !== undefined &&
+      canonicalRow !== undefined &&
+      candidateRow.clinicId === clinicId &&
+      canonicalRow.clinicId === clinicId;
+
+    const base = {
       id: m.id,
       candidateId: m.candidateId,
       canonicalId: m.canonicalId,
-      reason: m.reason,
       decidedAt: m.decidedAt.toISOString(),
-      candidate: toParty(patientsById.get(m.candidateId)),
-      existing: toParty(patientsById.get(m.canonicalId)),
-    }));
+    };
 
-  return { pendingCount, failedCount, conflicts, merges };
+    if (bothInCurrentClinic) {
+      return {
+        ...base,
+        reason: m.reason,
+        identityMasked: false,
+        candidate: toParty(candidateRow),
+        existing: toParty(canonicalRow),
+      };
+    }
+
+    // Paire hors cabinet (revue `cross-clinic`) ou revue incomplète : entrée
+    // **résumée sans identité** — utile à l'opérateur (il sait qu'une revue
+    // existe) sans jamais dévoiler prénom / nom / naissance d'un autre cabinet.
+    // Les identifiants restent ceux de la file (`sync_conflict`) : métadonnées
+    // opaques déjà exposées telles quelles par le journal D-4 device-wide, et
+    // les deux actions de revue refusent ces paires (garde d'écriture).
+    const rowsExist = candidateRow !== undefined && canonicalRow !== undefined;
+    return {
+      ...base,
+      reason: rowsExist
+        ? "Doublon inter-cabinets détecté : identités masquées."
+        : "Revue de fusion incomplète : identités masquées.",
+      identityMasked: true,
+      candidate: null,
+      existing: null,
+    };
+  });
+
+  return { clinicId, pendingCount, failedCount, conflicts, merges };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -241,8 +308,51 @@ export async function resolveConflictAction(id: string): Promise<SyncActionResul
 /* -------------------------------------------------------------------------- */
 
 /**
- * Clore une entrée de revue **sans** fusionner (« Ignorer » — `resolveMerge`,
- * idempotent).
+ * Charge la revue `reviewId` **et** vérifie que LA PAIRE (candidat ET
+ * canonique) appartient au cabinet `clinicId`.
+ *
+ * Garde d'écriture multi-tenant (BLOQUANT 2) : `resolveMerge` clôture n'importe
+ * quelle ligne de `sync_conflict` par son seul `id` — sans cette vérification,
+ * un utilisateur du cabinet A pourrait **disqualifier silencieusement** la revue
+ * du cabinet B.
+ *
+ * `null` = revue inconnue, déjà clôturée, revue illisible (canonique absent) ou
+ * paire hors cabinet : **tous ces cas partagent le même message générique** côté
+ * action (aucun oracle d'énumération sur l'existence d'une revue d'un autre
+ * tenant).
+ */
+async function loadReviewInClinic(
+  reviewId: string,
+  clinicId: string,
+): Promise<PendingMerge | null> {
+  const review = (await listPendingMerges(createMergeDbRepo(db))).find(
+    (row) => row.id === reviewId,
+  );
+  if (review === undefined) return null;
+
+  const ids = [...new Set([review.candidateId, review.canonicalId])].filter((id) => id.length > 0);
+  if (ids.length === 0) return null;
+
+  const rows = await db
+    .select({ id: patients.id, clinicId: patients.clinicId })
+    .from(patients)
+    .where(inArray(patients.id, ids));
+  const clinicById = new Map(rows.map((row) => [row.id, row.clinicId]));
+
+  const bothInClinic = [review.candidateId, review.canonicalId].every(
+    (id) => clinicById.get(id) === clinicId,
+  );
+  return bothInClinic ? review : null;
+}
+
+/**
+ * Clore une entrée de revue **sans** fusionner (« Ignorer » — `resolveMerge`).
+ *
+ * Multi-tenant : la revue est **chargée** puis sa paire (candidat/canonique)
+ * vérifiée dans le cabinet actif avant toute écriture — sinon réponse
+ * `{ success: false }` générique (jamais de révélation sur l'existence d'une
+ * revue d'un autre cabinet). Une revue déjà clôturée ou absente de la file
+ * renvoie donc le même refus générique.
  */
 export async function resolveMergeAction(id: string): Promise<SyncActionResult> {
   const parsed = idSchema.safeParse(id);
@@ -250,11 +360,21 @@ export async function resolveMergeAction(id: string): Promise<SyncActionResult> 
     return { success: false, error: "Identifiant de revue invalide." };
   }
   const user = await requireAuth();
-  await requireCurrentClinic();
+  const clinicId = await requireCurrentClinic();
+
+  let review: PendingMerge | null;
+  try {
+    review = await loadReviewInClinic(parsed.data, clinicId);
+  } catch {
+    return { success: false, error: "Enregistrement impossible (base de données indisponible)." };
+  }
+  if (review === null) {
+    return { success: false, error: "Revue introuvable dans ce cabinet." };
+  }
 
   try {
     await resolveMerge(createMergeDbRepo(db), {
-      id: parsed.data,
+      id: review.id,
       resolvedBy: user.id,
     });
     revalidatePath("/settings/sync");
@@ -274,7 +394,9 @@ export async function resolveMergeAction(id: string): Promise<SyncActionResult> 
  * `revalidatePath`.
  *
  * Garde multi-tenant : les DEUX patients doivent appartenir au cabinet actif,
- * sinon refus net avant tout appel au moteur.
+ * sinon refus net avant tout appel au moteur ; pareil pour la revue d'origine
+ * (`reviewId`) : sa paire est chargée et **re-vérifiée dans le cabinet actif**
+ * avant toute clôture (jamais de clôture d'une revue d'un autre cabinet).
  */
 export async function mergePatientAction(input: {
   candidateId: string;
@@ -301,8 +423,26 @@ export async function mergePatientAction(input: {
     return { success: false, error: "Dossier introuvable dans ce cabinet." };
   }
 
+  // Clôture d'origine (BLOQUANT 2) : la revue est CHARGÉE et sa paire vérifiée
+  // dans le cabinet actif AVANT toute écriture — un `reviewId` appartenant à un
+  // autre cabinet ne doit jamais être clos (refus générique, même message que
+  // `resolveMergeAction` : aucune révélation sur l'existence de la revue).
+  if (reviewId !== undefined) {
+    let review: PendingMerge | null;
+    try {
+      review = await loadReviewInClinic(reviewId, clinicId);
+    } catch {
+      return { success: false, error: "Enregistrement impossible (base de données indisponible)." };
+    }
+    if (review === null) {
+      return { success: false, error: "Revue introuvable dans ce cabinet." };
+    }
+  }
+
   // Clôture de la revue d'origine après succès — **best-effort** : la fusion
   // est déjà appliquée, un échec de clôture ne doit pas la signaler en échec.
+  // La revue a été vérifiée ci-dessus (paire du cabinet actif) ; `resolveMerge`
+  // est idempotent (`resolved_at IS NULL` en écriture conditionnelle).
   const closeReview = async (): Promise<void> => {
     if (reviewId === undefined) return;
     try {
@@ -367,6 +507,18 @@ function resolveLocalPort(): number {
 }
 
 /**
+ * Marqueurs d'une **installation desktop** : le serveur Next enfant de
+ * l'application de bureau porte `SYNC_TOKEN` **et** `DEVICE_ID` (injectés par
+ * `electron/env.ts`, cf. la route bootstrap qui exige les mêmes). Une session
+ * web (`next dev`, hébergement public) n'en a aucun.
+ */
+function hasDesktopMarkers(): boolean {
+  const token = process.env.SYNC_TOKEN?.trim() ?? "";
+  const deviceId = process.env.DEVICE_ID?.trim() ?? "";
+  return token.length > 0 && deviceId.length > 0;
+}
+
+/**
  * Amorçage d'une installation neuve : appelle — **depuis le serveur** —
  * `POST http://127.0.0.1:<port>/api/sync/bootstrap` avec les cabinets
  * validés. L'origine est fixée par le code (localhost, jamais fournie par
@@ -388,6 +540,18 @@ export async function bootstrapAction(clinicIds: string[]): Promise<BootstrapAct
     }
   } catch {
     return { success: false, error: "Accès refusé à l'un des cabinets demandés." };
+  }
+
+  // Garde « desktop only » : hors application de bureau (marqueurs `SYNC_TOKEN`
+  // ET `DEVICE_ID` absents de l'env du serveur), refus explicite et **aucun
+  // appel réseau** — une session web authentifiée ne peut pas déclencher un
+  // POST vers le serveur local (auto-DoS sans contre-mesure).
+  if (!hasDesktopMarkers()) {
+    return {
+      success: false,
+      error:
+        "Amorçage réservé à l'application de bureau : jeton d'appareil absent sur ce serveur local.",
+    };
   }
 
   const url = `http://127.0.0.1:${resolveLocalPort()}/api/sync/bootstrap`;

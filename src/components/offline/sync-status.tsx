@@ -60,20 +60,39 @@ export function formatRelativeSync(iso: string | null): string | null {
 }
 
 /**
+ * Descripteur **« statut inconnu »** — source unique : produit aussi bien pour
+ * un relevé `null` (premier rendu / pont momentanément indisponible) que pour
+ * l'état `unknown` du runner. Jamais rouge : aucune erreur n'est constatée.
+ */
+function unknownSyncBadge(): SyncBadgeDescriptor {
+  return {
+    kind: "unknown",
+    label: "Statut indisponible",
+    dotClass: "bg-cool-500",
+    textClass: "text-muted-fg",
+    description: "État de synchronisation non encore connu",
+  };
+}
+
+/**
  * Dérivation **pure** de l'affichage à partir du statut — partagée avec
  * `/settings/sync` (panneau de détail) pour qu'une seule règle décide de l'état.
+ *
+ * Relevé **absent** (`null` : premier rendu, pertes du pont) = état `unknown`
+ * (« Statut indisponible », gris) et **jamais** « Erreur » : une erreur n'est
+ * affichée que si un dernier motif d'erreur est réellement renseigné.
  */
 export function describeSyncBadge(status: SyncStatus | null): SyncBadgeDescriptor {
-  if (status === null || status.lastError !== null) {
+  if (status === null) {
+    return unknownSyncBadge();
+  }
+  if (status.lastError !== null) {
     return {
       kind: "error",
       label: "Erreur",
       dotClass: "bg-danger",
       textClass: "text-danger",
-      description:
-        status === null
-          ? "Statut de synchronisation indisponible"
-          : `Dernière erreur : ${status.lastError}`,
+      description: `Dernière erreur : ${status.lastError}`,
     };
   }
   switch (status.state) {
@@ -95,13 +114,7 @@ export function describeSyncBadge(status: SyncStatus | null): SyncBadgeDescripto
           "Moteur de synchronisation inactif : connectez-vous au serveur central",
       };
     case "unknown":
-      return {
-        kind: "unknown",
-        label: "Statut indisponible",
-        dotClass: "bg-cool-500",
-        textClass: "text-muted-fg",
-        description: "État de synchronisation non encore connu",
-      };
+      return unknownSyncBadge();
     case "online": {
       if (status.pendingCount !== null && status.pendingCount > 0) {
         return {
