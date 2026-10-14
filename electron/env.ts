@@ -393,6 +393,14 @@ const persistedFieldSchemas = {
   // Identifiant d'appareil (étape 3.2) : UUID persisté, stable sur la durée de
   // vie du poste — clé de la fenêtre de confiance hors-ligne (D-B).
   deviceId: z.string().min(1).max(128),
+  // Jeton d'appareil du serveur central (étape 5.3) : **ciphertext** base64
+  // `safeStorage` (ou valeur en clair dans le fallback documenté), même
+  // discipline que `authSecret`. L'expiration voyage à côté (`syncTokenExpiresAt`),
+  // chiffrée avec le **même** marqueur `syncTokenEncoding` : les deux sont
+  // écrits/effacés/relus **en bloc**, un décodage mixte n'a aucun sens.
+  syncToken: z.string().min(1).max(4096),
+  syncTokenExpiresAt: z.string().min(1).max(128),
+  syncTokenEncoding: storedEncodingSchema,
 }
 
 /** Schéma d'ensemble, dérivé des champs ci-dessus (source du type persisté). */
@@ -404,6 +412,9 @@ const persistedDbConfigSchema = z.object({
   authSecret: persistedFieldSchemas.authSecret.optional(),
   authSecretEncoding: persistedFieldSchemas.authSecretEncoding.optional(),
   deviceId: persistedFieldSchemas.deviceId.optional(),
+  syncToken: persistedFieldSchemas.syncToken.optional(),
+  syncTokenExpiresAt: persistedFieldSchemas.syncTokenExpiresAt.optional(),
+  syncTokenEncoding: persistedFieldSchemas.syncTokenEncoding.optional(),
 })
 
 type PersistedDbConfig = z.infer<typeof persistedDbConfigSchema>
@@ -631,6 +642,26 @@ function carryDeviceId(persisted: PersistedDbConfig): Pick<PersistedDbConfig, 'd
 }
 
 /**
+ * Conserve le jeton de synchronisation (`syncToken` / `syncTokenExpiresAt` +
+ * marqueur `syncTokenEncoding`) lors d'une **réécriture** du `config.json`
+ * motivée par un **autre** champ (étape 5.3) : le jeton émis par
+ * `POST /api/sync/token` est chiffré `safeStorage` ici même, et une
+ * réécriture de premier démarrage/réchiffrement ne doit jamais l'effacer (le
+ * poste devrait sinon retaper ses identifiants au prochain démarrage). Même
+ * mécanique que `carryAuthSecret`/`carryDeviceId`. Le jeton est un secret :
+ * seules sa présence et sa validité sont journalisables, jamais sa valeur.
+ */
+function carrySyncToken(
+  persisted: PersistedDbConfig,
+): Pick<PersistedDbConfig, 'syncToken' | 'syncTokenExpiresAt' | 'syncTokenEncoding'> {
+  return {
+    ...(persisted.syncToken !== undefined ? { syncToken: persisted.syncToken } : {}),
+    ...(persisted.syncTokenExpiresAt !== undefined ? { syncTokenExpiresAt: persisted.syncTokenExpiresAt } : {}),
+    ...(persisted.syncTokenEncoding !== undefined ? { syncTokenEncoding: persisted.syncTokenEncoding } : {}),
+  }
+}
+
+/**
  * Message d'action explicite (récupération, jamais de régénération muette) quand
  * un cluster existe et que son mot de passe n'est pas récupérable : réécrire
  * `config.json` ferait disparaître le seul exemplaire chiffré → accès aux
@@ -735,7 +766,24 @@ function resolveProdDbConfig(dataDirOverride: string | undefined): DbBaseConfig 
     // Même garde pour `deviceId` (étape 3.2) : une réécriture ne doit jamais
     // régénérer l'identifiant d'appareil porteur de la confiance hors-ligne.
     const carriedDevice = corruptFields.includes('deviceId') ? {} : carryDeviceId(persisted)
-    writePersistedConfig(configPath, { ...carried, ...carriedDevice, port, database, ...encodePasswordForStorage(password) })
+    // Même garde pour le jeton de sync (étape 5.3) : une réécriture motivée par
+    // un autre champ ne doit jamais effacer un jeton encore valide — un champ
+    // de jeton corrompu n'est pas recopié (sa valeur ne serait plus déchiffrable
+    // de toute façon, l'exemplaire d'origine reste dans la mise de côté).
+    const carriedSyncToken =
+      corruptFields.includes('syncToken') ||
+      corruptFields.includes('syncTokenExpiresAt') ||
+      corruptFields.includes('syncTokenEncoding')
+        ? {}
+        : carrySyncToken(persisted)
+    writePersistedConfig(configPath, {
+      ...carried,
+      ...carriedDevice,
+      ...carriedSyncToken,
+      port,
+      database,
+      ...encodePasswordForStorage(password),
+    })
   }
 
   return {
@@ -1028,6 +1076,196 @@ function resolveTrustDays(mode: DbMode): number {
     )
   }
   return days
+}
+
+/* -------------------------------------------------------------------------- */
+/* Jeton de synchronisation du serveur central (étape 5.3)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Jeton d'appareil émis par `POST /api/sync/token`, persisté dans
+ * `<userData>/config.json` **chiffré via `safeStorage`** (Credential Manager
+ * Windows / DPAPI), exactement comme le mot de passe de la base et
+ * `AUTH_SECRET` : mêmes helpers `encodeSecretForStorage`/`decodeStoredSecret`,
+ * même fallback documenté (en clair + `log.warn` explicite si `safeStorage`
+ * est indisponible, jamais de chute silencieuse).
+ *
+ * Le couple `syncToken`/`syncTokenExpiresAt` est **chiffré en bloc** sous
+ * l'unique marqueur `syncTokenEncoding` : les deux clés sont toujours lues,
+ * écrites et effacées ensemble (un décodage mixte — un clair, un chiffré —
+ * n'a aucun sens et serait rejeté à la relecture).
+ *
+ * discipline journal : la **valeur** du jeton n'est **jamais** journalisée
+ * (ni clair, ni hash) — seules la présence, l'expiration ou les causes de
+ * rejet le sont.
+ */
+
+/** Libellé d'erreur/journal du jeton — la **valeur** n'est jamais loguée. */
+const SYNC_TOKEN_LABEL = 'le jeton de synchronisation'
+
+/**
+ * Schéma du **clair décodé** : couple (jeton, expiration ISO). Valide les deux
+ * directions — entrée de `writeSyncToken` (erreur de programme si invalide) et
+ * sortie de `readSyncToken` (rejet tolérant si le décodage produit n'importe
+ * quoi).
+ */
+const decodedSyncTokenSchema = z.object({
+  token: z.string().min(1).max(4096),
+  expiresAt: z.iso.datetime(),
+})
+
+/**
+ * Récupération du jeton. Contrairement au mot de passe de la base et à
+ * `AUTH_SECRET` (échec **fermé** : jamais de régénération par-dessus un secret
+ * verrouillant un cluster ou des sessions), un jeton illisible n'est qu'une
+ * habilitation perdue : un nouvel échange `POST /api/sync/token` le régénère.
+ * Ces fonctions renvoient donc `null` au lieu de lever.
+ */
+const SYNC_TOKEN_HINTS: StoredSecretHints = {
+  plain: 'safeStorage indisponible à la dernière écriture du jeton',
+  unavailable:
+    'un nouvel échange via POST /api/sync/token le régénérera (aucune donnée perdue : le jeton n’est qu’une habilitation).',
+  corrupt:
+    'un nouvel échange via POST /api/sync/token le régénérera (aucune donnée perdue).',
+}
+
+/**
+ * Lit le jeton persisté. Renvoie `null` si le jeton est absent, corrompu,
+ * non déchiffrable ou malformé (échec fermé **d'usage**, jamais de levée).
+ * Un jeton **expiré** est renvoyé tel quel (loggé « présent mais EXPIRÉ » sans
+ * valeur) : la politique de ré-authentification revient à l'orchestrateur
+ * (étape 5.4), qui compare `expiresAt` à son horloge injectée.
+ */
+export function readSyncToken(): { token: string; expiresAt: string } | null {
+  const configPath = path.join(resolveUserDataDir(), 'config.json')
+  const { persisted, corruptFields } = readPersistedConfig(configPath)
+  const tokenFieldCorrupt = corruptFields.some((field) => field.startsWith('syncToken'))
+  if (persisted.syncToken === undefined || persisted.syncTokenExpiresAt === undefined) {
+    if (tokenFieldCorrupt) {
+      log.warn(
+        '[env] jeton de sync illisible (champ corrompu) : ignoré — un nouvel échange POST /api/sync/token le ' +
+          'régénérera (valeur jamais journalisée).',
+      )
+    }
+    return null
+  }
+  let decodedToken: string | null
+  let decodedExpiresAt: string | null
+  try {
+    decodedToken = decodeStoredSecret(
+      persisted.syncToken,
+      persisted.syncTokenEncoding,
+      SYNC_TOKEN_LABEL,
+      SYNC_TOKEN_HINTS,
+    )
+    decodedExpiresAt = decodeStoredSecret(
+      persisted.syncTokenExpiresAt,
+      persisted.syncTokenEncoding,
+      SYNC_TOKEN_LABEL,
+      SYNC_TOKEN_HINTS,
+    )
+  } catch (error) {
+    // Échec fermé d'usage : on n'utilise jamais un jeton qu'on n'a pas pu
+    // déchiffrer, mais on ne lève pas — la récupération est un ré-échange.
+    log.warn(
+      `[env] jeton de sync non déchiffrable : ignoré (${error instanceof Error ? error.message : String(error)}) — ` +
+        'un nouvel échange POST /api/sync/token le régénérera.',
+    )
+    return null
+  }
+  const parsed = decodedSyncTokenSchema.safeParse({
+    token: decodedToken,
+    expiresAt: decodedExpiresAt,
+  })
+  if (!parsed.success) {
+    log.warn(
+      '[env] jeton de sync malformé après décodage : ignoré (valeur jamais journalisée) — un nouvel échange ' +
+        'POST /api/sync/token le régénérera.',
+    )
+    return null
+  }
+  const expired = Date.now() >= Date.parse(parsed.data.expiresAt)
+  log.info(
+    `[env] jeton de sync ${expired ? 'présent mais EXPIRÉ' : 'présent et valide'} (valeur jamais journalisée)`,
+  )
+  return { token: parsed.data.token, expiresAt: parsed.data.expiresAt }
+}
+
+/**
+ * Persiste le jeton (chiffré `safeStorage`) — valide ses entrées au préalable
+ * (Zod) : une expiration non-ISO ou un jeton vide est une **erreur de
+ * programme**, jamais une condition à absorber silencieusement.
+ *
+ * Discipline identique à `resolveDeviceId` : un `config.json` corrompu est mis
+ * de côté (`quarantineCorruptConfig`) **avant toute réécriture**, jamais écrasé
+ * sans sauvegarde. Une réécriture conserve les champs valides déjà présents
+ * (`persisted`) : écrire le jeton ne régénère ni le mot de passe, ni
+ * `AUTH_SECRET`, ni le `deviceId`.
+ */
+export function writeSyncToken(token: string, expiresAt: string): void {
+  const parsed = decodedSyncTokenSchema.safeParse({ token, expiresAt })
+  if (!parsed.success) {
+    throw new Error(
+      'writeSyncToken : jeton vide ou expiration non-ISO invalide — aucune persistance effectuée ' +
+        '(erreur de programme, la valeur n’est pas journalisée).',
+    )
+  }
+  const configPath = path.join(resolveUserDataDir(), 'config.json')
+  const { persisted, fileCorrupt } = readPersistedConfig(configPath)
+  if (fileCorrupt) {
+    quarantineCorruptConfig(configPath)
+  }
+  // Les deux champs sont chiffrés par le MÊME appel à `encodeSecretForStorage`
+  // conceptuel : `safeStorage.isEncryptionAvailable()` est stable au sein d'un
+  // process, les deux encodages sont donc identiques — le marqueur unique
+  // `syncTokenEncoding` décrit le couple en bloc.
+  const encodedToken = encodeSecretForStorage(parsed.data.token, SYNC_TOKEN_LABEL)
+  const encodedExpiresAt = encodeSecretForStorage(
+    parsed.data.expiresAt,
+    'l’expiration du jeton de synchronisation',
+  )
+  writePersistedConfig(configPath, {
+    ...persisted,
+    syncToken: encodedToken.encoded,
+    syncTokenExpiresAt: encodedExpiresAt.encoded,
+    syncTokenEncoding: encodedToken.encoding,
+  })
+  log.info('[env] jeton de sync persisté chiffré (valeur jamais journalisée)')
+}
+
+/**
+ * Efface le jeton (`clearSyncToken`) — idempotent, sans effet si aucun champ
+ * de jeton n'existe (aucune réécriture inutile du fichier). Un champ de jeton
+ * **corrompu** compte comme « présent » : il sera retiré par la réécriture
+ * (après mise de côté du fichier, même discipline que `writeSyncToken`).
+ * Les autres champs du `config.json` sont recopiés tels quels.
+ */
+export function clearSyncToken(): void {
+  const configPath = path.join(resolveUserDataDir(), 'config.json')
+  if (!existsSync(configPath)) {
+    return
+  }
+  const { persisted, fileCorrupt, corruptFields } = readPersistedConfig(configPath)
+  const tokenFieldCorrupt = corruptFields.some((field) => field.startsWith('syncToken'))
+  const hadTokenField =
+    persisted.syncToken !== undefined ||
+    persisted.syncTokenExpiresAt !== undefined ||
+    persisted.syncTokenEncoding !== undefined ||
+    tokenFieldCorrupt
+  if (!hadTokenField) {
+    return
+  }
+  if (fileCorrupt) {
+    quarantineCorruptConfig(configPath)
+  }
+  const {
+    syncToken: _syncToken,
+    syncTokenExpiresAt: _syncTokenExpiresAt,
+    syncTokenEncoding: _syncTokenEncoding,
+    ...rest
+  } = persisted
+  writePersistedConfig(configPath, rest)
+  log.info('[env] jeton de sync effacé de config.json')
 }
 
 /**
