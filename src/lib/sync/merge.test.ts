@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MERGE_CHAIN_MAX_HOPS,
   MERGE_REVIEW_PREFIX,
   PATIENT_CHILD_TABLES,
   chooseCanonical,
@@ -14,7 +15,13 @@ import {
   type NewMergeRecord,
   type PatientCandidate,
 } from "./merge";
-import type { ConflictFilter, ConflictRepo, ConflictRow, NewConflictRow } from "./conflict";
+import {
+  recordPushConflicts,
+  type ConflictFilter,
+  type ConflictRepo,
+  type ConflictRow,
+  type NewConflictRow,
+} from "./conflict";
 
 /**
  * Tests **hermétiques** de la fusion des doublons patients (D-5) — tâche 6.2.
@@ -24,9 +31,17 @@ import type { ConflictFilter, ConflictRepo, ConflictRow, NewConflictRow } from "
  *  - `evaluateDuplicate` : `id` + garde-fou → `merge` ; `id` identique mais
  *    naissance différente → `review` ; e-mail identique mais nom différent →
  *    `review` ; **téléphone seul → jamais `merge`** ;
+ *  - **correctif 1** : cabinets différents **ou** `clinicId` absent → `review`
+ *    (`cross-clinic`), **jamais** `merge` (multi-tenant) ;
  *  - `mergeDuplicatePatients` : transaction **intégrale** (rollback sur
  *    échec), réorientation des enfants, tombstone, trace `sync_merge`,
  *    **2ᵉ appel idempotent** (index unique) ;
+ *  - **correctif 2** : chaînage A→B, B→C → point fixe **C** ; cycle A→B→A et
+ *    chaîne > borne → `review` (aucune boucle infinie) ;
+ *  - **correctif 3** : conflit push D-4 et revue de fusion sur le **même**
+ *    patient coexistent (clé `rowId` namespacée `merge-review:`) ;
+ *  - **correctif 4** : outbox `pending` du doublon **traitée**, celle du
+ *    canonique **intacte**, purge annulée par le rollback ;
  *  - file de revue : `listPendingMerges` / `resolveMerge`.
  */
 
@@ -65,12 +80,21 @@ interface FakeChild {
   patientId: string;
 }
 
+/** Ligne `sync_outbox` simulée (correctif 4 : purge des `pending` du doublon). */
+interface FakeOutboxRow {
+  id: string;
+  table: string;
+  rowId: string;
+  status: "pending" | "sent" | "failed";
+}
+
 interface FakeState {
   patients: Map<string, FakePatientRow>;
   /** Clé = `duplicate_id` (index unique). */
   merges: Map<string, MergeRecord>;
   children: FakeChild[];
   conflicts: ConflictRow[];
+  outbox: FakeOutboxRow[];
   /** Déclencheur d'échec injecté sur `insertMerge` (test de rollback). */
   failInsertMerge: boolean;
 }
@@ -81,6 +105,7 @@ function createState(): FakeState {
     merges: new Map(),
     children: [],
     conflicts: [],
+    outbox: [],
     failInsertMerge: false,
   };
 }
@@ -91,6 +116,7 @@ function snapshot(state: FakeState) {
     merges: new Map([...state.merges].map(([key, row]) => [key, { ...row }])),
     children: state.children.map((child) => ({ ...child })),
     conflicts: state.conflicts.map((row) => ({ ...row })),
+    outbox: state.outbox.map((row) => ({ ...row })),
     failInsertMerge: state.failInsertMerge,
   };
 }
@@ -100,6 +126,7 @@ function restore(state: FakeState, snap: ReturnType<typeof snapshot>): void {
   state.merges = snap.merges;
   state.children = snap.children;
   state.conflicts = snap.conflicts;
+  state.outbox = snap.outbox;
   state.failInsertMerge = snap.failInsertMerge;
 }
 
@@ -185,6 +212,15 @@ function createFakeTx(state: FakeState): MergeTx {
     async tombstonePatient(id, at) {
       const row = state.patients.get(id);
       if (row !== undefined) row.deletedAt = at;
+    },
+    // Correctif 4 : seules les lignes `pending` de (table, rowId) passent à
+    // `sent` — exactement le contrat du repo Drizzle.
+    async purgeOutboxFor(table, rowId) {
+      for (const row of state.outbox) {
+        if (row.table === table && row.rowId === rowId && row.status === "pending") {
+          row.status = "sent";
+        }
+      }
     },
     conflicts: createFakeConflictRepo(state),
   };
@@ -344,6 +380,64 @@ describe("evaluateDuplicate — identifiants natifs et garde-fou (D-5)", () => {
     expect(evaluateDuplicate(candidate, existing, T0).action).toBe("merge");
   });
 
+  /* Correctif 1 — garde-fou MULTI-CABINET (le plus important). */
+
+  it("homonymes, même naissance, MÊME identifiant mais cabinets DIFFÉRENTS → review `cross-clinic`", () => {
+    const existing = makeCandidate({ id: "p-same", clinicId: "clinic-alpha" });
+    const candidate = makeCandidate({ id: "p-same", clinicId: "clinic-beta" });
+
+    const decision = evaluateDuplicate(candidate, existing, T0);
+
+    // Tout le reste est identique (id, nom, naissance, e-mail) : sans le
+    // garde-fou, ces deux patients de cabinets distincts seraient FUSIONNÉS.
+    expect(decision.action).toBe("review");
+    if (decision.action !== "review") return;
+    expect(decision.reason).toBe("cross-clinic");
+  });
+
+  it("e-mail commun + cabinets différents → jamais `merge` (échec fermé)", () => {
+    const existing = makeCandidate({ id: "p-1", clinicId: "clinic-alpha" });
+    const candidate = makeCandidate({ id: "p-2", clinicId: "clinic-beta" });
+
+    const decision = evaluateDuplicate(candidate, existing, T0);
+
+    expect(decision.action).toBe("review");
+    if (decision.action !== "review") return;
+    expect(decision.reason).toBe("cross-clinic");
+  });
+
+  it("clinicId ABSENT d'un côté → review (échec fermé, jamais « même cabinet »)", () => {
+    const existing = makeCandidate({ id: "p-same", clinicId: "clinic-alpha" });
+
+    for (const absent of [null, "", "   "]) {
+      const candidate = makeCandidate({ id: "p-same", clinicId: absent });
+      const decision = evaluateDuplicate(candidate, existing, T0);
+      expect(decision.action).toBe("review");
+      if (decision.action !== "review") continue;
+      expect(decision.reason).toBe("cross-clinic");
+    }
+
+    // Symétrique : c'est le côté EXISTANT qui manque de cabinet.
+    const orphan = makeCandidate({ id: "p-same", clinicId: null });
+    const kept = makeCandidate({ id: "p-same", clinicId: "clinic-alpha" });
+    expect(evaluateDuplicate(orphan, kept, T0)).toEqual({
+      action: "review",
+      reason: "cross-clinic",
+    });
+  });
+
+  it("le garde-fou multi-cabinet s'applique AVANT l'identifiant natif", () => {
+    const existing = makeCandidate({ id: "p-1", email: "a@exemple.dz", clinicId: "clinic-alpha" });
+    const candidate = makeCandidate({ id: "p-2", email: "b@exemple.dz", clinicId: "clinic-beta" });
+
+    // Aucun identifiant commun (→ `none` en temps normal) : la frontière de
+    // tenant prime et reste vérifiable côté revue.
+    expect(evaluateDuplicate(candidate, existing, T0)).toEqual({
+      action: "review",
+      reason: "cross-clinic",
+    });
+  });
+
   it("ligne créée dans le futur (horloge de poste fausse) → review", () => {
     const existing = makeCandidate({ id: "p-1", createdAt: new Date("2026-07-01T00:00:00.000Z") });
     const candidate = makeCandidate({ id: "p-2" });
@@ -464,6 +558,12 @@ describe("mergeDuplicatePatients — fusion D-5 transactionnelle", () => {
     const state = createState();
     const { canonical, duplicate } = seedPair(state);
     state.children.push({ table: "appointment", id: "ap-1", patientId: duplicate.id });
+    state.outbox.push({
+      id: "op-1",
+      table: "patient",
+      rowId: duplicate.id,
+      status: "pending",
+    });
     state.failInsertMerge = true;
 
     await expect(
@@ -474,11 +574,13 @@ describe("mergeDuplicatePatients — fusion D-5 transactionnelle", () => {
       }),
     ).rejects.toThrow(/sync_merge/);
 
-    // Ni réorientation, ni tombstone, ni trace : la transaction a tout annulé.
+    // Ni réorientation, ni tombstone, ni trace, ni purge d'outbox : la
+    // transaction a tout annulé (la purge est bien DANS cette transaction).
     expect(state.children[0]?.patientId).toBe(duplicate.id);
     expect(state.patients.get(duplicate.id)?.deletedAt).toBeNull();
     expect(state.merges.size).toBe(0);
     expect(state.conflicts).toHaveLength(0);
+    expect(state.outbox[0]?.status).toBe("pending");
   });
 
   it("garde-fou en échec → `review` + entrée de revue, AUCUNE écriture de fusion", async () => {
@@ -500,12 +602,14 @@ describe("mergeDuplicatePatients — fusion D-5 transactionnelle", () => {
     expect(state.merges.size).toBe(0);
     expect(state.patients.get(duplicate.id)?.deletedAt).toBeNull();
     expect(state.children[0]?.patientId).toBe(duplicate.id);
-    // La revue est bien journalisée dans `sync_conflict` (file D-4).
+    // La revue est bien journalisée dans `sync_conflict` (file D-4), sous une
+    // clé `rowId` namespacée (correctif 3) : elle ne peut pas entrer en
+    // collision avec un conflit push du même patient.
     expect(state.conflicts).toHaveLength(1);
     expect(state.conflicts[0]).toMatchObject({
       id: review.reviewId,
       table: "patient",
-      rowId: duplicate.id,
+      rowId: `${MERGE_REVIEW_PREFIX}${duplicate.id}`,
       resolvedAt: null,
     });
     expect(state.conflicts[0]?.reason?.startsWith(MERGE_REVIEW_PREFIX)).toBe(true);
@@ -577,6 +681,65 @@ describe("mergeDuplicatePatients — fusion D-5 transactionnelle", () => {
     expect(result).toEqual({ status: "not-found", missing: ["p-fantome"] });
   });
 
+  /* Correctif 1 — garde-fou multi-cabinet au niveau transactionnel. */
+
+  it("cabinets DIFFÉRENTS → `review` `cross-clinic`, AUCUNE écriture de fusion", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state, { duplicate: { clinicId: "clinic-2" } });
+    state.children.push({ table: "appointment", id: "ap-1", patientId: duplicate.id });
+    state.outbox.push({ id: "op-1", table: "patient", rowId: duplicate.id, status: "pending" });
+
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    const review = expectStatus(result, "review");
+    expect(review.reason).toBe("cross-clinic");
+    // Rien n'est réorienté, tombstoné, tracé ni purgé.
+    expect(state.children[0]?.patientId).toBe(duplicate.id);
+    expect(state.patients.get(duplicate.id)?.deletedAt).toBeNull();
+    expect(state.merges.size).toBe(0);
+    expect(state.outbox[0]?.status).toBe("pending");
+    expect(state.conflicts).toHaveLength(1);
+    expect(state.conflicts[0]).toMatchObject({
+      table: "patient",
+      rowId: `${MERGE_REVIEW_PREFIX}${duplicate.id}`,
+    });
+  });
+
+  /* Correctif 4 — purge de l'outbox du doublon. */
+
+  it("outbox `pending` du doublon traitée, celle du canonique INTACTE", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state);
+    state.outbox.push(
+      // Doublon : une opération à pousser → traitée (jamais réanimée).
+      { id: "op-1", table: "patient", rowId: duplicate.id, status: "pending" },
+      // Déjà `failed` : `pendingBatch` ne lit que `pending` → jamais rétrogradée.
+      { id: "op-2", table: "patient", rowId: duplicate.id, status: "failed" },
+      // Autre table du doublon : hors périmètre de `purgeOutboxFor`.
+      { id: "op-3", table: "appointment", rowId: "ap-9", status: "pending" },
+      // Canonique : INTACT.
+      { id: "op-4", table: "patient", rowId: canonical.id, status: "pending" },
+    );
+
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    expectStatus(result, "merged");
+    expect(state.outbox.map((row) => row.status)).toEqual([
+      "sent",
+      "failed",
+      "pending",
+      "pending",
+    ]);
+  });
+
   it("params invalides (horloge caduque) → rejet Zod", async () => {
     const state = createState();
     await expect(
@@ -586,6 +749,185 @@ describe("mergeDuplicatePatients — fusion D-5 transactionnelle", () => {
         now: new Date(Number.NaN),
       }),
     ).rejects.toThrow();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 2bis. Correctif 2 — chaînage de fusion borné (point fixe + cycle)           */
+/* -------------------------------------------------------------------------- */
+
+describe("mergeDuplicatePatients — chaînage borné jusqu'au point fixe", () => {
+  /** Trace d'une fusion antérieure (`sync_merge`, clé = `duplicate_id`). */
+  function seedMerge(state: FakeState, duplicateId: string, canonicalId: string, tag: string): void {
+    state.merges.set(duplicateId, {
+      id: `m-${tag}`,
+      canonicalId,
+      duplicateId,
+      reason: "fusion antérieure",
+      mergedAt: new Date("2026-05-02T00:00:00.000Z"),
+    });
+  }
+
+  it("chaîne A→B, B→C : un merge VISANT A aboutit au point fixe C", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state);
+    addPatient(state, makeCandidate({ id: "p-c" }));
+    // A (le canonique pressenti) a été fusionné dans B, B dans C.
+    seedMerge(state, canonical.id, "p-b", "a");
+    seedMerge(state, "p-b", "p-c", "b");
+    state.children.push({ table: "appointment", id: "ap-1", patientId: duplicate.id });
+
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    const merged = expectStatus(result, "merged");
+    // Point fixe atteint : JAMAIS le tombstone B, jamais A (lui-même fusionné).
+    expect(merged.canonicalId).toBe("p-c");
+    expect(state.merges.get(duplicate.id)).toMatchObject({
+      canonicalId: "p-c",
+      duplicateId: duplicate.id,
+    });
+    expect(state.children[0]?.patientId).toBe("p-c");
+    expect(state.patients.get(duplicate.id)?.deletedAt).toEqual(T0);
+  });
+
+  it("cycle A→B, B→A → `review` (échec fermé, AUCUNE boucle infinie)", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state);
+    seedMerge(state, canonical.id, "p-b", "a");
+    seedMerge(state, "p-b", canonical.id, "b");
+
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    const review = expectStatus(result, "review");
+    expect(review.reason).toContain("cycle");
+    // Les traces antérieures sont intactes, le doublon ni réorienté ni
+    // tombstoné : seule une revue humaine est ouverte.
+    expect(state.merges.size).toBe(2);
+    expect(state.patients.get(duplicate.id)?.deletedAt).toBeNull();
+    expect(state.conflicts).toHaveLength(1);
+    expect(state.conflicts[0]?.rowId).toBe(`${MERGE_REVIEW_PREFIX}${duplicate.id}`);
+  });
+
+  it(`chaîne plus longue que la borne (${MERGE_CHAIN_MAX_HOPS}) → \`review\``, async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state);
+    // A → ch-1 → … → ch-11 : 11 redirects > borne de 10 → point fixe NON prouvé.
+    let from = canonical.id;
+    for (let hop = 1; hop <= MERGE_CHAIN_MAX_HOPS + 1; hop += 1) {
+      const to = `ch-${hop}`;
+      seedMerge(state, from, to, `${hop}`);
+      from = to;
+    }
+
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    const review = expectStatus(result, "review");
+    expect(review.reason).toContain("borne");
+    expect(state.merges.size).toBe(MERGE_CHAIN_MAX_HOPS + 1);
+    expect(state.patients.get(duplicate.id)?.deletedAt).toBeNull();
+  });
+
+  it("aucun chaînage (le canonique pressenti est déjà le point fixe) → fusion normale", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state);
+    // Aucune trace : le canonique pressenti est déjà le point fixe.
+    const result = await mergeDuplicatePatients(createFakeRepo(state), {
+      candidateId: duplicate.id,
+      existingId: canonical.id,
+      now: T0,
+    });
+
+    const merged = expectStatus(result, "merged");
+    expect(merged.canonicalId).toBe(canonical.id);
+    expect(state.conflicts).toHaveLength(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 2ter. Correctif 3 — clé de revue namespacée                                 */
+/* -------------------------------------------------------------------------- */
+
+describe("mergeDuplicatePatients — revue et conflits push ne se marchent pas dessus", () => {
+  const PUSH_ENTRY = { table: "patient" as const, reason: "base-rev-mismatch" };
+
+  it("un conflit push non résolu déjà présent N'ABSORBE PAS la revue de fusion", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state, { duplicate: { firstName: "Autre" } });
+
+    // Conflit push D-4 déjà journalisé sur `patient/<doublon>` (même poste,
+    // `device_id` absent) — sans namespace, la revue D-5 serait dédoublonnée
+    // sur CETTE ligne et ne serait jamais écrite.
+    const pushed = await recordPushConflicts(
+      createFakeConflictRepo(state),
+      [{ ...PUSH_ENTRY, rowId: duplicate.id }],
+      T0,
+    );
+    expect(pushed).toBe(1);
+
+    const review = expectStatus(
+      await mergeDuplicatePatients(createFakeRepo(state), {
+        candidateId: duplicate.id,
+        existingId: canonical.id,
+        now: T0,
+      }),
+      "review",
+    );
+
+    // Les deux entrées COEXISTENT.
+    expect(state.conflicts).toHaveLength(2);
+    expect(review.reviewId).not.toBe(state.conflicts[0]?.id);
+    const reviewRow = state.conflicts.find((row) => row.id === review.reviewId);
+    expect(reviewRow?.rowId).toBe(`${MERGE_REVIEW_PREFIX}${duplicate.id}`);
+    expect(reviewRow?.reason?.startsWith(MERGE_REVIEW_PREFIX)).toBe(true);
+
+    // La file de revue ne montre QUE la fusion, avec l'id du doublon brut.
+    const pending = await listPendingMerges(createFakeRepo(state));
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.id).toBe(review.reviewId);
+    expect(pending[0]?.candidateId).toBe(duplicate.id);
+  });
+
+  it("la revue de fusion déjà présente N'ABSORBE PAS un conflit push ultérieur", async () => {
+    const state = createState();
+    const { canonical, duplicate } = seedPair(state, { duplicate: { firstName: "Autre" } });
+    const repo = createFakeRepo(state);
+
+    const review = expectStatus(
+      await mergeDuplicatePatients(repo, {
+        candidateId: duplicate.id,
+        existingId: canonical.id,
+        now: T0,
+      }),
+      "review",
+    );
+    expect(review.reviewId.length).toBeGreaterThan(0);
+
+    // Même patient, même minute, même `device_id` (absent) : le conflit push
+    // serait dédoublonné sur la revue si le `row_id` n'était pas namespacé.
+    const pushed = await recordPushConflicts(
+      createFakeConflictRepo(state),
+      [{ ...PUSH_ENTRY, rowId: duplicate.id }],
+      T0,
+    );
+
+    expect(pushed).toBe(1);
+    expect(state.conflicts).toHaveLength(2);
+    expect(
+      state.conflicts.filter((row) => row.reason?.startsWith(MERGE_REVIEW_PREFIX)),
+    ).toHaveLength(1);
+    expect(state.conflicts.filter((row) => row.rowId === duplicate.id)).toHaveLength(1);
   });
 });
 

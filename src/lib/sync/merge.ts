@@ -22,6 +22,12 @@
  *    - garde-fou KO → `review` (revue humaine) ;
  * 3. **Horloge** : une ligne datée **dans le futur** (poste désynchronisé)
  *    → `review` plutôt qu'une fusion décidée sur une chronologie fausse.
+ * 4. **Garde-fou multi-cabinet (VÉRIFIÉ EN PREMIER)** : si les deux lignes
+ *    n'appartiennent pas au **même** cabinet (`clinicId` différent, ou
+ *    `clinicId` absent/vidé sur l'une des deux lignes) → `review` avec le
+ *    jeton stable **`cross-clinic`**. **Jamais** `merge` entre deux tenants :
+ *    fusionner deux homonymes de cabinets distincts serait une erreur
+ *    médicale **et** une violation du multi-tenant (échec fermé).
  *
  * ⚠️ Le numéro de téléphone **ne déclenche jamais** une fusion : deux personnes
  * distinctes peuvent le partager (numéro familial, cabinet, réemployé).
@@ -47,10 +53,33 @@
  * central applique **sa propre** décision D-5 de son côté ; `sync_merge` sert
  * de trace locale consultable (`listPendingMerges` / `resolveMerge`), pas de
  * protocole. Corollaires assumés :
- *  - une opération `sync_outbox` encore `pending` sur le doublon n'est pas
- *    purgée ici (hors périmètre 6.2) : le central la rejettera proprement ;
+ *  - la `sync_outbox` **pending** du doublon est **purgée dans la transaction
+ *    de fusion** (`purgeOutboxFor`) : un push ultérieur réanimerait un patient
+ *    tombstoné — le central rejetterait proprement, mais au prix d'un bruit et
+ *    d'un échec inutiles ;
  *  - la réconciliation des enfants est locale ; le central rafraîchit son état
  *    par ses propres tirages.
+ *
+ * ## Correctifs post-revue (4)
+ *
+ * 1. **Multi-cabinet** — `evaluateDuplicate` compare `clinicId` **avant toute
+ *    autre chose** : cliniques différentes **ou** `clinicId` absent d'un côté →
+ *    `review` (`cross-clinic`), **jamais** `merge` ;
+ * 2. **Chaînage de fusion borné** — `getMerge` est bouclé **jusqu'au point
+ *    fixe**, borné à `MERGE_CHAIN_MAX_HOPS` (10) avec détection de cycle. Un
+ *    cycle (A→B→A) ou le dépassement de la borne renvoient `review` (échec
+ *    fermé) : on ne choisit **jamais** un canonique dont la terminaison n'est
+ *    pas prouvée — un tombstone ne doit jamais devenir canonique ;
+ * 3. **Clé de revue namespacée** — l'entrée est écrite sous
+ *    `rowId = "merge-review:<candidateId>"` : la clé de dédoublonnage de
+ *    `journalConflict` est `(table, row_id, device_id)`, donc un conflit push
+ *    D-4 non résolu sur `patient/<id>` ne peut plus absorber la revue de fusion
+ *    du même patient (et inversement) ;
+ * 4. **Purge de l'outbox du doublon** — `purgeOutboxFor(table, rowId)` marque
+ *    les lignes `pending` du doublon comme `sent` **dans la même transaction**
+ *    (opération ajoutée à `MergeTx`/`MergeRepo` : aucune dépendance vers
+ *    `outbox.ts`, règle A5 d'anti-boucle). L'outbox du **canonique** reste
+ *    intact.
  *
  * ## Revue humaine (D-5 → D-4)
  *
@@ -66,7 +95,7 @@
  */
 
 import { z } from "zod";
-import { eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { AnyPgTable } from "drizzle-orm/pg-core";
 import {
   appointments,
@@ -83,6 +112,7 @@ import {
   quotes,
   radiographs,
   syncMerges,
+  syncOutbox,
   treatmentPlans,
   waitingRoomEntries,
 } from "@/lib/db/schema";
@@ -107,16 +137,30 @@ export const MERGE_REVIEW_PREFIX = "merge-review:";
 /** Tolérance d'horloge (postes hors-ligne rarement synchronisés) : 60 s. */
 export const MERGE_CLOCK_TOLERANCE_MS = 60_000;
 
+/**
+ * Borne du chaînage `getMerge` (correctif 2) : nombre maximal de redirects
+ * suivis jusqu'au point fixe. Au-delà → `review` (échec fermé).
+ */
+export const MERGE_CHAIN_MAX_HOPS = 10;
+
 /** Motifs D-5 — stables : ils deviennent `sync_merge.reason` et la file de revue. */
 const D5_REASON = {
   noNative: "d5 : aucun identifiant natif commun (le téléphone n'en est jamais un)",
   mergeId: "d5-id : identifiant natif « id » commun + garde-fou nom/prénom/naissance respecté",
   mergeEmail: "d5-email : adresse e-mail commune + garde-fou nom/prénom/naissance respecté",
+  /**
+   * Jeton **stable imposé** (garde-fou multi-cabinet) : recouvre les deux cas
+   * d'échec fermé — cabinets différents **et** `clinicId` absent d'un côté.
+   * Jamais de `merge` entre deux tenants.
+   */
+  crossClinic: "cross-clinic",
   guardNameMissing: "d5-garde-fou : nom ou prénom manquant",
   guardNameDiffers: "d5-garde-fou : nom ou prénom différent",
   guardDobMissing: "d5-garde-fou : date de naissance absente",
   guardDobDiffers: "d5-garde-fou : date de naissance différente",
   clockSkew: "d5-horloge : ligne créée après l'horloge du poste — fusion différée à la revue",
+  chainCycle: "d5-chaîne : cycle de fusions détecté (A→B→A) — point fixe jamais atteint",
+  chainTooLong: `d5-chaîne : chaîne de fusions dépassant la borne de ${MERGE_CHAIN_MAX_HOPS} redirects`,
   selfMerge: "d5 : même identifiant — aucune réorientation nécessaire",
 } as const;
 
@@ -127,7 +171,12 @@ const D5_REASON = {
 /** Ligne patient réduite aux champs de la décision D-5 (lecture seule). */
 export interface PatientCandidate {
   id: string;
-  clinicId: string;
+  /**
+   * Cabinet propriétaire (multi-tenant). Le schéma le rend `NOT NULL`, mais le
+   * type reste `string | null` : un `clinicId` **absent** est traité en
+   * **échec fermé** (`review` / `cross-clinic`), jamais comme « même cabinet ».
+   */
+  clinicId: string | null;
   firstName: string;
   lastName: string;
   dateOfBirth: Date | null;
@@ -165,7 +214,10 @@ export type NewMergeRecord = Omit<MergeRecord, "reason"> & { reason: string };
 export interface PendingMerge {
   /** `sync_conflict.id` — identifiant rendu à `resolveMerge`. */
   id: string;
-  /** Doublon pressenti (`row_id` de l'entrée). */
+  /**
+   * Doublon pressenti — `row_id` **dé-namespacé** : la clé stockée est
+   * `merge-review:<candidateId>` (correctif 3), le préfixe est retiré ici.
+   */
   candidateId: string;
   /** Ligne existante / canonique pressenti (`winning.id`, `""` si illisible). */
   canonicalId: string;
@@ -213,6 +265,15 @@ export interface MergeTx {
   repointChildren(fromId: string, toId: string): Promise<RepointReport>;
   /** Pose le tombstone du doublon (`deleted_at`). */
   tombstonePatient(id: string, at: Date): Promise<void>;
+  /**
+   * Purge l'outbox du doublon (correctif 4) : marque les lignes **`pending`**
+   * de `(table, rowId)` comme `sent` — elles ne seront donc plus poussées et
+   * ne réanimeront pas un patient tombstoné. `sent`/`failed` intacts.
+   *
+   * Opération **dédiée au repo** : `merge.ts` n'importe jamais `outbox.ts`
+   * (règle A5 d'anti-boucle). Exécutée **dans la transaction de la fusion**.
+   */
+  purgeOutboxFor(table: string, rowId: string): Promise<void>;
   /** Journal `sync_conflict` — file de revue des fusions refusées (D-4). */
   conflicts: ConflictRepo;
 }
@@ -315,7 +376,17 @@ export function chooseCanonical(
 }
 
 /**
- * Décision **pure** D-5 (aucune I/O) : identifiant natif → garde-fou → horloge.
+ * Cabinet normalisé : `null` = **absent** (échec fermé, jamais « même
+ * cabinet »). Une chaîne vide ou blanche est considérée comme absente.
+ */
+function clinicKey(clinicId: string | null | undefined): string | null {
+  const trimmed = (clinicId ?? "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Décision **pure** D-5 (aucune I/O) : multi-cabinet → identifiant natif →
+ * garde-fou → horloge.
  *
  * @param candidate doublon pressenti (lignée entrante)
  * @param existing  ligne déjà présente
@@ -328,6 +399,16 @@ export function evaluateDuplicate(
 ): MergeDecision {
   if (!Number.isFinite(now.getTime())) {
     throw new Error("sync/merge : horloge `now` caduque (Date invalide).");
+  }
+
+  /* 0 — garde-fou MULTI-CABINET, vérifié EN PREMIER : la frontière de tenant
+   * prime sur toute autre considération. Cliniques différentes **ou**
+   * `clinicId` absent d'un côté → `review` (`cross-clinic`) : JAMAIS `merge`
+   * entre deux cabinets (erreur médicale + violation du multi-tenant). */
+  const candidateClinic = clinicKey(candidate.clinicId);
+  const existingClinic = clinicKey(existing.clinicId);
+  if (candidateClinic === null || existingClinic === null || candidateClinic !== existingClinic) {
+    return { action: "review", reason: D5_REASON.crossClinic };
   }
 
   /* 1 — identifiant natif : `id` (UUID partagé) ou `email`. `phone` IGNORE. */
@@ -372,7 +453,11 @@ async function recordReview(
 ): Promise<string> {
   const entry: ConflictEntry = {
     table: PATIENT_TABLE,
-    rowId: candidate.id,
+    // Clé **namespacée** (correctif 3) : la clé de dédoublonnage de
+    // `journalConflict` est `(table, row_id, device_id)`. Sous
+    // `merge-review:<candidateId>`, la revue D-5 ne peut plus absorber — ni
+    // être absorbée par — un conflit push D-4 déposé sur `patient/<id>`.
+    rowId: `${MERGE_REVIEW_PREFIX}${candidate.id}`,
     // L'identité du dossier ne dépend pas du poste : la paire (canonique,
     // doublon) porte la revue, `deviceId` reste absent pour dédupliquer
     // quel que soit le poste qui remonte le refus.
@@ -389,9 +474,9 @@ async function recordReview(
 }
 
 /**
- * Applique une fusion D-5 : décision (garde-fou inclus) → réorientation des
- * enfants → tombstone du doublon → trace `sync_merge`, **dans une seule
- * transaction**.
+ * Applique une fusion D-5 : décision (garde-fou multi-cabinet inclus) →
+ * réorientation des enfants → tombstone du doublon → purge de l'outbox du
+ * doublon → trace `sync_merge`, **dans une seule transaction**.
  *
  * Idempotent : un second appel détecte `uq_sync_merge_duplicate_id` et renvoie
  * `already-merged` sans rien réécrire. Jamais de push (voir en-tête).
@@ -444,15 +529,63 @@ export async function mergeDuplicatePatients(
       };
     }
 
-    // Chaînage d'un niveau : le canonique pressenti a lui-même été fusionné —
-    // on suit la trace pour ne pas recréer un orphelin pointant un tombstone.
-    const root = await tx.getMerge(canonicalId);
-    if (root !== null) {
+    // Chaînage jusqu'au POINT FIXE (correctif 2) : le canonique pressenti a
+    // lui-même pu être fusionné (A→B puis B→C). On suit la trace de génération
+    // en génération pour ne jamais recréer un orphelin pointant un tombstone,
+    // avec BORNE (`MERGE_CHAIN_MAX_HOPS`) et DÉTECTEUR DE CYCLE : sur cycle ou
+    // dépassement, échec fermé → `review` (on ne choisit jamais un canonique
+    // dont la terminaison n'est pas prouvée).
+    // `duplicateId` fait partie des ids vus : une chaîne qui y ramènerait
+    // (X→doublon) ferait du doublon lui-même son propre canonique — état
+    // corrompu, donc `review`.
+    const seen = new Set<string>([canonicalId, duplicateId]);
+    let hops = 0;
+    for (;;) {
+      const root = await tx.getMerge(canonicalId);
+      if (root === null) break;
+      // Cycle : un id déjà vu réapparaît (A→B→A) — le point fixe n'existe pas.
+      if (seen.has(root.canonicalId)) {
+        const reviewId = await recordReview(
+          tx,
+          candidate,
+          existing,
+          D5_REASON.chainCycle,
+          parsed.now,
+        );
+        return {
+          status: "review" as const,
+          candidateId: parsed.candidateId,
+          existingId: parsed.existingId,
+          reason: D5_REASON.chainCycle,
+          reviewId,
+        };
+      }
+      if (hops >= MERGE_CHAIN_MAX_HOPS) {
+        const reviewId = await recordReview(
+          tx,
+          candidate,
+          existing,
+          D5_REASON.chainTooLong,
+          parsed.now,
+        );
+        return {
+          status: "review" as const,
+          candidateId: parsed.candidateId,
+          existingId: parsed.existingId,
+          reason: D5_REASON.chainTooLong,
+          reviewId,
+        };
+      }
+      seen.add(root.canonicalId);
       canonicalId = root.canonicalId;
+      hops += 1;
     }
 
     const children = await tx.repointChildren(duplicateId, canonicalId);
     await tx.tombstonePatient(duplicateId, parsed.now);
+    // Correctif 4 : l'outbox **pending** du doublon ne doit plus être poussée
+    // (elle réanimerait un patient tombstoné) — même transaction que la fusion.
+    await tx.purgeOutboxFor(PATIENT_TABLE, duplicateId);
 
     const mergeId = crypto.randomUUID();
     await tx.insertMerge({
@@ -478,6 +611,17 @@ export async function mergeDuplicatePatients(
 /* 7. Revue humaine                                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Retire la clé de namespace `merge-review:` du `row_id` (correctif 3) :
+ * `merge-review:p-X` → `p-X`. Une ligne héritée **sans** préfixe est renvoyée
+ * telle quelle (rétro-compatibilité de la file).
+ */
+function stripReviewNamespace(rawRowId: string): string {
+  return rawRowId.startsWith(MERGE_REVIEW_PREFIX)
+    ? rawRowId.slice(MERGE_REVIEW_PREFIX.length)
+    : rawRowId;
+}
+
 function toPendingMerge(row: {
   id: string;
   rowId: string;
@@ -489,7 +633,7 @@ function toPendingMerge(row: {
   const winningId = row.winning?.id;
   return {
     id: row.id,
-    candidateId: row.rowId,
+    candidateId: stripReviewNamespace(row.rowId),
     canonicalId: typeof winningId === "string" ? winningId : "",
     reason: raw.startsWith(MERGE_REVIEW_PREFIX) ? raw.slice(MERGE_REVIEW_PREFIX.length) : raw,
     decidedAt: row.decidedAt,
@@ -699,6 +843,25 @@ function createMergeTx(tx: MergeTxDb): MergeTx {
         .update(patients)
         .set({ deletedAt: at, updatedAt: at })
         .where(eq(patients.id, id));
+    },
+
+    /**
+     * Correctif 4 : les lignes `pending` de l'outbox du doublon deviennent
+     * `sent` — elles ne seront plus reprises par `pendingBatch` (qui ne lit
+     * que `status = 'pending'`) et ne réanimeront donc pas le tombstone.
+     * `sent` / `failed` existants sont laissés intacts (pas de rétrogradation).
+     */
+    async purgeOutboxFor(table, rowId) {
+      await tx
+        .update(syncOutbox)
+        .set({ status: "sent" })
+        .where(
+          and(
+            eq(syncOutbox.tableName, table),
+            eq(syncOutbox.rowId, rowId),
+            eq(syncOutbox.status, "pending"),
+          ),
+        );
     },
 
     conflicts: createConflictsDbRepo(tx),
