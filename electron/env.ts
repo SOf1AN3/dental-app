@@ -1026,14 +1026,50 @@ export function resolveDeviceId(): string {
  * que `resolveDevAuthSecret`). Une valeur **malformée est refusée** : la
  * laisser passer désactiverait silencieusement le contrôle (fail-open).
  */
+/**
+ * URL du serveur central, résolue dans cet ordre de priorité :
+ *  1. `process.env.SYNC_BASE_URL` (surcharge explicite, tout mode) ;
+ *  2. **mode dev** : `.env` / `.env.local` du projet ;
+ *  3. **mode prod (application installée)** : `desktop-config.json` livré à
+ *     côté du serveur standalone (`<resources>/desktop-config.json`).
+ *
+ * Le 3ᵉ niveau est INDISPENSABLE : l'installateur ne ship aucun `.env` (cela
+ * sortirait des secrets du client), donc sans ce fichier l'application ne
+ * connaîtrait jamais son serveur central — pas de jeton, pas d'amorçage, pas
+ * de login sur une machine neuve.
+ */
+function readPackagedDesktopConfig(): Record<string, unknown> | undefined {
+  const candidates: string[] = []
+  if (typeof process.resourcesPath === 'string' && process.resourcesPath !== '') {
+    candidates.push(path.join(process.resourcesPath, 'desktop-config.json'))
+  }
+  candidates.push(path.join(process.cwd(), 'desktop-config.json'))
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue
+      const parsed: unknown = JSON.parse(readFileSync(candidate, 'utf8'))
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // Fichier absent ou illisible : on essaie le candidat suivant, puis on
+      // laisse `resolveSyncBaseUrl` conclure « absente » (fail-closed).
+    }
+  }
+  return undefined
+}
+
 function resolveSyncBaseUrl(mode: DbMode): string | undefined {
   const fromProcess = process.env.SYNC_BASE_URL
+  const fromFile = readPackagedDesktopConfig()?.['syncBaseUrl']
   const raw =
     fromProcess !== undefined && fromProcess !== ''
       ? fromProcess
-      : mode === 'dev'
-        ? readDotEnvFile()['SYNC_BASE_URL']
-        : undefined
+      : typeof fromFile === 'string' && fromFile !== ''
+        ? fromFile
+        : mode === 'dev'
+          ? readDotEnvFile()['SYNC_BASE_URL']
+          : undefined
   if (raw === undefined || raw === '') {
     return undefined
   }

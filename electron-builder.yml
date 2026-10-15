@@ -6,6 +6,12 @@
 appId: com.dentalcare.desktop
 productName: DentalCare
 
+# Nom d'artefact STABLE (sans version) : le lien de téléchargement de la landing
+# (`releases/latest/download/DentalCare-Setup.exe`) reste valide à chaque
+# nouvelle version. electron-builder insère la version dans le nom par défaut
+# (`DentalCare Setup 0.1.0.exe`), ce qui casserait le lien à chaque release.
+artifactName: "DentalCare-Setup.${ext}"
+
 directories:
   # `build/` : ressources de build (icône `build/icon.ico`).
   buildResources: build
@@ -83,6 +89,14 @@ extraResources:
   # `migrationFolderCandidates()` (`electron/db/migrate.ts`).
   - from: dist-desktop/drizzle
     to: drizzle
+  # Configuration du poste (URL du serveur central) — lue par
+  # `resolveSyncBaseUrl()` (`electron/env.ts`) en mode application installée.
+  # L'installateur ne ship AUCUN `.env` (sinon les secrets sortiraient avec le
+  # client) : sans ce fichier, l'app ne connaîtrait jamais son central → pas de
+  # jeton, pas d'amorçage, login impossible sur une machine neuve.
+  # Aucun secret dedans : une simple URL publique.
+  - from: desktop-config.json
+    to: desktop-config.json
 
 # --------------------------------------------------------------------------
 # Cible Windows

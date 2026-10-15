@@ -1,0 +1,16 @@
+# Artefacts locaux — jamais envoyés sur Vercel (limite 100 Mo par déploiement).
+# Les builds Electron/packaging pèsent plusieurs centaines de Mo et ne sont
+# nécessaires qu'à l'application de bureau, pas au serveur central.
+/dist/
+/dist-desktop/
+/dist-electron/
+/node_modules/
+/pgdata/
+/uploads/
+/audit/
+/.playwright-mcp/
+/.opencode/
+/*.exe
+/*.blockmap
+*.asar
+*.log
