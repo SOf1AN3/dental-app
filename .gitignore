@@ -54,6 +54,18 @@ next-env.d.ts
 # electron build artefacts
 /dist-electron/
 
+# desktop packaging artefacts (étape 9 — jamais committés)
+/dist-desktop/
+/dist/
+/release/
+*.asar
+
+# l'icône de l'application est un ASSET source : elle doit rester versionnée,
+# malgré l'ignore de `/build` ci-dessus (dossier de production Next).
+!/build/
+/build/*
+!/build/icon.ico
+
 # log files
 *.log
 

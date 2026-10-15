@@ -377,7 +377,7 @@ describe("SEC-B02 — les 6 points d'accès exigent une invitation acceptée (jo
     { file: "src/lib/auth-utils.ts", fn: "getCurrentRole" },
     { file: "src/lib/multi-tenant.ts", fn: "requireClinicAccess" },
     { file: "src/lib/actions/clinic.ts", fn: "switchClinic" },
-    { file: "proxy.ts", fn: "isValidActiveClinic" },
+    { file: "src/proxy.ts", fn: "isValidActiveClinic" },
   ];
 
   it("chaque point de contrôle refuse une invitation jamais acceptée (joinedAt non nul)", () => {

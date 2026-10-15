@@ -9,6 +9,8 @@
     "dev:desktop": "cross-env ELECTRON_DEV=1 electron-vite dev",
     "typecheck:desktop": "tsc --noEmit -p electron/tsconfig.json",
     "build": "next build",
+    "build:desktop": "cross-env NEXT_OUTPUT=standalone tsx scripts/build-desktop.ts",
+    "dist:win": "npm run build:desktop && electron-builder --win nsis --config electron-builder.yml",
     "start": "next start",
     "lint": "eslint",
     "seed": "npx tsx seed.ts",

@@ -26,6 +26,12 @@ const eslintConfig = defineConfig([
     // d'electron-vite — les lintier ferait varier le résultat selon l'ordre
     // `lint` / `build`.
     "dist-electron/**",
+    // Artefacts de packaging (étape 9) : installeur, application décompilée et
+    // serveur standalone copié — idem, jamais du code source versionné.
+    "dist/**",
+    "dist-desktop/**",
+    // Captures d'écran d'un audit visuel antérieur (non versionnées).
+    "audit/**",
   ]),
 ]);
 

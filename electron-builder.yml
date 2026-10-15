@@ -1,0 +1,118 @@
+# Configuration electron-builder — DentalCare (PLAN-ELECTRON §9, tâche 9.1).
+#
+# Chaîne : `npm run dist:win` = `build:desktop` (scripts/build-desktop.ts) puis
+# `electron-builder --win nsis --config electron-builder.yml`.
+
+appId: com.dentalcare.desktop
+productName: DentalCare
+
+directories:
+  # `build/` : ressources de build (icône `build/icon.ico`).
+  buildResources: build
+  # Sortie des installateurs → `dist/` (gitignoré).
+  output: dist
+
+# --------------------------------------------------------------------------
+# Liste blanche stricte — ce qui entre dans app.asar
+# --------------------------------------------------------------------------
+# Rien d'autre que le bundle Electron compilé, le build desktop sanitizé et le
+# manifeste. Sont ainsi **exclus de l'archive** : `src/`, `electron/`,
+# `scripts/`, `.env*`, `pgdata/` et `uploads/` (données médicales), `audit/`,
+# `*.md` — `scripts/build-desktop.ts` échoue (exit ≠ 0) si l'un d'eux figurait
+# dans `dist-desktop/`, et `.gitignore`/le dépôt ne contient pas ces secrets.
+files:
+  - dist-electron/**
+  - dist-desktop/**
+  - package.json
+# Les `node_modules` de production (`electron-log`, `embedded-postgres`,
+# `postgres`, `zod`, `drizzle-orm`, `electron-updater`, `next`, …) sont
+# collectés **automatiquement** par electron-builder depuis `package.json` +
+# lockfile (devDependencies jamais copiées) : le `main` les externalise
+# (`electron.vite.config.ts`) et doit les résoudre au runtime.
+# NB : `dist-desktop/**` est repris ici par conformité à la liste blanche ; le
+# contenu **opérationnel** (serveur Next spawné + migrations) est livré hors
+# asar via `extraResources` ci-dessous, aucun fichier sensible n'y figurant.
+
+# --------------------------------------------------------------------------
+# asar + déballage
+# --------------------------------------------------------------------------
+asar: true
+asarUnpack:
+  # `pg_ctl.exe` et les binaires PostgreSQL ne peuvent pas être **exécutés**
+  # depuis l'intérieur d'une archive asar (fs réel requis) : déballés dans
+  # `app.asar.unpacked/`. `resolvePgCtlPath()` (electron/db/embedded-pg.ts)
+  # résout `@embedded-postgres/windows-x64` via `require.resolve` depuis le
+  # bundle, donc ces paquets doivent rester en fichiers réels.
+  - '**/node_modules/embedded-postgres/**'
+  - '**/node_modules/@embedded-postgres/**'
+  # Driver postgres.js laissé hors asar : requis par `embedded-pg.ts`, cohérent
+  # avec son externalisation dans `electron.vite.config.ts`.
+  - '**/node_modules/postgres/**'
+# CHOIX DOCUMENTÉ : le dossier « app » (serveur Next standalone + `public` +
+# `.next/static` + `node_modules` épuré) **n'est pas** packagé en asar, ni même
+# déplacé via `asarUnpack` : il passe par `extraResources` (fichiers réels,
+# `<resources>/standalone/`). Un serveur spawné (`ELECTRON_RUN_AS_NODE=1 node
+# <...>/standalone/server.js`) doit résoudre `require('next')` et charger des
+# `.node` natifs (sharp) depuis le disque ; `ELECTRON_RUN_AS_NODE` + chemin asar
+# ne suffirait pas pour les binaires natifs. Vérifié contre
+# `standaloneCandidates()` (electron/server/next.ts) : le **premier** candidat
+# packagé y est `<process.resourcesPath>/standalone/server.js`.
+
+# --------------------------------------------------------------------------
+# Ressources livrées hors asar
+# --------------------------------------------------------------------------
+extraResources:
+  # Conteneur `dist-desktop/app/` copié **à la racine des resources** (`to: "."`),
+  # ce qui donne `<resources>/standalone/…` :
+  # `<resources>/standalone/server.js` = **premier** candidat de
+  # `standaloneCandidates()` (`electron/server/next.ts`).
+  #
+  # ⚠️ Piège electron-builder (out/util/filter.js) : un `node_modules` de
+  # **premier niveau** est systématiquement écarté de toute copie
+  # (`if (relative === "node_modules") return false`), y compris pour
+  # `extraResources`/`extraFiles`. Or `server.js` fait `require('next')` → sans
+  # `standalone/node_modules/next`, l'app packagée planterait au démarrage.
+  # D'où l'arborescence `app/standalone/…` produite par `build-desktop.ts` :
+  # le chemin relatif `standalone/node_modules` n'est **pas** de premier niveau
+  # et passe le filtre, et Node remonte de `<resources>/standalone/server.js`
+  # vers `<resources>/standalone/node_modules` (premier cran → trouvé).
+  - from: dist-desktop/app
+    to: "."
+  # Migrations Drizzle → `<resources>/drizzle/` :
+  # `<resources>/drizzle/meta/_journal.json` = premier candidat de
+  # `migrationFolderCandidates()` (`electron/db/migrate.ts`).
+  - from: dist-desktop/drizzle
+    to: drizzle
+
+# --------------------------------------------------------------------------
+# Cible Windows
+# --------------------------------------------------------------------------
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  # SIGNING : à configurer via env CI (certificat Q-2 en attente) —
+  # `WIN_CSC_LINK` + `WIN_CSC_KEY_PASSWORD` (ou `cscLink`/`certificateFile`).
+  # Tant que le certificat n'est pas disponible, l'installateur est signé par
+  # personne : l'auto-updater (`electron-updater`) devra être réévalué à la
+  # signature (la vérification d'intégrité s'appuie alors sur `latest.yml`).
+
+nsis:
+  # `oneClick: false` : assistant d'installation (choix du dossier, raccourci
+  # démarrer) — indispensable sur un poste de cabinet partagé.
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # ⚠️ NE JAMAIS passer à `true` : les données de santé locales
+  # (`<userData>/pgdata` = cluster PostgreSQL embarqué, `<userData>/uploads` =
+  # pièces jointes médicales) vivent **hors** du dossier d'installation, et une
+  # suppression silencieuse à la désinstallation serait une perte de données
+  # irréversible pour le cabinet. La désinstallation ne retire que les binaires.
+  deleteAppDataOnUninstall: false
+
+# `npmRebuild: false` : aucun module natif à recompiler pour l'ABI Electron —
+# `sharp`/`@img/*` sont des N-API prebuilds et PostgreSQL est livré en
+# exécutables (`@embedded-postgres/windows-x64`). Évite surtout de muter
+# `node_modules/` pendant qu'un `next dev` tourne sur le poste de développement.
+npmRebuild: false
