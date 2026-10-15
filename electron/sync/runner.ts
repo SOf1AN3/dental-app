@@ -579,7 +579,10 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
         if (
           response.status === 413 ||
           response.status === 415 ||
-          response.status === 403
+          response.status === 403 ||
+          // 400 : cle refusee par le central (segments non stricts, cle hors
+          // format) — un refus FERME, jamais une erreur de cycle.
+          response.status === 400
         ) {
           return false
         }
@@ -602,13 +605,15 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
    */
   async function runMediaStep(result: SyncCycleResult): Promise<void> {
     if (stopped || !allowsMediaStep(result)) return
-    const clinicId = deps.clinicId
-    const stored = deps.token.read()
-    if (baseUrl === undefined || clinicId === null || stored === null) return
-    const expiresAt = Date.parse(stored.expiresAt)
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
-
+    // Toute l'etape est enveloppee : `deps.token.read()` peut lever (repertoire
+    // `userData` inaccessible) et une etape best-effort ne doit jamais faire
+    // echouer le cycle ni produire un "cycle imprévu" trompeur.
     try {
+      const clinicId = deps.clinicId
+      const stored = deps.token.read()
+      if (baseUrl === undefined || clinicId === null || stored === null) return
+      const expiresAt = Date.parse(stored.expiresAt)
+      if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
       // `syncMediaOnce` ne rejette jamais : ce `catch` est un filet de sécurité.
       await syncMediaOnce(
         createMediaSyncDeps(baseUrl, clinicId, stored.token),
