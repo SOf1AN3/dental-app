@@ -31,12 +31,40 @@
 
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import EmbeddedPostgres from "embedded-postgres";
 
 const PORT = Number(process.env.DEV_DB_PORT ?? 5432);
 const DATA_DIR = process.env.DEV_DB_DATA_DIR ?? "pgdata";
 const USER = process.env.DEV_DB_USER ?? "postgres";
 const PASSWORD = process.env.DEV_DB_PASSWORD ?? "devpassword";
+
+/**
+ * Vrai si le pid désigné est réellement un serveur PostgreSQL.
+ *
+ * Un pid peut être **recyclé** par l'OS après l'arrêt brutal de PostgreSQL :
+ * `process.kill(pid, 0)` répond alors « vivant » alors que le détenteur du
+ * verrou n'existe plus. Conclure « la base est déjà utilisée » sur la seule
+ * existence du pid bloquerait le démarrage **à jamais** (cas constaté : le pid
+ * de `postmaster.pid` hébergé par un processus `node` totalement étranger).
+ * Même garde que `electron/db/embedded-pg.ts` (durcissement issu des revues).
+ *
+ * En cas de doute (outillage absent, échec de `tasklist`), on retourne `true`
+ * : on préfère refuser de démarrer plutôt que d'ouvrir deux fois un catalogue.
+ */
+function isPostgresProcess(pid: number): boolean {
+  if (process.platform !== "win32") return true;
+  try {
+    const out = execFileSync(
+      "tasklist",
+      ["/FI", `PID eq ${pid}`, "/FI", "IMAGENAME eq postgres.exe", "/FO", "CSV", "/NH"],
+      { encoding: "utf8", windowsHide: true, timeout: 5000 },
+    );
+    return out.includes("postgres.exe");
+  } catch {
+    return true;
+  }
+}
 
 /**
  * PostgreSQL refuse de démarrer sur un répertoire contenant encore un
@@ -66,6 +94,17 @@ function clearStalePidLock(dataDir: string): void {
     } catch {
       holderAlive = false;
     }
+  }
+
+  // Un pid "vivant" qui n'est PAS un postgres.exe est un pid RECYCLE par l'OS :
+  // le verrou est orphelin et doit etre supprime (cf. isPostgresProcess).
+  if (holderAlive && !isPostgresProcess(pid)) {
+    console.warn(
+      `[dev-db] Verrou orphelin : le pid ${rawPid} existe mais n'est plus un ` +
+        `postgres.exe (recyclage par l'OS) — suppression du verrou.`,
+    );
+    rmSync(pidFile, { force: true });
+    return;
   }
 
   if (holderAlive) {

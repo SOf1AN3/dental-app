@@ -153,7 +153,16 @@ function disarmAsyncExitHook(): void {
       return
     }
     if (!exitHook.hookedEvents().includes('exit')) {
-      log.info("[pg] hook 'exit' d'async-exit-hook déjà absent : rien à désarmer")
+      // DURCISSEMENT (étape 10.3) : `hookedEvents()` peut renvoyer `[]` si
+      // `createRequire` a résolu une copie DIFFÉRENTE de celle qu'`embedded-postgres`
+      // a importée (layout de node_modules non hoisté, pnpm). Auquel cas le hook
+      // fautif reste armé malgré ce message : on passe en `warn` avec
+      // l'hypothèse « instance différente » explicite plutôt qu'un `info` trompeur.
+      log.warn(
+        "[pg] hook 'exit' d'async-exit-hook déjà absent sur l'instance résolue — si createRequire " +
+          'a chargé une copie différente de celle d’embedded-postgres (layout non hoisté, pnpm), ' +
+          'le hook fautif reste armé (hypothèse « instance différente »)',
+      )
       return
     }
     const listenersBefore = process.listenerCount('exit')
@@ -554,25 +563,32 @@ function buildPostgresLogHandlers(): { onLog: (message: string) => void; onError
 /* Arrêt (gracieux d'abord, repli sur le package)                             */
 /* -------------------------------------------------------------------------- */
 
-/** Cache de résolution de `pg_ctl` : `undefined` = pas encore cherché. */
-let pgCtlPathCache: string | null | undefined
+/** Cache de résolution **réussie** de `pg_ctl` : `undefined` = pas encore résolu. */
+let pgCtlPathCache: string | undefined
 
 /**
  * Chemin absolu de `pg_ctl.exe`, résolu **exactement comme le fait le package**
  * (son `dist/binary.js` importe `@embedded-postgres/<plateforme>`) mais sans
  * import statique : la résolution est lazy et reste isolée à l'arrêt.
  * `null` = indisponible → comportement historique du package (`taskkill /F`).
+ *
+ * **DURCISSEMENT (étape 10.3)** : seuls les **succès** sont mis en cache. Un
+ * échec transitoire (antivirus en lecture de `pg_ctl.exe`, accès momentanément
+ * refusé) ne doit pas désactiver l'arrêt gracieux **définitivement** pour la vie
+ * du processus — on re-tentera à chaque arrêt (le coût d'un `resolve`+
+ * `existsSync` est négligeable, un seul par arrêt).
  */
 function resolvePgCtlPath(): string | null {
   if (pgCtlPathCache !== undefined) {
+    // Succès déjà résolu et mis en cache.
     return pgCtlPathCache
   }
-  pgCtlPathCache = null
   if (process.platform !== 'win32') {
     // Seul Windows est couvert ici : `electron.vite.config.ts` externalise
     // `@embedded-postgres/windows-x64` (les binaires des autres plateformes ne
     // sont même pas installés). Ailleurs : repli sur le package, comme avant.
-    return pgCtlPathCache
+    // Non caché (seuls les succès le sont) — le coût est nul, un seul par arrêt.
+    return null
   }
   try {
     const requireFromBundle = createRequire(bundleFilename())
@@ -582,13 +598,19 @@ function resolvePgCtlPath(): string | null {
     const candidate = path.join(path.dirname(entry), '..', 'native', 'bin', 'pg_ctl.exe')
     if (existsSync(candidate)) {
       pgCtlPathCache = candidate
-    } else {
-      log.warn(`[pg] pg_ctl introuvable (${redactSecrets(candidate)}) : arrêt gracieux indisponible`)
+      return candidate
     }
+    log.warn(
+      `[pg] pg_ctl introuvable (${redactSecrets(candidate)}) : arrêt gracieux indisponible ` +
+        '(re-tenté au prochain arrêt : échec non mis en cache)',
+    )
   } catch (error) {
-    log.error(`[pg] résolution de pg_ctl impossible : ${describeError(error)}`)
+    log.error(
+      `[pg] résolution de pg_ctl impossible : ${describeError(error)} ` +
+        '(re-tentée au prochain arrêt : échec non mis en cache)',
+    )
   }
-  return pgCtlPathCache
+  return null
 }
 
 /**
@@ -640,13 +662,48 @@ async function stopClusterWithPgCtl(config: DbConfig): Promise<boolean> {
  * `pg.stop()` tenterait un `taskkill /pid <…>` sur un **pid éventuellement
  * recyclé** (processus innocent) et attendrait indéfiniment un événement
  * `exit` qui ne viendra plus.
+ *
+ * **DURCISSEMENT (étape 10.3) — test de succès + risque de version (paquet beta)** :
+ * l'affectation d'un champ privé **n'est pas vérifiée** par défaut. Le paquet
+ * est en `beta` (`18.4.0-beta.17`) : une nouvelle version peut **renommer** ce
+ * champ, auquel cas `internals.process = undefined` créerait une propriété
+ * fantôme et laisserait le vrai champ intact — `pg.stop()` retomberait alors
+ * sur un `taskkill` de pid recyclé **silencieusement**. On retourne donc un
+ * **test de succès** (le champ est relu `undefined` après l'affectation) :
+ *  - `true`  → détachement confirmé, l'appelant peut (doit) laisser `pg.stop()`
+ *    s'exécuter (devenu no-op sûr) ;
+ *  - `false` → détachement **non confirmé** (champ renommé/lecture seule, ou
+ *    déjà absent au moment du test) : l'appelant **ne doit pas** appeler
+ *    `pg.stop()` mais confirmer l'arrêt par ses propres moyens (port /
+ *    `postmaster.pid`), au risque sinon d'un kill de pid recyclé.
+ *
+ * @returns `true` si le détachement est confirmé (`process` relu `undefined`).
  */
-function detachPackageProcessRef(pg: EmbeddedPostgresInstance): void {
+function detachPackageProcessRef(pg: EmbeddedPostgresInstance): boolean {
   const internals = pg as unknown as { process?: unknown }
-  if (internals.process !== undefined) {
-    internals.process = undefined
-    log.info('[pg] référence de processus du package effacée (enfant déjà terminé)')
+  if (internals.process === undefined) {
+    // Déjà absent : soit déjà détaché, soit le champ a été renommé (nouvelle
+    // version du paquet beta) et le vrai processus subsiste ailleurs. Impossible
+    // à distinguer ici → on retourne `false` (échec fermé) pour que l'appelant
+    // confirme l'arrêt par port/verrou plutôt que par `pg.stop()`.
+    log.warn(
+      "[pg] champ `process` du package déjà absent : détachement NON confirmé " +
+        '(champ éventuellement renommé par une version plus récente du paquet beta)',
+    )
+    return false
   }
+  internals.process = undefined
+  if (internals.process !== undefined) {
+    // Affectation sans effet : accesseur en lecture seule / champ renommé qui
+    // masque encore la valeur. On n'affirme jamais un succès silencieux.
+    log.warn(
+      "[pg] affectation du champ `process` du package sans effet : détachement NON confirmé " +
+        '(champ renommé ou lecture seule — paquet beta)',
+    )
+    return false
+  }
+  log.info('[pg] référence de processus du package effacée et confirmée (enfant déjà terminé)')
+  return true
 }
 
 /** `pg.stop()` **jamais rejetant et jamais bloquant** (attente bornée ci-dessus). */
@@ -664,22 +721,67 @@ async function stopViaPackageBounded(pg: EmbeddedPostgresInstance): Promise<bool
  * Arrêt complet du cluster `pg` : **gracieux d'abord** (`pg_ctl stop -m fast`),
  * **repli sur le package** (`taskkill /F`, comportement historique, brutal)
  * uniquement si `pg_ctl` est indisponible ou échoue **et** que le postmaster
- * est toujours vivant. Ne rejette jamais ; `true` = cluster arrêté (ou déjà
- * arrêté).
+ * est toujours vivant. Ne rejette jamais ; `true` = cluster arrêté **et confirmé**.
+ *
+ * Durcissements (étape 10.3) :
+ *  1. le repli `taskkill` vérifie **l'image** du pid (`isPostgresImage`) avant
+ *     de tuer — un pid recyclé par Windows n'est jamais tué à l'aveugle ;
+ *  2. l'arrêt n'est conclu (`true`) qu'après **confirmation réelle** (port
+ *     refusant **et/ou** `postmaster.pid` retiré) — sinon `false` pour garder
+ *     `forceStopLocalDb()` armé ;
+ *  3. `pg.stop()` n'est appelé que si le **détachement du champ `process` est
+ *     confirmé** (paquet beta) ; sinon on confirme par port/verrou.
  */
 async function stopCluster(pg: EmbeddedPostgresInstance, config: DbConfig): Promise<boolean> {
   if (await stopClusterWithPgCtl(config)) {
-    detachPackageProcessRef(pg)
-    await stopViaPackageBounded(pg)
-    return true
+    // Arrêt gracieux confirmé par pg_ctl (-w). Détachement VÉRIFIÉ (durc. 3).
+    if (detachPackageProcessRef(pg)) {
+      // Détachement confirmé : `process === undefined` → `pg.stop()` est un
+      // no-op sûr (aucun taskkill possible), il fait juste relicuer le package.
+      await stopViaPackageBounded(pg)
+      return true
+    }
+    // Détachement NON confirmé : ne PAS appeler `pg.stop()` (il tenterait un
+    // taskkill de pid éventuellement recyclé). On confirme l'arrêt par nos
+    // propres moyens (port / postmaster.pid) — durcissement 3.
+    log.warn("[pg] detach du processus du package non confirmé : pg.stop() évité, confirmation par port/verrou")
+    return await waitClusterFullyStopped(config)
   }
+
+  // Repli : pg_ctl indisponible ou échoué.
   const pid = readPostmasterPid(config.dataDir)
   if (pid === null || !isProcessAlive(pid)) {
     log.info('[pg] aucun postmaster actif : plus rien à arrêter')
     return true
   }
+
+  // DURCISSEMENT 1 : ne jamais `taskkill` un pid non identifié `postgres.exe`.
+  // Si le postmaster est mort et que Windows a recyclé le pid, tuer cet à l'aveugle
+  // détruirait un processus étranger. Fail-closed : on n'y touche pas et on ne
+  // conclut PAS à l'arrêt (`false`) — `ownedCluster` reste peuplé et
+  // `forceStopLocalDb()` reste armé : il réévaluera (même garde `isPostgresImage`)
+  // à la sortie et laissera l'étranger intact. Retourner `true` ici désarmerait
+  // prématurément le filet (durcissement 2) au cas où `tasklist` aurait échoué
+  // plutôt que le pid être réellement étranger.
+  if (process.platform === 'win32' && !isPostgresImage(pid)) {
+    log.warn(
+      `[pg] repli taskkill annulé : le pid ${pid} n'est plus identifié comme postgres.exe ` +
+        '(postmaster mort ou pid recyclé) — processus étranger laissé intact, filet forceStopLocalDb maintenu armé.',
+    )
+    return false
+  }
+
   log.warn("[pg] repli sur l'arrêt du package (taskkill /F) : arrêt brutal, récupération automatique au prochain démarrage")
-  return await stopViaPackageBounded(pg)
+  const packageStopped = await stopViaPackageBounded(pg)
+  if (!packageStopped) {
+    // Échec/explicite de `pg.stop()` : on ne conclut rien, filet maintenu armé.
+    return false
+  }
+  // DURCISSEMENT 2 : l'attente bornée ci-dessus (≤1 s) a pu renvoyer `true` alors
+  // que `taskkill` n'avait pas terminé. On CONFIRME la mort réelle (port refusant
+  // et/ou verrou retiré) avant de conclure ; sinon `false` → `ownedCluster` n'est
+  // pas vidé et `forceStopLocalDb()` reste armé.
+  return await waitClusterFullyStopped(config)
 }
 
 /* -------------------------------------------------------------------------- */
