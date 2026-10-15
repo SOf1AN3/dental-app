@@ -50,6 +50,18 @@ convergence passe par le serveur central.
 
 ## Questions / décisions en attente
 
+### Publication de la première release (2026-10-15)
+
+| Étape | Statut |
+|---|---|
+| **Serveur central déployé** | ✅ `https://dental-app-beta1.vercel.app` — routes `health/token/push/pull/blocks/media/bootstrap` **vérifiées en production** (`/api/health` → JSON, `push` GET → 405, `token` → 400 de validation) |
+| **`SYNC_BASE_URL` dans l'installateur** | ✅ `desktop-config.json` livré via `extraResources` — **indispensable** : l'installateur ne ship aucun `.env`, sans ce fichier aucune authentification possible sur machine neuve. Priorité : env > fichier > `.env` (dev) |
+| **Nom d'artefact stable** | ✅ `artifactName: "DentalCare-Setup.${ext}"` — le lien de la landing survit aux prochaines versions |
+| **Lien de téléchargement** | ✅ `src/lib/desktop.ts` → `releases/latest/download/DentalCare-Setup.exe` (déjà branché sur le bouton existant de la landing) |
+| **Push** | ✅ `a1cdc35..5eeb9a8` vers `origin/main` (dépôt **privé**) |
+| **`.vercelignore`** | ✅ ajouté — le 1ᵉʳ déploiement avait échoué (861 Mo > limite 100 Mo : `dist/`, `dist-desktop/`, `pgdata/` n'étaient pas ignorés) |
+| **Release GitHub** | ⏳ **en attente de `gh` CLI** (`winget install GitHub.cli` puis `gh auth login`) → tag `v0.1.0` + upload de l'installateur |
+
 ### Q-8 — ✅ RÉSOLU (voir le tableau ci-dessus)
 > **Historique** : deux conventions d'horodatage coexistaient (`defaultNow()` = heure locale PG,
 > Drizzle = UTC), ce qui pouvait faire **reculer `updated_at`** après une mise à jour et faire
