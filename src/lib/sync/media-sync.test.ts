@@ -40,6 +40,18 @@ const KEY = `${CLINIC_ID}/radiograph-1.png`;
 const BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const VALID_TOKEN = "jeton-valide-abc123";
 
+/**
+ * Clés « exotiques » qui passent `isSafeStorageKey` (format basique) mais que
+ * Win32 normalise de façon ambigüe : elles doivent être refusées **400** par
+ * les segments stricts, avant tout accès disque.
+ */
+const EXOTIC_KEYS = [
+  "C:/radiograph.png", // lettre de lecteur (segment `C:`)
+  ".. /x.png", // segment `.. ` avec espace final
+  "x.png.", // point final (tronqué par Win32 au `join` disque)
+  `${CLINIC_ID}/espace interne.png`, // espace interne de segment
+] as const;
+
 const CTX: DeviceTokenContext = {
   deviceId: "device-1",
   userId: "user-1",
@@ -387,13 +399,17 @@ describe("route /api/sync/media", () => {
   }
 
   function postJson(body: unknown, token: string | null = VALID_TOKEN): Request {
+    const payload = JSON.stringify(body);
     return new Request("http://localhost/api/sync/media", {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        // Tout client HTTP réel annonce la longueur du corps — le serveur
+        // refuse d'ailleurs les requêtes sans `Content-Length` (411).
+        "content-length": String(Buffer.byteLength(payload)),
         ...(token === null ? {} : bearer(token)),
       },
-      body: JSON.stringify(body),
+      body: payload,
     });
   }
 
@@ -483,6 +499,98 @@ describe("route /api/sync/media", () => {
     expect(await errorOf(response)).toEqual({ error: "unsupported-media-type" });
   });
 
+  it("POST sans content-length annoncé → 411 (corps jamais lu)", async () => {
+    const handlers = createHandlers();
+    // Aucun `content-length` : le serveur doit refuser AVANT de lire le corps.
+    const request = new Request("http://localhost/api/sync/media", {
+      method: "POST",
+      headers: bearer(),
+      body: JSON.stringify({ key: KEY, clinicId: CLINIC_ID, contentBase64: "AAAA" }),
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+    const response = await handlers.POST(request);
+    expect(response.status).toBe(411);
+    expect(await errorOf(response)).toEqual({ error: "length-required" });
+  });
+
+  it("POST avec un content-length illisible → 411", async () => {
+    const handlers = createHandlers();
+    const request = new Request("http://localhost/api/sync/media", {
+      method: "POST",
+      headers: { ...bearer(), "content-length": "pas-un-nombre" },
+      body: JSON.stringify({ key: KEY, clinicId: CLINIC_ID, contentBase64: "AAAA" }),
+    });
+    const response = await handlers.POST(request);
+    expect(response.status).toBe(411);
+    expect(await errorOf(response)).toEqual({ error: "length-required" });
+  });
+
+  it("POST d'une clé prefixée d'un autre cabinet → 403 (liaison clé ↔ cabinet)", async () => {
+    const inputs: MediaPutInput[] = [];
+    const handlers = createHandlers({
+      put: async (input) => {
+        inputs.push(input);
+        return `${input.key}${extname(input.name)}`;
+      },
+    });
+    const response = await handlers.POST(
+      postJson({
+        // Cabinet A autorisé, clé du cabinet B : lecture/écriture inter-cabinets.
+        key: `${OTHER_CLINIC_ID}/radiograph-9.png`,
+        clinicId: CLINIC_ID,
+        contentBase64: Buffer.from(BYTES).toString("base64"),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(await errorOf(response)).toEqual({ error: "clinic-out-of-scope" });
+    // Aucun accès disque : `put` n'est jamais appelé.
+    expect(inputs).toHaveLength(0);
+    expect(stored.size).toBe(0);
+  });
+
+  it("POST avec des clés exotiques → 400 invalid-key et aucun fichier créé", async () => {
+    const inputs: MediaPutInput[] = [];
+    const handlers = createHandlers({
+      put: async (input) => {
+        inputs.push(input);
+        const written = `${input.key}${extname(input.name)}`;
+        stored.set(written, input.bytes);
+        return written;
+      },
+    });
+    const contentBase64 = Buffer.from(BYTES).toString("base64");
+    for (const key of EXOTIC_KEYS) {
+      const response = await handlers.POST(
+        postJson({ key, clinicId: CLINIC_ID, contentBase64 }),
+      );
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toEqual({ error: "invalid-key" });
+    }
+    // Aucun fichier créé : ni appel de `put`, ni entrée dans le magasin.
+    expect(inputs).toHaveLength(0);
+    expect(stored.size).toBe(0);
+  });
+
+  it("POST avec une extension .html/.jsp → 415 et aucun fichier créé (XSS stocké)", async () => {
+    const inputs: MediaPutInput[] = [];
+    const handlers = createHandlers({
+      put: async (input) => {
+        inputs.push(input);
+        return `${input.key}${extname(input.name)}`;
+      },
+    });
+    const contentBase64 = Buffer.from(BYTES).toString("base64");
+    for (const name of ["radiograph-1.html", "radiograph-1.jsp"]) {
+      const response = await handlers.POST(
+        postJson({ key: `${CLINIC_ID}/${name}`, clinicId: CLINIC_ID, contentBase64 }),
+      );
+      expect(response.status).toBe(415);
+      expect(await errorOf(response)).toEqual({ error: "unsupported-media-type" });
+    }
+    expect(inputs).toHaveLength(0);
+    expect(stored.size).toBe(0);
+  });
+
   it("POST valide → 200 { key, sha256 } et stockage via l'adaptateur", async () => {
     const inputs: MediaPutInput[] = [];
     const handlers = createHandlers({
@@ -514,6 +622,26 @@ describe("route /api/sync/media", () => {
     expect(logged).not.toContain(contentBase64);
   });
 
+  it("journalise la clé sérialisée (aucune injection de ligne de journal)", async () => {
+    const handlers = createHandlers();
+    const contentBase64 = Buffer.from(BYTES).toString("base64");
+    const response = await handlers.POST(
+      postJson({ key: KEY, clinicId: CLINIC_ID, contentBase64 }),
+    );
+    expect(response.status).toBe(200);
+
+    // L'événement d'audit transporte `JSON.stringify(key)` (guillemets
+    // compris) : une clé contenant `\n` ne pourrait pas forger une ligne.
+    const infoCalls = vi.mocked(console.info).mock.calls as unknown[][];
+    const audits = infoCalls
+      .map((call) => call[1])
+      .filter((arg): arg is Record<string, unknown> =>
+        typeof arg === "object" && arg !== null && "key" in arg,
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.key).toBe(JSON.stringify(KEY));
+  });
+
   it("GET sans jeton → 401 (et non 307/500)", async () => {
     const handlers = createHandlers();
     const response = await handlers.GET(getRequest(KEY, CLINIC_ID, null));
@@ -530,6 +658,8 @@ describe("route /api/sync/media", () => {
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(response.headers.get("content-length")).toBe(String(BYTES.byteLength));
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+    // anti re-sniffing MIME (données de santé).
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(sameBytes(new Uint8Array(await response.arrayBuffer()), BYTES)).toBe(true);
   });
 
@@ -552,5 +682,39 @@ describe("route /api/sync/media", () => {
     const response = await handlers.GET(getRequest("../../evil.png", CLINIC_ID));
     expect(response.status).toBe(400);
     expect(await errorOf(response)).toEqual({ error: "invalid-key" });
+  });
+
+  it("GET d'une clé prefixée d'un autre cabinet → 403 (liaison clé ↔ cabinet)", async () => {
+    const reads: string[] = [];
+    const handlers = createHandlers({
+      read: async (key) => {
+        reads.push(key);
+        return { kind: "ok" as const, bytes: BYTES };
+      },
+    });
+    // Cabinet A autorisé, clé du cabinet B : lecture inter-cabinets interdite.
+    const response = await handlers.GET(
+      getRequest(`${OTHER_CLINIC_ID}/radiograph-9.png`, CLINIC_ID),
+    );
+    expect(response.status).toBe(403);
+    expect(await errorOf(response)).toEqual({ error: "clinic-out-of-scope" });
+    // Aucune lecture disque.
+    expect(reads).toEqual([]);
+  });
+
+  it("GET avec des clés exotiques → 400 invalid-key et aucune lecture disque", async () => {
+    const reads: string[] = [];
+    const handlers = createHandlers({
+      read: async (key) => {
+        reads.push(key);
+        return { kind: "ok" as const, bytes: BYTES };
+      },
+    });
+    for (const key of EXOTIC_KEYS) {
+      const response = await handlers.GET(getRequest(key, CLINIC_ID));
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toEqual({ error: "invalid-key" });
+    }
+    expect(reads).toEqual([]);
   });
 });

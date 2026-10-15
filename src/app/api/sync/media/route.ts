@@ -27,8 +27,9 @@
  * | état | POST (téléversement)                          | GET (téléchargement)              |
  * |------|-----------------------------------------------|-----------------------------------|
  * | 401  | jeton absent / malformé / inconnu / révoqué   | idem                              |
- * | 400  | corps illisible, champs invalides, clé non conforme (`isSafeStorageKey`), base64 malformé | `key`/`clinicId` manquants ou clé non conforme |
- * | 403  | `clinicId` ∉ `ctx.clinicIds` (anti-IDOR)      | idem + sortie de répertoire        |
+ * | 411  | `Content-Length` absent / illisible (corps non borné → jamais lu) | —                 |
+ * | 400  | corps illisible, champs invalides, clé non conforme (segments stricts), base64 malformé | `key`/`clinicId` manquants ou clé non conforme |
+ * | 403  | `clinicId` ∉ `ctx.clinicIds` **ou** clé non prefixée par ce cabinet (anti-IDOR) | idem + sortie de répertoire |
  * | 413  | > 10 Mo (longueur base64 ou contenu décodé)   | —                                 |
  * | 415  | extension absente / hors allow-list de MIME   | idem                              |
  * | 404  | —                                             | fichier absent du stockage        |
@@ -36,11 +37,20 @@
  * | 200  | `{ key, sha256 }`                             | flux d'octets                     |
  *
  * Invariants :
- *  - **anti path traversal en deux temps** : `isSafeStorageKey(key)` (validation
- *    du format) **puis**, en lecture disque, contrôle du préfixe après
- *    `resolve` (le chemin résolu doit rester dans `uploads/`) ;
- *  - `Cache-Control: private, no-store` sur le GET : données de santé, jamais
- *    mises en cache ;
+ *  - **anti path traversal en deux barrières** : `isStrictStorageKey(key)`
+ *    (segments fermés, miroir de `KEY_SEGMENT_PATTERN` de `/api/files` —
+ *    refuse `C:…`, espaces, points finaux, `..`) **puis** un contrôle du
+ *    préfixe **après** `resolve`, à la lecture **et à l'écriture** (le chemin
+ *    résolu doit rester dans `uploads/`) ;
+ *  - **anti-IDOR de la liaison `key ↔ clinicId`** (les deux verbes) : la clé
+ *    DOIT être prefixée par le `clinicId` autorisé par le jeton — un jeton du
+ *    cabinet A ne lit ni n'écrase jamais `uploads/<autre-cabinet>/…`, même en
+ *    passant un `clinicId` valide en champ `clinicId` (le `key.startsWith` est
+ *    littéral et le `clinicId` est validé sans séparateur, donc le préfixe ne
+ *    peut pas être élargi) ;
+ *  - `Cache-Control: private, no-store` **et** `X-Content-Type-Options:
+ *    nosniff` sur le GET : données de santé, jamais mises en cache, jamais
+ *    re-sniffées par le navigateur ;
  *  - stockage **via l'adaptateur existant** `storage` (S3 si `S3_REGION` +
  *    `S3_BUCKET` sont définis, sinon disque `uploads/`) — aucun accès direct
  *    en écriture ;
@@ -48,7 +58,9 @@
  *  - zéro `console.log` ; `console.error` uniquement sur les 500 (message
  *    fixe, ni jeton ni détail interne) ; événement de téléversement et de
  *    téléchargement journalisés en `console.info` avec **clé, deviceId et
- *    taille seulement** (jamais le contenu, jamais le jeton).
+ *    taille seulement** (jamais le contenu, jamais le jeton) — la clé est
+ *    journalisée via `JSON.stringify` (aucune injection de ligne de
+ *    journal possible).
  */
 
 import { readFile } from "fs/promises";
@@ -93,6 +105,32 @@ const MAX_KEY_LENGTH = 512;
 const MAX_CLINIC_ID_LENGTH = 256;
 
 /**
+ * Clés émises par le serveur : `<clinicId>/radiograph-<uuid>.<ext>` →
+ * identifiants UUID/ULID + noms fixes. Le premier caractère doit être
+ * alphanumérique (exclut `.`, `..`, `C:…`) et aucun espace ni deux-points
+ * n'est admis (normalisation Win32 des noms).
+ *
+ * **Dupliqué** de `KEY_SEGMENT_PATTERN` de
+ * `src/app/api/files/[...key]/route.ts` (~l.29) : cette constante n'est pas
+ * exportée et un import depuis un fichier de route App Router n'est pas
+ * souhaitable — la duplication est volontaire et documentée.
+ */
+const KEY_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+
+/**
+ * Identifiant de cabinet : non vide (Zod `min(1)`) et **sans séparateur de
+ * chemin ni NUL** — le `clinicId` sert de préfixe littéral à la clé (anti-IDOR
+ * de la liaison `key ↔ clinicId`) et ne doit donc jamais pouvoir être
+ * interprété comme un chemin. Le format exact (UUID/ULID) n'est pas imposé pour
+ * rester compatible avec les identifiants historiques.
+ */
+const clinicIdSchema = z
+  .string()
+  .min(1)
+  .max(MAX_CLINIC_ID_LENGTH)
+  .regex(/^[^/\\\0]+$/);
+
+/**
  * MIME **autorisés** — miroir strict de `ALLOWED_MIME_TYPES` de
  * `src/lib/storage.ts` (constante privée : elle n'est pas exportée ; le
  * couple « extension → MIME » ci-dessous ne peut produire que l'un de ces
@@ -123,13 +161,13 @@ const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 const uploadBodySchema = z.object({
   key: z.string().min(1).max(MAX_KEY_LENGTH),
-  clinicId: z.string().min(1).max(MAX_CLINIC_ID_LENGTH),
+  clinicId: clinicIdSchema,
   contentBase64: z.string().min(1),
 });
 
 const downloadQuerySchema = z.object({
   key: z.string().min(1).max(MAX_KEY_LENGTH),
-  clinicId: z.string().min(1).max(MAX_CLINIC_ID_LENGTH),
+  clinicId: clinicIdSchema,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -139,6 +177,7 @@ const downloadQuerySchema = z.object({
 function jsonError(
   error:
     | "unauthorized"
+    | "length-required"
     | "invalid-request"
     | "invalid-key"
     | "clinic-out-of-scope"
@@ -163,6 +202,45 @@ function readBearerToken(header: string | null): string | null {
 /* Découpage de clé (le stockage ajoute l'extension : `key` = `base` + `ext`)  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Format **strict** de clé — `isSafeStorageKey` (déjà appelé) **plus**
+ * `KEY_SEGMENT_PATTERN` par segment : refuse les clés exotiques que
+ * `isSafeStorageKey` laisse passer et que Win32 normalise ensuite de façon
+ * ambigüe — `C:/radiograph.png` (lettre de lecteur), `.. /x.png` (espace),
+ * `x.png.` (point final tronqué par Win32 au moment du `join` disque),
+ * `a b/c.png` (espace interne). Appelée **avant tout accès disque**.
+ */
+function isStrictStorageKey(key: string): boolean {
+  if (!isSafeStorageKey(key)) return false;
+  return key
+    .split("/")
+    .every(
+      (segment) =>
+        KEY_SEGMENT_PATTERN.test(segment) &&
+        !segment.endsWith(".") &&
+        !segment.endsWith(" "),
+    );
+}
+
+/**
+ * La clé doit être **prefixée** par le cabinet autorisé — miroir de la
+ * branche radiographie de `isKeyOwnedByClinic` de
+ * `src/app/api/files/[...key]/route.ts` (~l.49-60) : cette fonction n'est pas
+ * exportée et un import depuis un fichier de route App Router n'est pas
+ * souhaitable — duplication documentée.
+ *
+ * Seule la branche `<clinicId>/radiograph-<uuid>.<ext>` s'applique ici : le
+ * protocole de synchronisation ne transporte que des radiographies (la branche
+ * `clinics/<clinicId>/logo.png` de `/api/files` n'a pas de contrepartie sync).
+ *
+ * Robustesse : le test est un `startsWith` **littéral** et le `clinicId` est
+ * validé non vide et sans `/`, `\` ni NUL (`clinicIdSchema`) — un cabinet ne
+ * peut pas « élargir » son préfixe pour atteindre les fichiers d'un autre.
+ */
+function isKeyOwnedByClinic(key: string, clinicId: string): boolean {
+  return key.startsWith(clinicId + "/");
+}
+
 interface KeyParts {
   /** Clé transmise à `storage.upload` (elle ré-agrége l'extension). */
   base: string;
@@ -186,7 +264,7 @@ function splitStorageKey(key: string): KeyParts | null {
   const ext = extname(key);
   if (ext.length <= 1) return null;
   const base = key.slice(0, key.length - ext.length);
-  if (base.length === 0 || !isSafeStorageKey(base)) return null;
+  if (base.length === 0 || !isStrictStorageKey(base)) return null;
   const slash = key.lastIndexOf("/");
   const name = slash === -1 ? key : key.slice(slash + 1);
   if (name.length === 0 || extname(name) !== ext) return null;
@@ -242,8 +320,9 @@ async function readStoredFile(key: string): Promise<MediaReadResult> {
     const uploadsRoot = resolve(process.cwd(), LOCAL_UPLOADS_BASE_PATH);
     const filePath = resolve(uploadsRoot, key);
     if (filePath === uploadsRoot || !filePath.startsWith(uploadsRoot + sep)) {
+      // Clé journalisée sérialisée : jamais d'injection de ligne de journal.
       console.error("[api/sync/media] sortie du répertoire d'uploads refusée", {
-        key,
+        key: JSON.stringify(key),
       });
       return { kind: "outside" };
     }
@@ -255,7 +334,10 @@ async function readStoredFile(key: string): Promise<MediaReadResult> {
       if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") {
         return { kind: "missing" };
       }
-      console.error("[api/sync/media] lecture du fichier impossible", { key, code });
+      console.error("[api/sync/media] lecture du fichier impossible", {
+        key: JSON.stringify(key),
+        code,
+      });
       throw error;
     }
   }
@@ -335,9 +417,19 @@ export function createSyncMediaHandlers(
     if ("response" in auth) return auth.response;
     const ctx = auth.ctx;
 
-    // (2) Garde-fou de taille sur l'en-tête (le corps n'est pas encore lu).
-    const contentLength = Number(request.headers.get("content-length"));
-    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+    // (2) Garde-fou `Content-Length` sur l'en-tête (le corps n'est pas encore
+    // lu) : absent ou illisible → **411** (sinon `Number(null) === 0`
+    // « passerait » et `request.json()` lirait un corps de taille illimitée
+    // en mémoire).
+    const rawContentLength = request.headers.get("content-length");
+    const contentLength =
+      rawContentLength === null || rawContentLength.trim() === ""
+        ? Number.NaN
+        : Number(rawContentLength);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      return jsonError("length-required", 411);
+    }
+    if (contentLength > MAX_REQUEST_BODY_BYTES) {
       return jsonError("payload-too-large", 413);
     }
 
@@ -354,13 +446,22 @@ export function createSyncMediaHandlers(
     }
     const { key, clinicId, contentBase64 } = parsed.data;
 
-    // (4) Anti path traversal — format de la clé AVANT tout décodage.
-    if (!isSafeStorageKey(key)) {
+    // (4) Anti path traversal — segments **stricts** de la clé AVANT tout
+    // décodage (miroir de `KEY_SEGMENT_PATTERN` de `/api/files`).
+    if (!isStrictStorageKey(key)) {
       return jsonError("invalid-key", 400);
     }
 
     // (5) Anti-IDOR : le cabinet doit appartenir à la portée du jeton.
     if (!ctx.clinicIds.includes(clinicId)) {
+      return jsonError("clinic-out-of-scope", 403);
+    }
+
+    // (5bis) Anti-IDOR de la **liaison clé ↔ cabinet** : la clé doit être
+    // prefixée par le cabinet autorisé — un jeton du cabinet A ne peut ni
+    // lire ni écraser `uploads/<autre-cabinet>/…` en passant un `clinicId`
+    // valide dans le champ `clinicId`.
+    if (!isKeyOwnedByClinic(key, clinicId)) {
       return jsonError("clinic-out-of-scope", 403);
     }
 
@@ -391,6 +492,23 @@ export function createSyncMediaHandlers(
       return jsonError("invalid-key", 400);
     }
 
+    // (7ter) Contrôle de préfixe **après résolution**, à l'écriture — miroir
+    // exact du contrôle de lecture (`readStoredFile`) : `storage.upload` ne
+    // vérifie que le format (`isSafeStorageKey`) puis fait
+    // `join(cwd, basePath, key)` — le chemin résolu doit rester dans
+    // `uploads/` **avant** tout accès disque (S3 : la clé est déjà validée
+    // strictement, aucun système de fichiers concerné).
+    if (storage instanceof LocalStorageAdapter) {
+      const uploadsRoot = resolve(process.cwd(), LOCAL_UPLOADS_BASE_PATH);
+      const resolved = resolve(uploadsRoot, key);
+      if (resolved === uploadsRoot || !resolved.startsWith(uploadsRoot + sep)) {
+        console.error("[api/sync/media] tentative d'écriture hors uploads refusée", {
+          key: JSON.stringify(key),
+        });
+        return jsonError("invalid-key", 400);
+      }
+    }
+
     // (8) Stockage via l'adaptateur existant (S3 ou disque).
     let storedKey: string;
     try {
@@ -419,9 +537,11 @@ export function createSyncMediaHandlers(
       return jsonError("internal-error", 500);
     }
 
-    // (9) Événement d'audit **sans secret** : clé, deviceId, taille.
+    // (9) Événement d'audit **sans secret** : clé, deviceId, taille. La clé
+    // est sérialisée (`JSON.stringify`) — une clé contenant `\n` ne peut pas
+    // forger une ligne de journal (injection de logs).
     console.info("[api/sync/media] téléversement accepté", {
-      key,
+      key: JSON.stringify(key),
       deviceId: ctx.deviceId,
       size: decoded.byteLength,
     });
@@ -446,13 +566,19 @@ export function createSyncMediaHandlers(
     }
     const { key, clinicId } = parsed.data;
 
-    // (3) Anti path traversal — format de la clé.
-    if (!isSafeStorageKey(key)) {
+    // (3) Anti path traversal — segments **stricts** de la clé.
+    if (!isStrictStorageKey(key)) {
       return jsonError("invalid-key", 400);
     }
 
     // (4) Anti-IDOR : le cabinet doit appartenir à la portée du jeton.
     if (!ctx.clinicIds.includes(clinicId)) {
+      return jsonError("clinic-out-of-scope", 403);
+    }
+
+    // (4bis) Anti-IDOR de la **liaison clé ↔ cabinet** (miroir du POST) :
+    // un jeton du cabinet A ne lit jamais `uploads/<autre-cabinet>/…`.
+    if (!isKeyOwnedByClinic(key, clinicId)) {
       return jsonError("clinic-out-of-scope", 403);
     }
 
@@ -477,9 +603,10 @@ export function createSyncMediaHandlers(
       return jsonError("not-found", 404);
     }
 
-    // (7) Événement d'audit **sans secret** : clé, deviceId, taille.
+    // (7) Événement d'audit **sans secret** : clé, deviceId, taille (clé
+    // sérialisée — aucune injection de ligne de journal).
     console.info("[api/sync/media] téléchargement servi", {
-      key,
+      key: JSON.stringify(key),
       deviceId: ctx.deviceId,
       size: result.bytes.byteLength,
     });
@@ -490,6 +617,9 @@ export function createSyncMediaHandlers(
         "Content-Length": String(result.bytes.byteLength),
         // Données de santé : jamais mis en cache ni partagé.
         "Cache-Control": "private, no-store",
+        // Jamais de re-sniffing MIME côté navigateur (PDF/images servis en
+        // type déduit de l'extension).
+        "X-Content-Type-Options": "nosniff",
       },
     });
   }
