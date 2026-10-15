@@ -475,6 +475,54 @@ async function auditOutput(): Promise<AuditResult> {
 /* Point d'entrée                                                             */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Étape 4 — binaires PostgreSQL positionnés HORS asar.
+ *
+ * `embedded-postgres` calcule le chemin de ses exécutables à partir de son
+ * propre emplacement de module, et n'offre aucun moyen de le surcharger. Dans
+ * une archive asar, ce chemin pointe dans l'archive : `existsSync` passe (la
+ * couche virtuelle d'Electron redirige les lectures) mais `spawn` échoue — un
+ * fichier d'archive n'est pas un fichier disque. D'où `ENOENT` au premier
+ * démarrage (release 0.1.0).
+ *
+ * On stage donc le paquet de plateforme dans `dist-desktop/pgbin/`, livré par
+ * `extraResources` vers `<resources>/node_modules/@embedded-postgres/…` : la
+ * résolution remonte alors de `app.asar/…` (absent) à `resources/node_modules/…`
+ * (réel), et tous les spawns repartent d'un chemin disque.
+ *
+ * Seul l'indispensable est copié : `package.json` (point d'entrée), `dist/`
+ * (JS) et `native/` (bin + lib + share ≈ 104 Mo, la runtime PostgreSQL complète).
+ * Les `.md` sont exclus — l'audit de fin de build les refuse.
+ */
+async function copyEmbeddedPostgresBinaries(): Promise<void> {
+  const platformName =
+    process.platform === 'win32' ? 'windows-x64' : `${process.platform}-${process.arch}`
+  const sourcePkg = path.join(PROJECT_ROOT, 'node_modules', '@embedded-postgres', platformName)
+  if (!existsSync(sourcePkg)) {
+    log(`paquet @embedded-postgres/${platformName} absent : etape ignoree`)
+    return
+  }
+  const destination = path.join(PROJECT_ROOT, OUTPUT_DIR, 'pgbin', '@embedded-postgres', platformName)
+  await mkdir(destination, { recursive: true })
+
+  const pkgFile = path.join(sourcePkg, 'package.json')
+  if (existsSync(pkgFile)) {
+    await cp(pkgFile, path.join(destination, 'package.json'))
+  }
+  for (const subdirectory of ['dist', 'native']) {
+    const from = path.join(sourcePkg, subdirectory)
+    if (!existsSync(from)) continue
+    await cp(from, path.join(destination, subdirectory), {
+      recursive: true,
+      // Les symlinks hydratés par le postinstall deviennent de vrais fichiers :
+      // une junction aurait une cible absolue non relocatable hors du poste.
+      dereference: true,
+      filter: (source) => !/\.(md|ts|map)$/i.test(source),
+    })
+  }
+  log(`binaires PostgreSQL stages hors asar -> ${OUTPUT_DIR}/pgbin/@embedded-postgres/${platformName}`)
+}
+
 async function main(): Promise<void> {
   if (!existsSync(path.join(PROJECT_ROOT, 'package.json')) || !existsSync(path.join(PROJECT_ROOT, 'next.config.ts'))) {
     fail(`cwd inattendu (${PROJECT_ROOT}) : lancez ce script depuis la racine du projet (\`npm run build:desktop\`).`)
@@ -493,6 +541,7 @@ async function main(): Promise<void> {
   await copyStandaloneApp()
   await copyStaticAndPublic()
   await copyMigrations()
+  await copyEmbeddedPostgresBinaries()
 
   log('vérification finale (garde-fou de sécurité) …')
   const audit = await auditOutput()

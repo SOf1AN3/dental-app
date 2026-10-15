@@ -30,6 +30,9 @@ files:
   - dist-electron/**
   - dist-desktop/**
   - package.json
+  # Binaires PostgreSQL HORS archive (voir extraResources) : spawn ne peut pas executer
+  # un fichier contenu dans asar — c etait le bug ENOENT de la 0.1.0.
+  - "!node_modules/@embedded-postgres/**"
 # Les `node_modules` de production (`electron-log`, `embedded-postgres`,
 # `postgres`, `zod`, `drizzle-orm`, `electron-updater`, `next`, â€¦) sont
 # collectÃ©s **automatiquement** par electron-builder depuis `package.json` +
@@ -42,28 +45,15 @@ files:
 # --------------------------------------------------------------------------
 # asar + dÃ©ballage
 # --------------------------------------------------------------------------
-asar: false
-# DÃ‰CISION : asar DÃ‰SACTIVÃ‰ (bug bloquant corrigÃ© le 2026-10-15).
+# asar ACTIVE : c'est ce qui rend l'installation rapide (quelques fichiers au lieu de
+# 43 000). Sans asar, les chemins Windows depassent MAX_PATH (260) et NSIS abandonne
+# silencieusement des fichiers : l'installation restait incomplete (151 paquets sur 340)
+# et l'application ne pouvait plus resoudre ses modules.
 #
-# SymptÃ´me : `spawn â€¦\resources\app.asar\node_modules\@embedded-postgres\
-# windows-x64\native\bin\postgres.exe ENOENT` au premier lancement.
-#
-# Explication : `asarUnpack` extrait bien les binaires dans
-# `app.asar.unpacked/`, et la couche `fs` d'Electron redirige les LECTURES â€”
-# mais `child_process.spawn` exÃ©cute un chemin rÃ©el : un fichier dans
-# l'archive n'existe pas sur disque. Or `embedded-postgres` calcule ses
-# chemins d'exÃ©cution **Ã  partir de son propre emplacement de module** (et
-# n'offre AUCUNE option pour les surcharger) : impossible de corriger Ã§a sans
-# patcher `child_process`, ce qui est fragile (le package dÃ©structure `spawn`
-# au chargement).
-#
-# Contrepartie : les fichiers sont posÃ©s en clair dans `resources/app/`
-# (43 000 fichiers, ~350 Mo). C'est acceptable car l'asar **ne protÃ¨ge rien**:
-# c'est une archive, extraite en une commande â€” il ne s'agissait jamais d'une
-# mesure de sÃ©curitÃ©. Les protections rÃ©elles de l'application sont ailleurs :
-# aucun secret livrÃ© avec l'installateur, jetons chiffrÃ©s DPAPI, sandbox du
-# renderer, serveur local en bouclage uniquement.
-asarUnpack: []
+# Les binaires PostgreSQL sont les SEULES pieces qui doivent rester executables :
+# ils sont livres HORS archive via extraResources (voir plus bas), car spawn ne peut
+# pas executer un fichier contenu dans l'archive.
+asar: true
 # CHOIX DOCUMENTÃ‰ : le dossier Â« app Â» (serveur Next standalone + `public` +
 # `.next/static` + `node_modules` Ã©purÃ©) **n'est pas** packagÃ© en asar, ni mÃªme
 # dÃ©placÃ© via `asarUnpack` : il passe par `extraResources` (fichiers rÃ©els,
@@ -99,6 +89,10 @@ extraResources:
   # `migrationFolderCandidates()` (`electron/db/migrate.ts`).
   - from: dist-desktop/drizzle
     to: drizzle
+  # Binaires PostgreSQL en fichiers reels : la resolution descend de app.asar/ (absent)
+  # vers <resources>/node_modules/@embedded-postgres/... (present) — chemin disque reel.
+  - from: dist-desktop/pgbin/@embedded-postgres
+    to: node_modules/@embedded-postgres
   # Configuration du poste (URL du serveur central) â€” lue par
   # `resolveSyncBaseUrl()` (`electron/env.ts`) en mode application installÃ©e.
   # L'installateur ne ship AUCUN `.env` (sinon les secrets sortiraient avec le
