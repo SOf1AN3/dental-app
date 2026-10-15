@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SyncScopeError, applyOps } from "@/lib/sync/central-store";
+import { REJECT, SyncScopeError, applyOps } from "@/lib/sync/central-store";
 import { verifyDeviceToken, type DeviceTokenContext } from "@/lib/sync/central-auth";
 import {
   MAX_PUSH_OPS,
@@ -20,8 +20,35 @@ import {
  *    le schéma : on répond explicitement plutôt qu'un 500 venant de
  *    `applyOps`) ;
  *  - succès → **200** avec la `PushResponse` contractuelle ;
- *  - `SyncScopeError` → **403** ; toute autre exception → **500** générique
- *    (jamais le message interne, jamais de stack).
+ *  - **portée (A3)** → **403** `{ error: "clinic-out-of-scope" }`, code aligné
+ *    sur `POST /api/sync/pull` (même portée, même verrou) quand **toutes** les
+ *    opérations du lot ont été refusées pour `clinic-mismatch` (ou que le store
+ *    lève `SyncScopeError`) ;
+ *  - lot **mixte** (au moins une op acceptée ET des rejets de portée) →
+ *    **200** avec `rejected` détaillé : voir « Portée et contrat 403 » ci-bas ;
+ *  - toute autre exception → **500** générique (jamais le message interne,
+ *    jamais de stack).
+ *
+ * ## Portée et contrat 403 (choix explicité, tâche 10.3)
+ *
+ * Le verrou de portée est appliqué **côté store** (`applyOps` →
+ * `RejectedOpError(REJECT.clinicMismatch)` : aucune ligne hors portée n'est
+ * jamais écrite). Le **store reste total** : il renvoie toujours un rapport de
+ * lot (`accepted` / `rejected` / `conflicts`) et ne lève jamais pour un rejet
+ * de portée — c'est le contrat qu'attestent les tests du cœur serveur (un lot
+ * intégralement refusé reste un rapport exploitable). La **route traduit donc
+ * la réponse en code HTTP**, exactement comme `/api/sync/pull` traduit
+ * `SyncScopeError` :
+ *
+ *  - **100 % hors portée** (`rejected` non vide, `accepted` vide, toutes les
+ *    raisons `clinic-mismatch`) → **403** `{ error: "clinic-out-of-scope" }`. Le
+ *    refus est total : détailler les rejets ne dirait rien de plus, et le code
+ *    identique au tirage évite deux dialectes pour un même verrou ;
+ *  - **lot mixte** (au moins une op acceptée) → **200** avec `rejected`
+ *    détaillé. C'est le contrat **idempotent** : la partie acceptée a été
+ *    écrite et journalisée (`sync_applied`), le client doit pouvoir lire le
+ *    sort de CHAQUE opération (abandonner celles qui sont rejetées, garder le
+ *    reste) ; un 403 masquerait des écritures pourtant advenues.
  *
  * Invariants :
  *  - `now` est **toujours l'horloge serveur** (`new Date()` ici) : aucune
@@ -38,10 +65,35 @@ export const dynamic = "force-dynamic";
 /* -------------------------------------------------------------------------- */
 
 function jsonError(
-  error: "unauthorized" | "invalid-request" | "too-many-ops" | "forbidden" | "internal-error",
+  error:
+    | "unauthorized"
+    | "invalid-request"
+    | "too-many-ops"
+    | "clinic-out-of-scope"
+    | "internal-error",
   status: number,
 ): Response {
   return NextResponse.json({ error }, { status });
+}
+
+/**
+ * Lot **intégralement** hors portée : au moins une opération refusée, aucune
+ * acceptée, et **toutes** les raisons valant `clinic-mismatch`.
+ *
+ * - `accepted` vide est le marqueur décisif : il contient aussi les opId déjà
+ *   journalisés (rejeu A1), donc un lot « rejoué + hors portée » est mixte →
+ *   **200** (contrat idempotent, voir l'en-tête) ;
+ * - `conflicts` n'est jamais renseigné sans op acceptée (le journal n'est
+ *   écrit qu'après une écriture réussie) : pas de garde supplémentaire ;
+ * - une raison autre que `clinic-mismatch` (table inconnue, `parent-missing`…)
+ *   n'est **pas** une question de portée → 200 avec `rejected` détaillé.
+ */
+function isScopeOnlyRejection(response: PushResponse): boolean {
+  return (
+    response.rejected.length > 0 &&
+    response.accepted.length === 0 &&
+    response.rejected.every((op) => op.reason === REJECT.clinicMismatch)
+  );
 }
 
 /** Extrait le jeton d'un en-tête `Authorization: Bearer <jeton>`, `null` sinon. */
@@ -127,10 +179,17 @@ export function createSyncPushHandler(
     // (4) Application — `now` horloge serveur, une transaction par opération.
     try {
       const response: PushResponse = await apply(ctx, parsed.data.ops, new Date());
+      // (4bis) Portée : lot 100 % hors portée → 403 aligné sur le tirage ;
+      //       lot mixte → 200 avec `rejected` détaillé (voir l'en-tête).
+      if (isScopeOnlyRejection(response)) {
+        return jsonError("clinic-out-of-scope", 403);
+      }
       return NextResponse.json(response);
     } catch (error) {
       if (error instanceof SyncScopeError) {
-        return jsonError("forbidden", 403);
+        // Même code que `POST /api/sync/pull` : un seul dialecte pour le
+        // verrou de portée.
+        return jsonError("clinic-out-of-scope", 403);
       }
       // 500 générique : aucun message interne ni stack ne quitte le serveur.
       console.error("[api/sync/push] échec imprévu de l'application du lot");

@@ -1113,9 +1113,52 @@ export function createCentralStoreDbRepo(
       const entry = TABLE_REGISTRY[query.table];
       if (!entry || !entry.cursor) return [];
       const cols = getTableColumns(entry.table) as Record<string, Column>;
-      // Curseur composite (B1) : comparaison de lignes → index
-      // `*_clinic_updated_id` utilisable tel quel.
-      const cursorPredicate = sql`(${cols.updatedAt}, ${cols.id}) > (${query.cursor.updatedAt}, ${query.cursor.id})`;
+      /* ---------------------- Curseur composite (B1) ------------------------ */
+      //
+      // ⚠️ 1. NE JAMAIS interpoler le `Date` brut dans le template `sql` :
+      // postgres.js appellerait `Buffer.byteLength(Date)` → `TypeError` →
+      // `DrizzleQueryError` → **500 sur 100 % des tirages** (régression 10.3).
+      // `sql.param(date, cols.updatedAt)` passe par l'encodeur de la colonne
+      // (`mapToDriverValue` → `toISOString()`), exactement le chemin de
+      // `eq(updatedAt, date)` — jamais de valeur brute.
+      //
+      // ⚠️ 2. Fuseau : `updated_at` est un `timestamp WITHOUT time zone` et
+      // Postgres **ignore** le décalage du littéral `…Z` (vérifié :
+      // `'…T12:34:56.789Z'::timestamp` stocke `12:34:56.789`), tandis que
+      // Drizzle **relit** le champ mural en UTC (`mapFromDriverValue` ajoute
+      // "+0000", parser postgres-js transparent). Écriture et lecture sont donc
+      // symétriques : un curseur ISO sorti d'une ligne se recompare à l'identique.
+      //
+      // ⚠️ 3. PRÉCISION (piège n° 2 du tirage) : la base stocke des
+      // **microsecondes** (`defaultNow()` → `now()`) alors qu'un `Date` JS n'a
+      // que des millisecondes. Une comparaison `updated_at > Date` ré-émettrait
+      // la ligne du curseur à chaque page (`.228051 > .228`) → **boucle
+      // infinie**. Le benchmark logique du tirage est donc la milliseconde
+      // tronquée :
+      //     (date_trunc('millisecond', updated_at), id)
+      // — l'ordre **exact** que la couche pure applique déjà (`toTime` /
+      // `compareCursorOrder`) et que le repo mémoire implémente (test « deux
+      // lignes dans la MÊME millisseconde »). SQL et couche pure partagent le
+      // MÊME ordre : aucune ligne répétée, aucune ligne sautée, et le curseur
+      // `Date` (milliseconde) est sans perte.
+      //
+      // `updated_at >= param` est conservé en tête comme bornage de **plage**
+      // pour l'index `*_clinic_updated_id` : le tri ne porte que sur ce
+      // segment, `date_trunc` n'y figurant qu'en filtre.
+      //
+      // ⚠️ 4. AMBIGUÏTÉ SIGNALÉE (hors périmètre de ce correctif) : le défaut
+      // `defaultNow()` stocke `now()` = **heure locale de la session PG**
+      // (`TimeZone = Europe/Paris` → +2 h), alors qu'une écriture Drizzle
+      // (`.values({ updatedAt: date })`, `applyOps`) stocke l'**UTC** de la
+      // `Date`. Les deux conventions coexistent donc dans la même colonne : le
+      // tirage reste exact (la comparaison et le curseur opèrent toujours dans
+      // le domaine « champ mural », voisinage et progression garantis — vérifié
+      // en E2E), mais l'**ordre absolu** entre une ligne `defaultNow()` et une
+      // ligne Drizzle peut être décalé de l'offset du fuseau, et une ligne
+      // créée puis mise à jour dans les mêmes 2 h voit son `updated_at`
+      // « reculer ». Correction définitive : aligner `defaultNow()` sur UTC
+      // (session `SET timezone 'UTC'` ou colonne réécrite en UTC) — migration
+      // hors du périmètre de la tâche 10.3.
       const scope = query.scope;
       let scopePredicate;
       if (scope.kind === "clinic-ids") {
@@ -1138,11 +1181,15 @@ export function createCentralStoreDbRepo(
       } else {
         scopePredicate = inArray(cols[scope.column], scope.clinicIds);
       }
+
+      const cursorParam = sql.param(query.cursor.updatedAt, cols.updatedAt);
+      const truncatedUpdatedAt = sql`date_trunc('millisecond', ${cols.updatedAt})`;
+      const cursorPredicate = sql`(${cols.updatedAt} >= ${cursorParam}) and (${truncatedUpdatedAt}, ${cols.id}) > (${cursorParam}, ${query.cursor.id})`;
       const rows = await database
         .select()
         .from(entry.table)
         .where(and(scopePredicate, cursorPredicate))
-        .orderBy(asc(cols.updatedAt), asc(cols.id))
+        .orderBy(asc(truncatedUpdatedAt), asc(cols.id))
         .limit(query.limit);
       return rows as unknown as Row[];
     },

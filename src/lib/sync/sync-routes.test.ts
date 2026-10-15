@@ -534,7 +534,7 @@ describe("POST /api/sync/push", () => {
     expect(Math.abs(nowArg.getTime() - Date.now())).toBeLessThan(60_000);
   });
 
-  it("403 sur SyncScopeError levée par le store", async () => {
+  it("403 (clinic-out-of-scope) sur SyncScopeError levée par le store", async () => {
     const handler = createSyncPushHandler({
       verifyToken: async () => CTX,
       apply: async () => {
@@ -545,8 +545,81 @@ describe("POST /api/sync/push", () => {
     const res = await handler(
       postJson({ deviceId: "device-1", clinicId: "c1", ops: [pushOp()] }, bearer("jeton-valide")),
     );
+    // Même code que `POST /api/sync/pull` : un seul dialecte pour la portée.
     expect(res.status).toBe(403);
-    expect(await errorBody(res)).toEqual({ error: "forbidden" });
+    expect(await errorBody(res)).toEqual({ error: "clinic-out-of-scope" });
+  });
+
+  it("403 (clinic-out-of-scope) sur un lot 100 % hors portée", async () => {
+    const opA = pushOp({ opId: crypto.randomUUID() });
+    const opB = pushOp({ opId: crypto.randomUUID(), rowId: "p2" });
+    const handler = createSyncPushHandler({
+      verifyToken: async () => CTX,
+      apply: async () => ({
+        accepted: [],
+        rejected: [
+          { opId: opA.opId, reason: "clinic-mismatch" },
+          { opId: opB.opId, reason: "clinic-mismatch" },
+        ],
+        conflicts: [],
+      } satisfies PushResponse),
+    });
+
+    const res = await handler(
+      postJson(
+        { deviceId: "device-1", clinicId: "c1", ops: [opA, opB] },
+        bearer("jeton-valide"),
+      ),
+    );
+    expect(res.status).toBe(403);
+    expect(await errorBody(res)).toEqual({ error: "clinic-out-of-scope" });
+  });
+
+  it("200 (et NON 403) sur un lot MIXTE : le sort de CHAQUE op reste lisible", async () => {
+    const acceptedOp = pushOp({ opId: crypto.randomUUID() });
+    const rejectedOp = pushOp({ opId: crypto.randomUUID(), rowId: "p2" });
+    const mixed: PushResponse = {
+      accepted: [acceptedOp.opId],
+      rejected: [{ opId: rejectedOp.opId, reason: "clinic-mismatch" }],
+      conflicts: [],
+    };
+    const handler = createSyncPushHandler({
+      verifyToken: async () => CTX,
+      apply: async () => mixed,
+    });
+
+    const res = await handler(
+      postJson(
+        { deviceId: "device-1", clinicId: "c1", ops: [acceptedOp, rejectedOp] },
+        bearer("jeton-valide"),
+      ),
+    );
+    // Contrat idempotent : la partie acceptée est écrite et journalisée, un 403
+    // masquerait ces écritures — 200 avec le détail des rejets.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(mixed);
+  });
+
+  it("200 sur un lot rejeté pour une raison AUTRE que la portée (non-aligné 403)", async () => {
+    const opId = crypto.randomUUID();
+    const handler = createSyncPushHandler({
+      verifyToken: async () => CTX,
+      apply: async () => ({
+        accepted: [],
+        rejected: [{ opId, reason: "unknown-table" }],
+        conflicts: [],
+      } satisfies PushResponse),
+    });
+
+    const res = await handler(
+      postJson({ deviceId: "device-1", clinicId: "c1", ops: [pushOp()] }, bearer("jeton-valide")),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      accepted: [],
+      rejected: [{ opId, reason: "unknown-table" }],
+      conflicts: [],
+    });
   });
 
   it("500 générique (jamais le détail interne) sur une exception inattendue", async () => {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { inArray, sql } from "drizzle-orm";
 import {
   AlreadyAppliedError,
   CHILD_PARENT_REFS,
@@ -8,6 +9,7 @@ import {
   RejectedOpError,
   SyncScopeError,
   applyOps,
+  createCentralStoreDbRepo,
   fetchChanges,
   pullScopeOf,
   rowWithinScope,
@@ -18,11 +20,19 @@ import {
   type Row,
 } from "./central-store";
 import type { DeviceTokenContext } from "./central-auth";
+import { db } from "@/lib/db/db";
+import { clinics } from "@/lib/db/schema";
 import { TABLE_REGISTRY, type ChangeOp, type PullRequest } from "./protocol";
 
 /**
- * Tests **hermétiques** (repo mémoire, aucune base, aucun réseau) du cœur
- * serveur de la synchronisation — tâche 5.2b.
+ * Tests du cœur serveur de la synchronisation — tâche 5.2b (+ régression 10.3).
+ *
+ * **Sauf la dernière section**, ce sont des tests **hermétiques** (repo
+ * mémoire, aucune base, aucun réseau). La dernière section
+ * (`createCentralStoreDbRepo — curseur Date réelle`) exerce le **vrai SQL** du
+ * tirage contre la base de dev (127.0.0.1:5432) : elle est protégée par une
+ * sonde (`describe.skip` si la base est absente) et nettoie ses deux lignes de
+ * test en `afterAll` — la suite ne régresse jamais à cause de cette DB.
  *
  * Le repo mémoire est **volontairement naïf** : `listChangedRows` ne filtre
  * PAS par portée (il renvoie toutes les lignes de la table). C'est délibéré :
@@ -1581,4 +1591,162 @@ describe("erreurs contractuelles", () => {
     const res = await applyOps(makeCtx(), [], NOW, repo);
     expect(res).toEqual({ accepted: [], rejected: [], conflicts: [] });
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 9. Régression 10.3 — curseur du TIRAGE contre le vrai SQL (base de dev)     */
+/* -------------------------------------------------------------------------- */
+
+/** Sonde de connectivité (même motif que `device-trust-db.integration.test.ts`). */
+async function isSyncDbReachable(): Promise<boolean> {
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      db.execute(sql`select 1 from clinic limit 1`),
+      new Promise<never>((_, reject) => {
+        probeTimer = setTimeout(
+          () => reject(new Error("timeout connectivité")),
+          3000,
+        );
+      }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(probeTimer);
+  }
+}
+
+const syncDbReachable = await isSyncDbReachable();
+const describeWithDb = syncDbReachable ? describe : describe.skip;
+
+/** Date d'une colonne `updated_at` relue par Drizzle — échec si ce n'est pas une `Date`. */
+function asColumnDate(value: unknown): Date {
+  expect(value).toBeInstanceOf(Date);
+  return value as Date;
+}
+
+describeWithDb(
+  "createCentralStoreDbRepo — curseur Date réelle (régression 500 du pull)",
+  () => {
+    const repo = createCentralStoreDbRepo();
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const clinicA = crypto.randomUUID();
+    const clinicB = crypto.randomUUID();
+    const scope: PullScope = { kind: "clinic-ids", ids: [clinicA, clinicB] };
+    const ctx: DeviceTokenContext = {
+      deviceId: `device-cursor-${suffix}`,
+      userId: `user-cursor-${suffix}`,
+      clinicIds: [clinicA, clinicB],
+      trustExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    };
+
+    beforeAll(async () => {
+      await db.insert(clinics).values([
+        { id: clinicA, name: `_tmp curseur A ${suffix}`, slug: `_tmp-cursor-a-${suffix}` },
+        { id: clinicB, name: `_tmp curseur B ${suffix}`, slug: `_tmp-cursor-b-${suffix}` },
+      ]);
+    });
+
+    afterAll(async () => {
+      // Nettoyage garanti (afterAll s'exécute même si un test échoue) : aucune
+      // ligne `_tmp*` ne survit dans `clinic`.
+      await db.delete(clinics).where(inArray(clinics.id, [clinicA, clinicB]));
+    });
+
+    it("tirage paginé : AUCUN 500 — pages disjoints et curseur qui progresse", async () => {
+      const now = new Date();
+
+      // Page 1 : `cursor: null` → MIN_PULL_CURSOR → `Date` CONVERTIE avant
+      // d'atteindre le repo. Avant le correctif 10.3, ce seul appel levait
+      // `DrizzleQueryError` (Date brute dans le template `sql`) → 500 systématique.
+      const page1 = await fetchChanges(
+        ctx,
+        pullRequest({ clinicId: clinicA, limit: 1 }),
+        now,
+        repo,
+      );
+      expect(page1.changes).toHaveLength(1);
+      expect(page1.hasMore).toBe(true);
+
+      // Page 2 : le curseur retourné (ISO) redevient une `Date` côté repo.
+      const page2 = await fetchChanges(
+        ctx,
+        pullRequest({ clinicId: clinicA, cursor: page1.cursor, limit: 1 }),
+        now,
+        repo,
+      );
+      expect(page2.changes).toHaveLength(1);
+      expect(page2.hasMore).toBe(false);
+
+      // Progression prouvée : les deux pages sont DISJOINTES (aucune boucle)
+      // et le curseur avance strictement.
+      const key = (c: { table: string; rowId: string }): string =>
+        `${c.table}:${c.rowId}`;
+      const keys1 = page1.changes.map(key);
+      const keys2 = page2.changes.map(key);
+      expect(keys1).toHaveLength(1);
+      expect(keys2).toHaveLength(1);
+      expect(keys2).not.toContain(keys1[0]);
+      expect(page2.cursor).not.toEqual(page1.cursor);
+
+      // Fin de tirage : plus rien derrière le dernier curseur, curseur STABLE.
+      const page3 = await fetchChanges(
+        ctx,
+        pullRequest({ clinicId: clinicA, cursor: page2.cursor, limit: 1 }),
+        now,
+        repo,
+      );
+      expect(page3.changes).toEqual([]);
+      expect(page3.hasMore).toBe(false);
+      expect(page3.cursor).toEqual(page2.cursor);
+    });
+
+    it("listChangedRows : Date RÉELLE au curseur → strictement après (ordre composite)", async () => {
+      const all = await repo.listChangedRows({
+        table: "clinic",
+        scope,
+        cursor: { updatedAt: new Date("2000-01-01T00:00:00.000Z"), id: "0" },
+        limit: 10,
+      });
+      // Exactement nos 2 lignes, dans l'ordre
+      // `(milliseconde(updated_at), id)` croissant.
+      expect(all.map((row) => String(row.id)).sort()).toEqual(
+        [clinicA, clinicB].sort(),
+      );
+      const [first, second] = all as [Row, Row];
+
+      // Curseur = copie de la `Date` RÉELLE de la 1ʳᵉ ligne (jamais une string)
+      // → la 1ʳᵉ ligne ne ressort plus, la 2ᵉ si : progression, pas de boucle.
+      const afterFirst = await repo.listChangedRows({
+        table: "clinic",
+        scope,
+        cursor: {
+          updatedAt: new Date(asColumnDate(first.updatedAt).getTime()),
+          id: String(first.id),
+        },
+        limit: 10,
+      });
+      expect(afterFirst).toHaveLength(1);
+      expect(String(afterFirst[0]?.id)).toBe(String(second.id));
+
+      // Curseur sur la dernière ligne → rien au-delà : la pagination se termine.
+      const afterSecond = await repo.listChangedRows({
+        table: "clinic",
+        scope,
+        cursor: {
+          updatedAt: new Date(asColumnDate(second.updatedAt).getTime()),
+          id: String(second.id),
+        },
+        limit: 10,
+      });
+      expect(afterSecond).toEqual([]);
+    });
+  },
+);
+
+/** Fermeture du client partagé : aucune socket ouverte à la sortie du fichier. */
+afterAll(async () => {
+  await db.$client.end({ timeout: 1 });
 });
