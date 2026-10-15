@@ -50,32 +50,26 @@ convergence passe par le serveur central.
 
 ## Questions / décisions en attente
 
-### Q-8 (NOUVEAU — trouvé par la recette E2E 10.2) : deux conventions d'horodatage coexistent
-`updated_at` est un `timestamp **without** time zone` et **deux écritures coexistent** :
-- `defaultNow()` (SQL) écrit l'**heure locale du serveur PG** (`TimeZone=Europe/Paris`, +2 h) ;
-- les écritures Drizzle (`.values()` / `$onUpdate`) écrivent l'**UTC** de la `Date` JS.
-
-Conséquences : l'ordre absolu entre lignes des deux populations peut être décalé de l'offset, et une
-ligne créée puis mise à jour dans les mêmes 2 h voit son `updated_at` « reculer » → **mise à jour
-manquée** côté d'un autre poste. Le tirage reste exact au sein d'une population (prouvé E2E), mais
-le mélange est un risque de convergence.
-**Impact web préexistant** : ce mélange existe déjà dans l'application web (il n'est pas introduit
-par ce projet).
-**Piste** : `ALTER DATABASE … SET timezone = 'UTC'` (alignement sur Vercel, déjà UTC) **+** vérifier
-que l'affichage reste correct (JS interprète un timestamp naïf comme local), ou migrer les colonnes
-en `timestamptz`. **→ Décision Lead requise** (touche le schéma et les données existantes).
+### Q-8 — ✅ RÉSOLU (voir le tableau ci-dessus)
+> **Historique** : deux conventions d'horodatage coexistaient (`defaultNow()` = heure locale PG,
+> Drizzle = UTC), ce qui pouvait faire **reculer `updated_at`** après une mise à jour et faire
+> **perdre une édition au curseur de pull**. Bug réel constaté dans les données de test.
+> **Résolution** : convention **UTC partout** + migration réversible des colonnes d'horodatage
+> machine. Reste à documenter : le commentaire « ambiguïté hors périmètre » de
+> `src/lib/sync/central-store.ts` (à mettre à jour lors d'une prochaine tâche de sync).
 
 À trancher avant ou avant la fin de la Phase « Packaging » (elles ne bloquent pas les Phases 1-7) :
 
-| # | Question | Impact | Proposition par défaut |
-|---|---|---|---|
-| **Q-1** | **Hébergement des releases** pour l'auto-update (GitHub Releases ? S3 ? Vercel Blob ?) | Phase 8 | GitHub Releases du repo existant |
-| **Q-2** | **Certificat de code signing** : qui l'achète, quel type (OV vs EV), qui gère le pipeline de signature ? | Phase 8 | Sans certificat, SmartScreen s'affiche (coût humain accepté si postes gérés par la DSI) |
-| **Q-3** | **Chiffrement du disque** (BitLocker/VeraCrypt) : les binaires PostgreSQL stockent les données médicales **en clair** dans `userData/pgdata` | Sécurité | À **signifier par écrit au client** ; prérequis non technique |
-| **Q-4** | **Version Windows cible** (10 / 11 ?) et architecture (x64 uniquement ?) | Phase 8 | Windows 10/11 x64 |
-| **Q-5** | **Port PostgreSQL local** : fixe (5433) ou détecté dynamiquement à chaque démarrage ? | Phase 2 | Dynamique avec persistance dans `userData/config.json` (évite les conflits si PG système installé) |
-| **Q-6** | **Bootstrap initial** : premier lancement d'un poste vierge = pull complet depuis le serveur central (pagination, volume à estimer) | Phase 5 | Pull paginé par `clinic_id` |
-| **Q-7** | **La base centrale reste-t-elle la source de vérité unique ?** (supposée oui : le serveur Vercel continue de tourner pour le web) | Phase 4 | Oui — validé implicitement par D-1/D-3 |
+| # | Question | Décision |
+|---|---|---|
+| **Q-1** | **Hébergement des releases** pour l'auto-update | `app-update.yml` généré pointe déjà sur **GitHub Releases** (`SOf1AN3/dental-app`). À confirmer : publier la 1ʳᵉ release sur ce dépôt. |
+| **Q-2** | **Code signing** | ✅ **DÉCIDÉ (2026-10-15) : aucun certificat.** Option gratuite → SmartScreen affiche « Windows a protégé votre ordinateur », l'utilisateur clique « Plus d'informations → Exécuter quand même » **une fois**. Acceptable sur 2-5 postes fixes par clinique (coût humain documenté dans `DESKTOP-ELECTRON.md` §4.1). Réévaluer si la distribution s'élargit (OV ~100-200 $/an). |
+| **Q-3** | **Chiffrement du disque** (BitLocker/VeraCrypt) | ⏳ **À signifier par écrit au client** — PG stocke les données médicales en clair dans `userData/pgdata`. |
+| **Q-4** | **Version Windows cible** | Windows 10/11 x64 (cible `nsis` actuelle). |
+| **Q-5** | **Port PostgreSQL local** | ✅ Dynamique avec persistance (`userData/config.json`), défaut 5433. |
+| **Q-6** | **Bootstrap initial** | ✅ Pull paginé via `POST /api/sync/bootstrap` (plafond 20 pages / 5 000 lignes). |
+| **Q-7** | **Source de vérité** | ✅ Oui : le serveur Vercel reste central ; le web continue de tourner. |
+| **Q-8** | **Dualité d'horodatage** | ✅ **RÉSOLU (2026-10-15) : UTC partout.** Investigation : **aucune** comparaison `now()` SQL dans l'app (tout est calculé en JS = instants UTC), Drizzle écrit/lit déjà de l'UTC, l'agenda est insensible. Bascule : `ALTER DATABASE … SET timezone='UTC'` (dev) + `-c timezone=UTC` (clusters embarqués, avec vérification au démarrage) + migration réversible des `created_at`/`updated_at` de test (61 colonnes, **jamais** les horaires métier). Preuve : `updated_at` strictement croissant après insert/update. |
 
 ---
 
