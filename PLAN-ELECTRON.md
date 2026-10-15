@@ -50,6 +50,21 @@ convergence passe par le serveur central.
 
 ## Questions / décisions en attente
 
+### Q-8 (NOUVEAU — trouvé par la recette E2E 10.2) : deux conventions d'horodatage coexistent
+`updated_at` est un `timestamp **without** time zone` et **deux écritures coexistent** :
+- `defaultNow()` (SQL) écrit l'**heure locale du serveur PG** (`TimeZone=Europe/Paris`, +2 h) ;
+- les écritures Drizzle (`.values()` / `$onUpdate`) écrivent l'**UTC** de la `Date` JS.
+
+Conséquences : l'ordre absolu entre lignes des deux populations peut être décalé de l'offset, et une
+ligne créée puis mise à jour dans les mêmes 2 h voit son `updated_at` « reculer » → **mise à jour
+manquée** côté d'un autre poste. Le tirage reste exact au sein d'une population (prouvé E2E), mais
+le mélange est un risque de convergence.
+**Impact web préexistant** : ce mélange existe déjà dans l'application web (il n'est pas introduit
+par ce projet).
+**Piste** : `ALTER DATABASE … SET timezone = 'UTC'` (alignement sur Vercel, déjà UTC) **+** vérifier
+que l'affichage reste correct (JS interprète un timestamp naïf comme local), ou migrer les colonnes
+en `timestamptz`. **→ Décision Lead requise** (touche le schéma et les données existantes).
+
 À trancher avant ou avant la fin de la Phase « Packaging » (elles ne bloquent pas les Phases 1-7) :
 
 | # | Question | Impact | Proposition par défaut |
@@ -587,6 +602,24 @@ extraResources:
 ---
 
 ## Ordre d'exécution (séquentiel — chaque étape livre une app fonctionnelle)
+
+> ### ✅ ÉTAT D'AVANCEMENT (2026-10-15) — ÉTAPES 1 À 9 TERMINÉES, ÉTAPE 10 PARTIELLE
+>
+> | Étape | Statut | Preuve |
+> |---|---|---|
+> | **1 Socle** | ✅ | coque sécurisée, build web **79 routes intact**, standalone OK |
+> | **2 Base locale** | ✅ | cycle prod complet `initdb`→PG 5433→migrations→standalone, **persistance au 2ᵉ démarrage**, arrêt propre sans recovery |
+> | **3 Auth hors-ligne** | ✅ | login HTTP local prouvé, confiance **fail-closed**, MERGE incapable de lever une révocation |
+> | **4 Colonnes de sync** | ✅ | 27 tables répliquées + 5 tables moteur, migrations 0017→0020 additives |
+> | **5 Synchronisation** | ✅ | routes centrales + jeton d'appareil + outbox + runner ; **641/641 tests** |
+> | **6 Conflits & blocs** | ✅ | numérotation sans doublon (blocs + plancher), fusion D-5 avec garde-fou multi-cabinet |
+> | **7 UI** | ✅ | badge, `/settings/sync`, revues, **bootstrap** (hash via variante fermée) |
+> | **8 Médias** | ✅ | magasin SHA-256, route `/api/sync/media` (IDOR fermé), étape best-effort |
+> | **9 Packaging** | ✅ | **installateur NSIS 220,9 Mo**, garde-fous `.env`/`pgdata`/`uploads`/`src` **vérifiés** |
+> | **10 Validation** | 🟡 | durcissements ✅, réparation du tirage ✅ (Date brut + µs), **recette E2E partielle** (push/idempotence/portée/blocs/LWW ✅ ; convergence 2 bases à refaire), **recette 2 postes réels à faire** |
+>
+> **Reste ouvert** : Q-8 (fuseaux horaires, décision Lead), recette 2 postes, décision sur le
+> code signing (Q-2) et l'hébergement des releases (Q-1).
 
 ```
 ÉTAPE 1 — SOCLE (reconnaissance)
