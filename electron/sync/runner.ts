@@ -46,12 +46,15 @@
  */
 
 import log from 'electron-log'
-import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 import type { DesktopDb } from '@/lib/db/desktop-db'
 import { getDesktopDb } from '@/lib/db/desktop-db'
-import { syncOutbox, syncState } from '@/lib/db/schema'
+import { radiographs, syncOutbox, syncState } from '@/lib/db/schema'
+import { createLocalBlobStore } from '@/lib/offline/blob-store'
 import { applyPulledChanges, createLocalApplyRepo } from '@/lib/sync/local-apply'
 import { createConflictsDbRepo, recordPushConflicts } from '@/lib/sync/conflict'
+import { syncMediaOnce } from '@/lib/sync/media-sync'
+import type { MediaSyncDeps } from '@/lib/sync/media-sync'
 import { createBackoff, createCentralProbe, SyncScheduler } from '@/lib/sync/net'
 import {
   OUTBOX_SEQ_KEY,
@@ -70,6 +73,7 @@ import type {
   SyncOutboxApi,
   SyncRunnerDeps,
 } from '@/lib/sync/runner-core'
+import { LOCAL_UPLOADS_BASE_PATH } from '@/lib/storage'
 import { clearSyncToken, readSyncToken, resolveDeviceId, writeSyncToken } from '../env'
 import type { SyncStatus } from '../preload'
 import { redactSecrets } from '../server/next'
@@ -82,6 +86,48 @@ import { redactSecrets } from '../server/next'
 const DEFAULT_TICK_MS = 30_000
 /** Premier différé : le démarrage de l'app (fenêtre, Next) n'est pas gêné. */
 const FIRST_TICK_DELAY_MS = 3_000
+
+/* -------------------------------------------------------------------------- */
+/* Étape best-effort de synchronisation des médias (tâche 8.1)                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Plafond d'items (téléchargements **et** téléversements confondus) traités
+ * par cycle : un cycle média reste borné, quel que soit le nombre de
+ * radiographies du cabinet. Le cœur (`runner-core.ts`) n'est pas modifié :
+ * cette étape vit ici, dans le câblage.
+ */
+const MEDIA_SYNC_MAX_ITEMS = 20
+/** Timeout par item distant — aligné sur `SYNC_REQUEST_TIMEOUT_MS` du cœur. */
+const MEDIA_REQUEST_TIMEOUT_MS = 15_000
+
+/**
+ * États de cycle qui **prouvent** que le central est joignable et le jeton
+ * valide lors de CE cycle : le probe (étape 4 du cœur) puis l'habilitation
+ * (étape 5) sont franchis avant le push/pull. Tous les autres états
+ * (`offline`, `needs-auth`, `needs-clinic`, `idle-no-base-url`, `error`,
+ * `noop` refusé) → **aucune** étape média : hors-ligne, aucun aller-retour.
+ */
+function allowsMediaStep(result: SyncCycleResult): boolean {
+  if (result.status === 'pushed' || result.status === 'pulled') return true
+  return result.status === 'noop' && result.reason === undefined
+}
+
+/**
+ * Annule le corps d'une réponse **sans le lire** : la décision (présence,
+ * acceptation) repose sur le statut HTTP, jamais sur les octets — on ne
+ * re-télécharge pas un fichier entier pour savoir s'il existe.
+ * (La route n'exporte pas `HEAD` : Next répondrait 405.)
+ */
+async function discardBody(response: Response): Promise<void> {
+  const body = response.body
+  if (body === null) return
+  try {
+    await body.cancel()
+  } catch {
+    // Corps déjà fermé ou verrouillé : sans conséquence sur la décision.
+  }
+}
 
 export interface SyncRunnerHandle {
   /** Arrêt **idempotent** : libère le timer, désactive le runner courant. */
@@ -402,6 +448,11 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
   // le runner reste inactif — comportement inchangé.
   const conflictsRepo = createConflictsDbRepo(db)
 
+  // Magasin binaire local (tâche 8.1) : même base que `LocalStorageAdapter`
+  // (`uploads/<key>`), résolue contre `process.cwd()` — les octets téléchargés
+  // sont donc lisibles par la route `/api/files/[...key]` sans autre câblage.
+  const mediaBlobs = createLocalBlobStore(LOCAL_UPLOADS_BASE_PATH)
+
   const deps: SyncRunnerDeps = {
     baseUrl,
     clinicId: options.clinicId ?? null,
@@ -448,9 +499,132 @@ function startRunnerUnsafe(options: StartSyncRunnerOptions): SyncRunnerHandle {
     }
   }
 
+  /**
+   * Dépendances de l'étape média (tâche 8.1) — construites à chaque étape
+   * pour figer le cabinet ACTIF et le jeton VALIDE du cycle en cours. Aucune
+   * de ces valeurs n'est journalisée.
+   *
+   * Déclarée en `const` **après** la garde `db === null` ci-dessus : le corps
+   * d'une déclaration de fonction étant hoisté, il ne bénéficierait pas du
+   * narrowing de `db`.
+   */
+  const createMediaSyncDeps = (
+    base: string,
+    clinicId: string,
+    token: string,
+  ): MediaSyncDeps => {
+    const authHeader = { Authorization: `Bearer ${token}` }
+    const urlFor = (key: string): string => {
+      const url = new URL(`${base}/api/sync/media`)
+      url.searchParams.set('key', key)
+      url.searchParams.set('clinicId', clinicId)
+      return url.toString()
+    }
+    return {
+      blobs: mediaBlobs,
+      // Radiographies du cabinet actif, non supprimées, **plus récentes
+      // d'abord** : le plafond `maxItems` examine toujours les têtes de liste
+      // à chaque cycle — un téléversement relégué en fin de liste n'est donc
+      // jamais éternellement starvé.
+      async listLocalRadiographs() {
+        const rows = await db
+          .select({ fileKey: radiographs.fileKey })
+          .from(radiographs)
+          .where(
+            and(eq(radiographs.clinicId, clinicId), isNull(radiographs.deletedAt)),
+          )
+          .orderBy(desc(radiographs.createdAt))
+        return rows.map((row) => ({ fileKey: row.fileKey }))
+      },
+      async hasRemote(key) {
+        const response = await deps.fetchImpl(urlFor(key), {
+          method: 'GET',
+          headers: authHeader,
+          signal: AbortSignal.timeout(MEDIA_REQUEST_TIMEOUT_MS),
+        })
+        await discardBody(response)
+        if (response.status === 200) return true
+        if (response.status === 404) return false
+        throw new Error(`présence distante refusée (HTTP ${response.status})`)
+      },
+      async downloadRemote(key) {
+        const response = await deps.fetchImpl(urlFor(key), {
+          method: 'GET',
+          headers: authHeader,
+          signal: AbortSignal.timeout(MEDIA_REQUEST_TIMEOUT_MS),
+        })
+        if (response.status === 200) {
+          return new Uint8Array(await response.arrayBuffer())
+        }
+        await discardBody(response)
+        if (response.status === 404) return null
+        throw new Error(`téléchargement refusé (HTTP ${response.status})`)
+      },
+      async uploadLocal(key, bytes) {
+        const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes)
+        const response = await deps.fetchImpl(`${base}/api/sync/media`, {
+          method: 'POST',
+          headers: { ...authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            key,
+            clinicId,
+            contentBase64: buffer.toString('base64'),
+          }),
+          signal: AbortSignal.timeout(MEDIA_REQUEST_TIMEOUT_MS),
+        })
+        await discardBody(response)
+        if (response.status === 200) return true
+        // Refus FERME du central : taille (413), type (415) ou portée (403)
+        // → item écarté (`skipped`), jamais une erreur de cycle.
+        if (
+          response.status === 413 ||
+          response.status === 415 ||
+          response.status === 403
+        ) {
+          return false
+        }
+        throw new Error(`téléversement refusé (HTTP ${response.status})`)
+      },
+      logger: deps.logger,
+    }
+  }
+
+  /**
+   * Étape best-effort de synchronisation des médias (tâche 8.1), exécutée
+   * **après** le push/pull :
+   *
+   *  - **seulement si en ligne** : le cycle courant doit avoir franchi le
+   *    probe et l'habilitation (`allowsMediaStep`) ;
+   *  - **plafonnée** : `MEDIA_SYNC_MAX_ITEMS` items par cycle ;
+   *  - **jamais bloquante** : toute défaillance devient un simple
+   *    `log.warn` — le cycle de synchronisation est retourné tel quel, et le
+   *    cœur (`runner-core.ts`) n'est pas modifié.
+   */
+  async function runMediaStep(result: SyncCycleResult): Promise<void> {
+    if (stopped || !allowsMediaStep(result)) return
+    const clinicId = deps.clinicId
+    const stored = deps.token.read()
+    if (baseUrl === undefined || clinicId === null || stored === null) return
+    const expiresAt = Date.parse(stored.expiresAt)
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
+
+    try {
+      // `syncMediaOnce` ne rejette jamais : ce `catch` est un filet de sécurité.
+      await syncMediaOnce(
+        createMediaSyncDeps(baseUrl, clinicId, stored.token),
+        { maxItems: MEDIA_SYNC_MAX_ITEMS, timeoutMs: MEDIA_REQUEST_TIMEOUT_MS },
+      )
+    } catch (error) {
+      log.warn(`[sync] étape média ignorée (cycle inchangé) : ${redactSecrets(messageOf(error))}`)
+    }
+  }
+
   async function runOnce(): Promise<SyncCycleResult> {
     const result = await runSyncCycle(deps)
     applyStatus(result)
+    // Tâche 8.1 : étape média best-effort APRÈS push/pull, hors cœur — voir
+    // `runMediaStep` (seulement en ligne, plafonnée, jamais bloquante).
+    await runMediaStep(result)
     return result
   }
 
