@@ -143,9 +143,16 @@ async function main() {
     // application médicale en Algérie — on force UTF-8.
     initdbFlags: ["--encoding=UTF8", "--no-locale"],
     postgresFlags: [
-      // Écoute sur l'interface de bouclage uniquement.
+      // Ecoute sur l'interface de bouclage uniquement.
       "-c",
       "listen_addresses=127.0.0.1",
+      // Convention d'horodatage UNIQUE (Q-8) : Drizzle écrit/lit de l'UTC,
+      // sans quoi defaultNow() (heure locale) et $onUpdate (UTC) coexistent
+      // dans la meme colonne et `updated_at` peut RECULER apres une mise a
+      // jour -> le curseur de pull perd alors la mise a jour a jamais.
+      // Meme drapeau que electron/db/embedded-pg.ts.
+      "-c",
+      "timezone=UTC",
     ],
     onLog: (m) => console.log(`[postgres] ${m}`),
     onError: (m) => console.error(`[postgres] ${m}`),

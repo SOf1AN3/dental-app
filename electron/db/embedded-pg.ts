@@ -25,6 +25,10 @@
  *    détenteur est réellement mort, sinon on abandonne ;
  *  - **journalisation** : `electron-log` **uniquement** (aucun `console.log`), et
  *    toute URL/jeton passe par `redactSecrets()` (l'URL contient le mot de passe) ;
+ *  - **fuseau `UTC` (Q-8)** : `postgresFlags` impose `-c timezone=UTC` et
+ *    `ensureUtcTimezone()` vérifie (et corrige via `ALTER DATABASE`) avant la
+ *    première écriture — `defaultNow()` et les écritures Drizzle partagent
+ *    alors la même convention, condition de monotonie d'`updated_at` ;
  *  - **arrêt** : `stop()` idempotent, jamais rejetant ; arrêt **gracieux** via
  *    `pg_ctl stop -m fast` (checkpoint de fermeture → `postmaster.pid` retiré
  *    par PostgreSQL, plus de « automatic recovery » au démarrage suivant), le
@@ -863,6 +867,107 @@ function createReusedHandle(config: DbConfig): LocalDbHandle {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Fuseau UTC — convention d'horodatage unique (Q-8)                           */
+/* -------------------------------------------------------------------------- */
+
+/** Nom d'identifiant SQL sûr (base issue de la config, jamais d'un utilisateur). */
+const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * `current_setting('TimeZone')` sur une session **dédiée** (ouverte puis
+ * fermée) : chaque session porte son propre fuseau, une session réutilisée
+ * ne prouve rien pour les suivantes.
+ */
+async function readTimeZone(config: DbConfig): Promise<string> {
+  const sql = postgres(config.url, {
+    connect_timeout: PROBE_CONNECT_TIMEOUT_S,
+    max: 1,
+    fetch_types: false,
+    onnotice: () => undefined,
+  })
+  try {
+    const rows = await sql<{ tz: string }[]>`select current_setting('TimeZone') as tz`
+    return readTextColumn(rows[0], 'tz')
+  } finally {
+    await sql.end({ timeout: CLIENT_END_TIMEOUT_S }).catch(() => undefined)
+  }
+}
+
+/**
+ * Garantit que **toute nouvelle session** démarre en `UTC` — prérequis de la
+ * monotonie d'`updated_at` (Q-8).
+ *
+ * Deux filets, dans cet ordre :
+ *  1. le drapeau `-c timezone=UTC` du `postgresFlags` ci-dessus (déjà appliqué
+ *     au moment où cette fonction est appelée) ;
+ *  2. si le fuseau lu reste non-UTC (paquet `embedded-postgres` **beta** qui
+ *     n'aurait pas transmis le drapeau, cluster préexistant, drapeau filtré),
+ *     `ALTER DATABASE … SET timezone = 'UTC'` — persistant dans le catalogue,
+ *     puis **re-vérifié sur une nouvelle session** (`ALTER DATABASE` ne
+ *     s'applique jamais à la session courante).
+ *
+ * Échec fermé : si le fuseau n'est toujours pas `UTC` après correction, on
+ * REJETTE le démarrage (le cluster démarré est nettoyé par l'appelant) plutôt
+ * que d'écrire des horodatages dans deux conventions — c'est exactement le
+ * défaut silencieux que cette vérification doit empêcher.
+ */
+async function ensureUtcTimezone(config: DbConfig): Promise<void> {
+  const before = await readTimeZone(config)
+  if (before === 'UTC') {
+    log.info(`[pg] TimeZone = ${before} (convention d'horodatage unique, drapeau -c timezone=UTC appliqué)`)
+    return
+  }
+
+  log.warn(`[pg] TimeZone = ${before} (attendu UTC) : correction par ALTER DATABASE … SET timezone = 'UTC'`)
+  if (!SAFE_IDENTIFIER.test(config.database)) {
+    throw new Error(`Nom de base inattendu (${JSON.stringify(config.database)}) : correction du fuseau impossible.`)
+  }
+  const sql = postgres(config.url, {
+    connect_timeout: PROBE_CONNECT_TIMEOUT_S,
+    max: 1,
+    fetch_types: false,
+    onnotice: () => undefined,
+  })
+  try {
+    await sql.unsafe(`ALTER DATABASE "${config.database}" SET timezone = 'UTC'`)
+  } finally {
+    await sql.end({ timeout: CLIENT_END_TIMEOUT_S }).catch(() => undefined)
+  }
+
+  // Nouvelle session : c'est elle qui porte le réglage persisté.
+  const after = await readTimeZone(config)
+  if (after !== 'UTC') {
+    throw new Error(
+      `Fuseau PostgreSQL non aligné : TimeZone = ${after} au lieu de UTC après correction. ` +
+        'Démarrage refusé (les horodatages mélangeraient le local et l\'UTC).',
+    )
+  }
+  log.info('[pg] TimeZone = UTC confirmé après correction (ALTER DATABASE persistant)')
+}
+
+/**
+ * Chemin **réutilisation** : on ne modifie JAMAIS un serveur qui n'est pas le
+ * nôtre (contrat du fichier) — on se contente de signaler un fuseau non-UTC,
+ * qui dégraderait la monotonie d'`updated_at` sur cette base.
+ */
+async function warnIfNonUtcTimezone(config: DbConfig): Promise<void> {
+  try {
+    const tz = await readTimeZone(config)
+    if (tz !== 'UTC') {
+      log.warn(
+        `[pg] TimeZone = ${tz} sur la base réutilisée (attendu UTC) : serveur non nôtre, aucun réglage appliqué. ` +
+          'Exécuter « ALTER DATABASE … SET timezone = \'UTC\' » sur cette base (Q-8).',
+      )
+    } else {
+      log.info('[pg] TimeZone = UTC sur la base réutilisée')
+    }
+  } catch (error) {
+    // Sonde non bloquante : l'identité du serveur est déjà vérifiée.
+    log.warn(`[pg] lecture du TimeZone impossible : ${describeError(error)}`)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Point d'entrée                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -887,6 +992,8 @@ export async function startLocalDb(config: DbConfig): Promise<LocalDbHandle> {
       `[pg] serveur PostgreSQL déjà actif sur le port ${config.port} (identité vérifiée) : réutilisation, ` +
         'aucun processus lancé',
     )
+    // Sonde seule (jamais de mutation sur un serveur qui n'est pas le nôtre).
+    await warnIfNonUtcTimezone(config)
     return createReusedHandle(config)
   }
 
@@ -914,6 +1021,19 @@ export async function startLocalDb(config: DbConfig): Promise<LocalDbHandle> {
       // Écoute sur l'interface de bouclage uniquement.
       '-c',
       'listen_addresses=127.0.0.1',
+      // Q-8 — convention d'horodatage UNIQUE : UTC.
+      // `updated_at`/`created_at` sont des `timestamp` sans fuseau ; Drizzle
+      // écrit et relit l'UTC de la `Date` JS, tandis que `defaultNow()` écrit
+      // `now()` = fuseau de la SESSION PostgreSQL. Sans ce réglage, une même
+      // colonne mélange Paris (+2 h) et UTC : `updated_at` peut RECULER après
+      // un insert, et le curseur `(updated_at, id)` perd l'édition pour
+      // toujours. `-c` vaut pour les clusters neufs COMME pour les data dirs
+      // déjà créés (paramètre appliqué à chaque session, quel que soit le
+      // `postgresql.conf` existant) — la vérification `ensureUtcTimezone()`
+      // plus bas couvre le cas où le paquet beta ne transmettrait pas le
+      // drapeau.
+      '-c',
+      'timezone=UTC',
     ],
     onLog: handlers.onLog,
     onError: handlers.onError,
@@ -926,6 +1046,8 @@ export async function startLocalDb(config: DbConfig): Promise<LocalDbHandle> {
     }
     await pg.start()
     await waitUntilReady(config)
+    // Q-8 : fuseau UTC vérifié (et corrigé) AVANT la première écriture.
+    await ensureUtcTimezone(config)
   } catch (error) {
     // Jamais de cluster orphelin derrière un démarrage avorté — et, si possible,
     // arrêt **gracieux** (`pg_ctl`) : même ici, pas de `taskkill /F` inutile.
