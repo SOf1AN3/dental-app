@@ -7,7 +7,30 @@ import path from 'node:path'
  * servie par `next dev` (développement) ou `next start` (production).
  * Partagée avec `main.ts`, qui attend la disponibilité du serveur avant le chargement.
  */
-export const START_URL = process.env.ELECTRON_START_URL || 'http://localhost:3000'
+/**
+ * Port du serveur Next embarqué — source UNIQUE : `electron/server/next.ts`
+ * l'importe (il importe déjà `START_URL` de ce module), de sorte que le port
+ * réellement servi, l'URL chargée dans la fenêtre et la liste blanche
+ * `will-navigate` dérivent tous du même entier — un écart bloquerait toute
+ * navigation (écran blanc).
+ *
+ * Pourquoi 47820 : 3000 est massivement squatte (autres serveurs de dev, Vite,
+ * Expo...). 47820 est sous la plage éphémère Windows (49152+, connexions
+ * sortantes), au-dessus des ports de dev courants, et n'est pas un port de
+ * service enregistré. L'écoute se fait sur 127.0.0.1 uniquement : aucun
+ * pare-feu n'est déclenché quel que soit le port. Surcharge via `PORT`.
+ */
+export const DEFAULT_NEXT_PORT = 47820
+
+export const START_URL =
+  process.env.ELECTRON_START_URL || `http://localhost:${DEFAULT_NEXT_PORT}`
+
+/**
+ * Chemin d'entrée : l'app de bureau s'ouvre directement sur l'écran de
+ * connexion. La landing est de toute façon inaccessible en mode bureau
+ * (`src/proxy.ts`), donc ce chemin ne peut jamais remonter au marketing.
+ */
+export const START_PATH = '/login'
 
 const WINDOW_WIDTH = 1440
 const WINDOW_HEIGHT = 900
@@ -22,7 +45,7 @@ function resolveAppOrigin(rawUrl: string): string {
   try {
     return new URL(rawUrl).origin
   } catch {
-    return 'http://localhost:3000'
+    return `http://localhost:${DEFAULT_NEXT_PORT}`
   }
 }
 

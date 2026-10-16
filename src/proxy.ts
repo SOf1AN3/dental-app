@@ -100,6 +100,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // vers /login et personne ne pourrait jamais la voir.
   const isLanding = pathname === "/";
 
+  // Mode application de bureau : `DEVICE_ID` est injecté par `electron/env.ts`
+  // dans l'env du serveur Next **uniquement** quand l'app tourne sous Electron
+  // (jamais sur Vercel, jamais en `npm run dev` simple). La landing y est
+  // inaccessible : le poste est déjà déployé chez un client, le discours
+  // commercial n'a pas de sens, et un visiteur anonyme doit tomber sur l'écran
+  // de connexion. Les pages d'authentification restent servies (mot de passe
+  // oublié, réinitialisation, vérification).
+  const isDesktopApp = Boolean(process.env.DEVICE_ID);
+
   // --- Exemptions : ni lecture de session, ni verrou appliqués. ---------
   if (pathname.startsWith("/api/auth")) return NextResponse.next();
   if (pathname.startsWith("/api/cron")) return NextResponse.next();
@@ -124,7 +133,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   // --- Anonyme : landing + parcours d'authentification uniquement. -----
   if (!sessionUser) {
-    if (isLanding) return NextResponse.next();
+    // En mode bureau, la landing compte comme page protégée pour un anonyme :
+    // il est redirigé vers /login comme sur n'importe quelle autre route.
+    if (isLanding && !isDesktopApp) return NextResponse.next();
     if (authPages.some((r) => pathname.startsWith(r))) return NextResponse.next();
     return NextResponse.redirect(new URL("/login", request.url));
   }

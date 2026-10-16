@@ -6,7 +6,7 @@ import path from 'node:path'
 import type { Readable } from 'node:stream'
 // Source de vérité unique de l'origine : `window.ts` ne fait qu'exporter une
 // constante (aucun effet de bord au chargement — voir `resolveServerUrl`).
-import { START_URL } from '../window'
+import { DEFAULT_NEXT_PORT, START_URL } from '../window'
 
 /**
  * Cycle de vie du serveur Next.js embarqué (PLAN-ELECTRON §1.4 — tâche 1.4).
@@ -41,7 +41,7 @@ import { START_URL } from '../window'
 
 /** URL de bouclage utilisée par le renderer — doit rester cohérente avec `START_URL`. */
 const LOOPBACK_HOSTNAME = '127.0.0.1'
-const DEFAULT_PORT = 3000
+const DEFAULT_PORT = DEFAULT_NEXT_PORT
 
 const PROBE_INTERVAL_MS = 250
 /** Timeout du probe de **readiness** interne (`waitUntilReady`) : inchangé. */

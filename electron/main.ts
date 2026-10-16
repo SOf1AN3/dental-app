@@ -18,7 +18,7 @@ import {
 } from './server/next'
 import { centralLoginFailureMessage, loginToCentral, type LoginToCentralResult } from './sync/auth'
 import { startSyncRunner, type SyncRunnerHandle } from './sync/runner'
-import { createMainWindow, START_URL } from './window'
+import { createMainWindow, START_PATH, START_URL } from './window'
 
 /** Délai de secours au-delà duquel l'arrêt du serveur est forcé (tâche 1.4). */
 const SERVER_SHUTDOWN_TIMEOUT_MS = 5_000
@@ -97,7 +97,27 @@ async function openMainWindow(url: string): Promise<void> {
       mainWindow = null
     }
   })
-  await win.loadURL(url)
+  await win.loadURL(resolveStartUrl(url))
+}
+
+/**
+ * URL d'entrée de l'application de bureau : l'app s'ouvre **directement** sur
+ * l'écran de connexion (`START_PATH`), jamais sur la landing — un poste de
+ * cabinet n'a pas à voir le discours commercial, et la landing est de toute
+ * façon refusée en mode bureau par `src/proxy.ts`.
+ *
+ * `url` est une **origine** (le serveur local n'a pas de chemin à ce stade) :
+ * `new URL('/login', origine)` conservant hôte et port, la liste blanche
+ * `will-navigate` (définie sur la même origine) reste valable.
+ */
+function resolveStartUrl(url: string): string {
+  try {
+    return new URL(START_PATH, url).href
+  } catch {
+    // URL illisible : on charge telle quelle plutôt que de planter au démarrage ;
+    // `loadURL` échouera proprement et le chemin d'erreur existant prendra le relais.
+    return url
+  }
 }
 
 /** URL du serveur courant, avec repli sur `START_URL` (serveur jamais démarré). */
