@@ -1,66 +1,53 @@
-"use client";
-
 /**
- * Tâche P2 — section « Première connexion sur ce poste ? » (application de
- * bureau uniquement).
+ * Tâche P3 — flux de connexion desktop : **logique pure** extraite de
+ * l'ancien composant `FirstRunBootstrap` (supprimé en P3), puis orchestration
+ * testable du repli vers le serveur central.
  *
- * ## Pourquoi ce composant existe
+ * ## Pourquoi ce module existe
  *
  * Une **installation neuve** de l'application de bureau possède une base
  * locale **vide** : aucun utilisateur → le login local (`bcrypt` sur `user`)
  * rejette toujours, même avec un compte valide. Les comptes viennent du
- * **serveur central** : il faut d'abord « récupérer le compte » sur le poste,
- * en deux temps :
+ * **serveur central**. Depuis la P3, l'utilisateur ne voit qu'**un seul**
+ * bouton « Se connecter » : le repli est **invisible** pour lui.
  *
- *  1. `api.loginToSync(email, password)` — IPC vers le main Electron →
- *     `POST {central}/api/sync/token` : le main enregistre le jeton
- *     d'appareil, injecte `SYNC_TOKEN`/`SYNC_BASE_URL`/`DEVICE_ID` dans
- *     l'env de l'enfant Next et le **relance** ;
- *  2. `POST /api/sync/bootstrap` — route du serveur **local**, même origine
- *     que la page (jamais d'URL fournie par l'utilisateur) : elle tire les
- *     données initiales (dont les hash d'accès) du central et les applique
- *     localement. Le poste peut ensuite faire son login **local**.
+ * Le flux complet (page de connexion) est :
  *
- * ## Réutilisation du formulaire de connexion
+ *  1. `signIn("credentials", …)` — chemin **local**, inchangé ;
+ *  2. en cas d'erreur **et en mode desktop uniquement**
+ *     (`useIsDesktop()` → faux = aucun appel ci-dessous) :
+ *     a. `loginToSync(email, password)` — IPC vers le main Electron →
+ *        `POST {central}/api/sync/token` : le main enregistre le jeton
+ *        d'appareil, injecte `SYNC_TOKEN`/`SYNC_BASE_URL`/`DEVICE_ID` dans
+ *        l'env de l'enfant Next et le **relance** ;
+ *     b. `POST /api/sync/bootstrap` — route du serveur **local**, même
+ *        origine que la page (jamais d'URL fournie par l'utilisateur),
+ *        jamais mis en cache, délai plafonné : elle tire les données
+ *        initiales (dont les hash d'accès) du central ;
+ *     c. **nouveau** `signIn("credentials", …)` — un **seul** essai de repli,
+ *        jamais de boucle (ce second essai ne redéclenche jamais (2)).
+ *  3. en mode web : strictement le comportement d'origine (« Email ou mot de
+ *     passe incorrect »), **aucun** IPC, **aucun** fetch bootstrap.
  *
- * Ce composant n'a **pas** son propre formulaire : il relit les valeurs déjà
- * saisies dans les champs `#email` / `#password` de la page de login via les
- * `RefObject` reçus en props — un seul couple identifiants, jamais de double
- * saisie divergente. Champs vides → message inline, aucun appel réseau.
+ * ## Harness node-only (pourquoi des fonctions pures)
  *
- * ## Mode desktop uniquement
- *
- * Rendu **uniquement** quand le pont `window.desktop` existe
- * ({@link useIsDesktop}) : `null` en web, **zéro** changement visible côté
- * navigateur. Le snapshot serveur du hook vaut `false` → le bloc n'apparaît
- * qu'après hydratation dans l'environnement Electron (sans divergence
- * d'hydratation, cf. le hook).
- *
- * ## Logique de décision pure (testée sans React ni réseau)
- *
- * Le harness de tests du projet est **node-only** (`vitest.config.ts` :
+ * `vitest.config.ts` configure un harness **node-only** :
  * `environment: "node"`, `include` limité aux fichiers `*.test.ts` sous
- * `src/` — aucun `@testing-library/react`,
- * aucun jsdom). La décision est donc extraite dans des fonctions **pures** —
- * {@link resolveBootstrapOutcome} (union fermée des issues de
- * `loginToSync`) et {@link interpretBootstrapStatus} (statut HTTP du
- * bootstrap) — testées dans
- * `src/lib/offline/first-run-bootstrap.test.ts`, et le composant ne fait que
- * de la traduction événement → état React.
+ * `src/` — aucun jsdom, aucun `@testing-library/react`. La décision est donc
+ * extraite dans des fonctions **pures** —
+ * {@link resolveBootstrapOutcome} (union fermée des issues de `loginToSync`),
+ * {@link interpretBootstrapStatus} (statut HTTP du bootstrap) et
+ * {@link attemptDesktopFallback} (enchaînement `loginToSync` → bootstrap →
+ * retry, avec `loginToSync`/`fetchImpl`/`signIn` **injectés**, donc sans
+ * React ni réseau réel) — testées dans
+ * `src/lib/offline/bootstrap-flow.test.ts`.
  *
  * Aucun secret, aucun mot de passe ne circule dans l'UI ni dans les logs :
  * seuls des **messages rédigés** sont affichés (l'union fermée des motifs
  * d'échec est mappée exhaustivement, jamais de texte brut du serveur).
  */
 
-import { useState, type RefObject } from "react";
-import { toast } from "sonner";
-import {
-  getDesktopApi,
-  useIsDesktop,
-  type CentralLoginFailureReason,
-  type SyncLoginResult,
-} from "@/hooks/use-desktop";
+import type { CentralLoginFailureReason, SyncLoginResult } from "@/hooks/use-desktop";
 
 /* -------------------------------------------------------------------------- */
 /* Messages (français, rédigés — jamais de texte brut du serveur central)      */
@@ -91,7 +78,7 @@ export const LOGIN_FAILURE_MESSAGES: Record<CentralLoginFailureReason, string> =
     "Le serveur local n'a pas redémarré à temps. Redémarrez l'application, puis réessayez.",
 };
 
-/** Repli honnête si le main omet le motif (l'union reste la source normale). */
+/** Repli honnête si le main omet le motif (l'union reste la source normative). */
 export const GENERIC_LOGIN_FAILURE_MESSAGE =
   "La connexion au serveur central a échoué. Réessayez.";
 
@@ -110,12 +97,12 @@ export const NO_CLINICS_MESSAGE =
   "Aucun cabinet n'est associé à ce compte : il n'y a rien à récupérer sur ce poste. " +
   "Contactez votre administrateur.";
 
-/** Champs du formulaire de connexion encore vides au clic. */
+/** Champs du formulaire de connexion encore vides au moment du repli. */
 export const FILL_FIELDS_MESSAGE =
   "Renseignez votre email et votre mot de passe dans le formulaire ci-dessus " +
-  "avant de récupérer votre compte.";
+  "avant de vous connecter.";
 
-/** Pont Electron absent au moment du clic (démontage / préload refusé). */
+/** Pont Electron absent au moment du repli (démontage / preload refusé). */
 export const BRIDGE_UNAVAILABLE_MESSAGE =
   "Le module de synchronisation de l'application est indisponible. " +
   "Redémarrez l'application, puis réessayez.";
@@ -134,18 +121,31 @@ export const BOOTSTRAP_UNREACHABLE_MESSAGE =
   "Impossible de joindre le serveur local pour l'amorçage. " +
   "Vérifiez que l'application est ouverte, puis réessayez.";
 
-/** Succès : invitation explicite à cliquer sur « Se connecter ». */
+/**
+ * Succès de l'amorçage (2xx) : invitation explicite à cliquer sur
+ * « Se connecter ». Depuis la P3 le retry automatique prend le relais, mais le
+ * message reste l'ancrage sémantique du succès (testé tel quel).
+ */
 export const BOOTSTRAP_DONE_MESSAGE =
   "Compte récupéré : les données initiales ont été chargées. " +
   "Cliquez maintenant sur « Se connecter ».";
+
+/**
+ * Compte bien récupéré (bootstrap 2xx) mais le **second** `signIn` est refusé :
+ * message explicite, jamais un « Email ou mot de passe incorrect » muet qui
+ * laisserait croire que le compte n'existe toujours pas.
+ */
+export const RETRY_REFUSED_MESSAGE =
+  "Votre compte a bien été récupéré sur ce poste, mais le mot de passe a été " +
+  "refusé lors de la nouvelle tentative. Vérifiez votre mot de passe, puis réessayez.";
 
 /* -------------------------------------------------------------------------- */
 /* Décision pure — issue de `loginToSync` (testée sans React ni réseau)        */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Verdict sur le résultat de `loginToSync`, en **fermé** : le composant ne
- * peut traiter que ces issues, sans repli muet.
+ * Verdict sur le résultat de `loginToSync`, en **fermé** : l'appelant ne peut
+ * traiter que ces issues, sans repli muet.
  */
 export type BootstrapOutcome =
   /** Identifiants centraux acceptés et cabinets connus → lancer le bootstrap. */
@@ -161,12 +161,12 @@ export type BootstrapOutcome =
 
 /**
  * Avertissements **connus** du main (le miroir les typent en `string` ouverte,
- * cf. `SyncLoginResult.warning`) : ces deux valeurs signifient que l'env n'a
- * pas été appliqué et que le serveur local tourne **sans** le jeton — le
+ * cf. `SyncLoginResult.warning`) : ces valeurs signifient que l'env n'a pas
+ * été appliqué et que le serveur local tourne **sans** le jeton — le
  * `POST /api/sync/bootstrap` répondra 409. Un avertissement inconnu reste non
  * bloquant (l'appel bootstrap départagera, via son statut HTTP).
  */
-const SERVER_RESTART_WARNINGS: ReadonlySet<string> = new Set([
+export const SERVER_RESTART_WARNINGS: ReadonlySet<string> = new Set([
   "server-not-restartable",
   "restart-failed",
   // Même signification : le serveur local n'a jamais été relancé avec le jeton,
@@ -195,7 +195,7 @@ export function resolveBootstrapOutcome(result: SyncLoginResult): BootstrapOutco
       kind: "login-failed",
       message:
         result.reason !== undefined
-          ? LOGIN_FAILURE_MESSAGES[result.reason]
+          ? LOGIN_FAILURE_MESSAGES[result.reason] ?? GENERIC_LOGIN_FAILURE_MESSAGE
           : GENERIC_LOGIN_FAILURE_MESSAGE,
     };
   }
@@ -233,140 +233,111 @@ export function interpretBootstrapStatus(status: number): BootstrapStatusOutcome
 }
 
 /* -------------------------------------------------------------------------- */
-/* Composant                                                                   */
+/* Orchestration du repli desktop (deps injectées → testable sans réseau réel)  */
 /* -------------------------------------------------------------------------- */
 
-/** Phase du flux d'amorçage (`done` = bootstrap terminé avec succès). */
-type BootstrapPhase = "idle" | "submitting" | "done";
-
-/** Retour d'information inline (accessible via `role="status"`). */
-interface BootstrapFeedback {
-  readonly kind: "error" | "success";
-  readonly message: string;
-}
-
-export interface FirstRunBootstrapProps {
-  /** Champ `#email` du formulaire de connexion (lecture seule, jamais de copie). */
-  readonly emailRef: RefObject<HTMLInputElement | null>;
-  /** Champ `#password` du formulaire de connexion (lecture au clic uniquement). */
-  readonly passwordRef: RefObject<HTMLInputElement | null>;
-}
-
 /** Délai maximal d'un appel au serveur local (échec fermé, jamais d'attente infinie). */
-const BOOTSTRAP_TIMEOUT_MS = 60_000;
+export const BOOTSTRAP_TIMEOUT_MS = 60_000;
 
-export function FirstRunBootstrap({ emailRef, passwordRef }: FirstRunBootstrapProps) {
-  const isDesktop = useIsDesktop();
-  const [phase, setPhase] = useState<BootstrapPhase>("idle");
-  const [feedback, setFeedback] = useState<BootstrapFeedback | null>(null);
+/**
+ * Sous-ensemble structurel de `fetch` consommé ici : accepte une URL relative
+ * de même origine, renvoie la `Response`. Suffisant pour injecter un double
+ * de test sans `any` ni cast.
+ */
+export interface BootstrapFetch {
+  (input: string, init?: RequestInit): Promise<Response>;
+}
 
-  // Rendu desktop **uniquement** : en web, zéro changement. Placé après les
-  // hooks (règles des hooks : aucun appel conditionnel).
-  if (!isDesktop) return null;
+/**
+ * Sous-ensemble structurel de `SignInResponse` (next-auth, `redirect: false`)
+ * : seule la présence d'une `error` est lue — le succès = absence d'erreur.
+ */
+export interface CredentialSignInResponse {
+  readonly error?: string | undefined;
+  readonly code?: string | undefined;
+  readonly status?: number;
+  readonly ok?: boolean;
+  readonly url?: string | null;
+}
 
-  async function handleBootstrap(): Promise<void> {
-    // (1) Relecture des identifiants **déjà saisis** dans le formulaire de
-    //     connexion — jamais de second formulaire.
-    const email = emailRef.current?.value.trim() ?? "";
-    const password = passwordRef.current?.value ?? "";
-    if (email === "" || password === "") {
-      setFeedback({ kind: "error", message: FILL_FIELDS_MESSAGE });
-      return;
-    }
-    const api = getDesktopApi();
-    if (api === null) {
-      setFeedback({ kind: "error", message: BRIDGE_UNAVAILABLE_MESSAGE });
-      return;
-    }
+/** Dépendances du repli, **injectées** (le module ne touche jamais `window`). */
+export interface DesktopFallbackDeps {
+  /** IPC vers le main Electron (`api.loginToSync`). */
+  readonly loginToSync: (email: string, password: string) => Promise<SyncLoginResult>;
+  /** Second essai de connexion **local** (next-auth, `redirect: false`). */
+  readonly signIn: (email: string, password: string) => Promise<CredentialSignInResponse>;
+  /** `fetch` du navigateur — injecté pour tester sans réseau réel. */
+  readonly fetchImpl: BootstrapFetch;
+}
 
-    setPhase("submitting");
-    setFeedback(null);
+/** Issue du repli desktop, en **fermé** (aucun repli muet dans la page). */
+export type DesktopFallbackOutcome =
+  /** Bootstrap 2xx puis second `signIn` **accepté** → `router.push(...)`. */
+  | { readonly kind: "signed-in" }
+  /** Bootstrap 2xx mais second `signIn` refusé (mot de passe) → message dédié. */
+  | { readonly kind: "retry-refused"; readonly message: string }
+  /** Échec à une étape (motifs rédigés, jamais de texte brut serveur). */
+  | { readonly kind: "failed"; readonly message: string };
 
-    // (2) Authentification centrale via le main Electron (IPC).
-    let result: SyncLoginResult;
-    try {
-      result = await api.loginToSync(email, password);
-    } catch {
-      setPhase("idle");
-      setFeedback({ kind: "error", message: BRIDGE_UNAVAILABLE_MESSAGE });
-      return;
-    }
-
-    // (3) Décision pure : motifs d'échec mappés, warnings honnêtes, listes
-    //     jamais devinées.
-    const outcome = resolveBootstrapOutcome(result);
-    if (outcome.kind !== "ready") {
-      setPhase("idle");
-      setFeedback({ kind: "error", message: outcome.message });
-      toast.error(outcome.message);
-      return;
-    }
-
-    // (4) Bootstrap : **même origine** que la page (aucune URL externe n'est
-    //     acceptée de l'extérieur), jamais mis en cache, délai plafonné.
-    try {
-      const response = await fetch("/api/sync/bootstrap", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clinicIds: outcome.clinicIds }),
-        cache: "no-store",
-        signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
-      });
-      const verdict = interpretBootstrapStatus(response.status);
-      if (verdict.kind === "done") {
-        setPhase("done");
-        setFeedback({ kind: "success", message: BOOTSTRAP_DONE_MESSAGE });
-        toast.success(BOOTSTRAP_DONE_MESSAGE);
-        return;
-      }
-      setPhase("idle");
-      setFeedback({ kind: "error", message: verdict.message });
-      toast.error(verdict.message);
-    } catch {
-      setPhase("idle");
-      setFeedback({ kind: "error", message: BOOTSTRAP_UNREACHABLE_MESSAGE });
-      toast.error(BOOTSTRAP_UNREACHABLE_MESSAGE);
-    }
+/**
+ * Enchaîne `loginToSync` → `POST /api/sync/bootstrap` → **un seul** second
+ * `signIn` — sans React, sans réseau réel (tout est injecté).
+ *
+ * Garde-fous :
+ *  - identifiants vides → aucun appel, message inline ;
+ *  - pont qui lève → {@link BRIDGE_UNAVAILABLE_MESSAGE} (jamais de crash) ;
+ *  - échec d'une étape → `{ kind: "failed" }` **sans** jamais enchaîner les
+ *    étapes suivantes (pas de boucle : seul ce module déclenche le repli, et
+ *    il n'est appelé qu'une fois par soumission, avant le retry).
+ */
+export async function attemptDesktopFallback(
+  email: string,
+  password: string,
+  deps: DesktopFallbackDeps,
+): Promise<DesktopFallbackOutcome> {
+  if (email.trim() === "" || password === "") {
+    return { kind: "failed", message: FILL_FIELDS_MESSAGE };
   }
 
-  return (
-    <section
-      aria-labelledby="first-run-bootstrap-title"
-      className="rounded-lg border border-dashed border-input p-4 text-left"
-    >
-      <h3 id="first-run-bootstrap-title" className="text-sm font-semibold text-foreground">
-        Première connexion sur ce poste&nbsp;?
-      </h3>
-      <p className="mt-1 text-sm text-muted-fg">
-        Une installation neuve possède une base locale vide&nbsp;: ce poste doit d&apos;abord
-        récupérer votre compte auprès du serveur central avant de pouvoir se connecter.
-        Saisissez vos identifiants dans le formulaire ci-dessus, puis lancez la
-        récupération.
-      </p>
+  // (1) Authentification centrale via le main Electron (IPC).
+  let result: SyncLoginResult;
+  try {
+    result = await deps.loginToSync(email, password);
+  } catch {
+    return { kind: "failed", message: BRIDGE_UNAVAILABLE_MESSAGE };
+  }
 
-      <button
-        type="button"
-        onClick={() => void handleBootstrap()}
-        disabled={phase === "submitting"}
-        aria-busy={phase === "submitting"}
-        className="mt-3 w-full rounded-lg border border-input bg-transparent px-4 py-2.5 text-sm font-medium text-foreground hover:bg-foreground/5 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-      >
-        {phase === "submitting" ? "Récupération en cours…" : "Récupérer mon compte"}
-      </button>
+  // (2) Décision pure : motifs d'échec mappés, warnings honnêtes, listes
+  //     jamais devinées.
+  const outcome = resolveBootstrapOutcome(result);
+  if (outcome.kind !== "ready") {
+    return { kind: "failed", message: outcome.message };
+  }
 
-      {feedback !== null && (
-        <div
-          role="status"
-          aria-live="polite"
-          className={
-            feedback.kind === "error"
-              ? "mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
-              : "mt-3 rounded-lg bg-primary/10 p-3 text-sm text-foreground"
-          }
-        >
-          {feedback.message}
-        </div>
-      )}
-    </section>
-  );
+  // (3) Bootstrap : **même origine** que la page (aucune URL externe n'est
+  //     acceptée de l'extérieur), jamais mis en cache, délai plafonné.
+  try {
+    const response = await deps.fetchImpl("/api/sync/bootstrap", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clinicIds: outcome.clinicIds }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
+    });
+    const verdict = interpretBootstrapStatus(response.status);
+    if (verdict.kind !== "done") {
+      return { kind: "failed", message: verdict.message };
+    }
+  } catch {
+    return { kind: "failed", message: BOOTSTRAP_UNREACHABLE_MESSAGE };
+  }
+
+  // (4) **Un seul** second essai de connexion local : c'est l'appelant (la
+  //     page) qui décide du redirectionnement, et cet essai ne redéclenche
+  //     jamais ce module (pas de boucle).
+  const retry = await deps.signIn(email, password);
+  if (retry.error !== undefined && retry.error !== null && retry.error !== "") {
+    return { kind: "retry-refused", message: RETRY_REFUSED_MESSAGE };
+  }
+  return { kind: "signed-in" };
 }
