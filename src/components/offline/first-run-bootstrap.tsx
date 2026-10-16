@@ -169,6 +169,11 @@ export type BootstrapOutcome =
 const SERVER_RESTART_WARNINGS: ReadonlySet<string> = new Set([
   "server-not-restartable",
   "restart-failed",
+  // Même signification : le serveur local n'a jamais été relancé avec le jeton,
+  // donc `POST /api/sync/bootstrap` renverra 409 — le remède est de redémarrer
+  // l'application, pas de « réessayer une fois la connexion effectuée ».
+  "env-unavailable",
+  "env-rebuild-failed",
 ]);
 
 /**
