@@ -2,12 +2,17 @@
 
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { FirstRunBootstrap } from "@/components/offline/first-run-bootstrap";
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Tâche P2 — « Première connexion » (desktop) : relecture des identifiants
+  // déjà saisis, jamais un second formulaire.
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -46,6 +51,7 @@ export default function LoginPage() {
           </label>
           <input
             id="email"
+            ref={emailRef}
             name="email"
             type="email"
             autoComplete="email"
@@ -61,6 +67,7 @@ export default function LoginPage() {
           </label>
           <input
             id="password"
+            ref={passwordRef}
             name="password"
             type="password"
             autoComplete="current-password"
@@ -97,6 +104,8 @@ export default function LoginPage() {
           S&apos;inscrire
         </a>
       </p>
+
+      <FirstRunBootstrap emailRef={emailRef} passwordRef={passwordRef} />
     </div>
   );
 }

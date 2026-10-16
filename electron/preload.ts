@@ -73,6 +73,12 @@ export type SyncTriggerResult = SyncCycleResult
  *    pas pu être appliqué (`env-unavailable`, `env-rebuild-failed`,
  *    `restart-failed`, `server-not-restartable`). **Jamais** `ok: true` sans au
  *    moins un serveur Next local joignable (garantie 7.1c).
+ *  - `clinicIds` : cabinets auxquels le compte est **réellement** rattaché
+ *    (tâche P1) — transmis par `POST /api/sync/token` sur `ok: true`, `[]`
+ *    quand aucun cabinet n'a été lu, `undefined` si le processus main n'a pas
+ *    transmis la liste (main plus ancien) : l'UI doit distinguer ces deux cas
+ *    plutôt que de deviner. Donnée non sensible — ni secret, ni jeton ; absent
+ *    (ou inutile) côté échec, dont l'union fermée `reason` reste inchangée.
  *
  * ⚠️ Le mot de passe **ne transite** que dans le message IPC `sync:login` :
  * il n'est jamais journalisé, ni persisté, côté main.
@@ -83,6 +89,12 @@ export interface SyncLoginResult {
   readonly message?: string
   readonly serverRestarted: boolean
   readonly warning?: string
+  /**
+   * Cabinets du compte (tâche P1) — renvoyé par le main sur `ok: true` :
+   * `[]` = aucun cabinet, `undefined` = liste non transmise (main plus
+   * ancien). Jamais présent côté échec, jamais de valeur déduite ici.
+   */
+  readonly clinicIds?: string[]
 }
 
 /**

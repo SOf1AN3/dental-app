@@ -89,13 +89,26 @@ export type CentralLoginFailureReason =
   | "local-server-down"
   | "restart-timeout";
 
-/** Résultat de `loginToSync(email, password)` (miroir de `SyncLoginResult`). */
+/**
+ * Résultat de `loginToSync(email, password)` (miroir de `SyncLoginResult`).
+ *
+ *  - `ok: false` : `reason` est l'**union fermée** (jamais de texte brut du
+ *    serveur central), `message` un texte court à afficher ;
+ *  - `warning` : avertissement non bloquant (`ok: true` mais env non appliqué,
+ *    `serverRestarted: false`) — même union de valeurs que le preload ;
+ *  - `clinicIds` : cabinets **réellement** rattachés au compte (tâche P1) —
+ *    `[]` = aucun cabinet, `undefined` = liste non transmise par un main plus
+ *    ancien (l'UI doit distinguer les deux, jamais deviner). Donnée non
+ *    sensible : ni secret, ni jeton. `ok: false` n'en porte jamais, l'union
+ *    fermée des `reason` reste inchangée.
+ */
 export interface SyncLoginResult {
   readonly ok: boolean;
   readonly reason?: CentralLoginFailureReason;
   readonly message?: string;
   readonly serverRestarted: boolean;
   readonly warning?: string;
+  readonly clinicIds?: string[];
 }
 
 /** Canaux utilisés par l'UI de synchronisation (sous-ensemble de la allow-list). */

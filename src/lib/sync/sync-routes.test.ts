@@ -19,6 +19,7 @@ import {
   type CentralAuthRepo,
   type CentralAuthUser,
   type DeviceTokenContext,
+  type IssueDeviceTokenResult,
 } from "./central-auth";
 import {
   MAX_PUSH_OPS,
@@ -361,9 +362,15 @@ describe("POST /api/sync/token", () => {
     const body = (await res.json()) as {
       token: string;
       trustExpiresAt: string;
+      clinicIds: string[];
     };
     expect(body.token).toMatch(/^[A-Za-z0-9_-]{20,}$/);
     expect(Number.isFinite(Date.parse(body.trustExpiresAt))).toBe(true);
+
+    // Tâche P1 : les cabinets du compte accompagnent le jeton (obstacle
+    // contractuel de l'amorçage) — strictement ceux de `clinic_membership`
+    // qui ont franchi la gate `no-membership`, **jamais** le corps de requête.
+    expect(body.clinicIds).toEqual(["c1"]);
 
     // Fenêtre calculée sur l'horloge SERVEUR : now + 30 j (tolérance 5 min).
     const expiry = Date.parse(body.trustExpiresAt);
@@ -383,6 +390,64 @@ describe("POST /api/sync/token", () => {
       successful: true,
     });
     expect(throttle.attempts[0].deniedReason).toBeUndefined();
+  });
+
+  it("200 : `clinicIds` ne vient JAMAIS du corps de la requête", async () => {
+    const { repo } = createTokenRepo({
+      memberships: { [USER_ID]: ["c1", "c2"] },
+    });
+    const handler = createSyncTokenHandler({
+      authRepo: repo,
+      findDeviceBinding: bindingLookup({ "device-1": USER_ID }),
+      ...memoryThrottle().deps,
+    });
+
+    // Tenter d'injecter des cabinets dans le corps ne peut rien changer : le
+    // schéma Zod les écarte et la réponse est bâtie sur `clinic_membership`.
+    const res = await handler(
+      postJson(
+        tokenBody({
+          clinicIds: ["cabinet-intrus"],
+          clinicId: "cabinet-intrus",
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { clinicIds: string[] };
+    expect(body.clinicIds).toEqual(["c1", "c2"]);
+  });
+
+  it("200 avec `clinicIds` vide pour un compte sans cabinet (`issue` injecté)", async () => {
+    const { repo, upserts } = createTokenRepo({
+      memberships: { [USER_ID]: [] },
+    });
+    const throttle = memoryThrottle();
+    const handler = createSyncTokenHandler({
+      authRepo: repo,
+      findDeviceBinding: bindingLookup(),
+      // Le central réel refuse un tel compte `403 no-membership` (couvert
+      // plus haut) : on isole ici la construction de la réponse, qui doit
+      // tolérer une liste **vide** sans planter — c'est le contrat que
+      // `loginToCentral` (Electron) consomme.
+      issue: async (): Promise<IssueDeviceTokenResult> => ({
+        ok: true,
+        token: "jeton-sans-cabinet-aaaaaaaaaaaaaaaa",
+        trustExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      }),
+      ...throttle.deps,
+    });
+
+    const res = await handler(postJson(tokenBody()));
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { clinicIds: string[] };
+    // Toujours un tableau (jamais `undefined`) : sans lecture de membership
+    // pendant l'émission, la route répond `[]`.
+    expect(body.clinicIds).toEqual([]);
+    // `issue` injecté : aucun `device` réel n'a été écrit.
+    expect(upserts).toHaveLength(0);
+    expect(throttle.attempts[0]).toMatchObject({ successful: true });
   });
 
   it("transmet au throttle le vrai email et la IP (x-forwarded-for)", async () => {

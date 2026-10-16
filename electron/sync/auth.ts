@@ -12,7 +12,10 @@
  *     l'env `SYNC_TOKEN` à jour (indispensable à la réservation de blocs de
  *     numéros, tâche 6.1c) ;
  *  4. l'enfant Next tire les données initiales (`POST /api/sync/bootstrap`),
- *     après quoi le poste fait son login **local** (bcrypt sur `user`).
+ *     après quoi le poste fait son login **local** (bcrypt sur `user`). Le
+ *     corps de cet amorçage porte les `clinicIds` renvoyés par l'échange
+ *     ci-dessous : c'est ce qui rend l'amorçage possible depuis un appareil
+ *     neuf, qui ne connaît encore **aucun** cabinet (tâche P1).
  *
  * Discipline sécurité (NON NÉGOCIABLE) :
  *  - **jamais** de journal ni d'erreur ne contient le mot de passe, le jeton,
@@ -113,7 +116,22 @@ export type CentralLoginFailureReason =
   | 'restart-timeout'
 
 export type LoginToCentralResult =
-  | { readonly ok: true; readonly trustExpiresAt: string }
+  | {
+      readonly ok: true
+      readonly trustExpiresAt: string
+      /**
+       * Cabinets auxquels le compte appartient **réellement** (`clinic_membership`
+       * côté central) — champ **toujours présent** sur un `200` (tâche P1) :
+       * `[]` = aucun cabinet, jamais `undefined`, jamais une valeur devinée
+       * côté poste. Nourrit `POST /api/sync/bootstrap` d'une installation
+       * neuve.
+       *
+       * Donnée **non sensible** : ni secret, ni jeton (ce dernier ne figure
+       * jamais dans ce résultat) ; aucun motif de l'union d'échecs n'est
+       * affecté (fermeture inchangée).
+       */
+      readonly clinicIds: string[]
+    }
   | {
       readonly ok: false
       readonly reason: CentralLoginFailureReason
@@ -164,10 +182,21 @@ const CENTRAL_REASONS: ReadonlySet<string> = new Set<CentralLoginFailureReason>(
 /* Schémas de réponse (Zod) — défense contre un corps central malformé         */
 /* -------------------------------------------------------------------------- */
 
-/** `200 { token, trustExpiresAt }` — miroir du contrat de `/api/sync/token`. */
+/**
+ * `200 { token, trustExpiresAt, clinicIds }` — miroir du contrat de
+ * `/api/sync/token` (tâche P1).
+ *
+ * `clinicIds` est **exigé** : un central qui l'omettrait produirait un corps
+ * malformé → échec fermé `central-error` (jamais un `undefined` propagé jusqu'au
+ * renderer). Le tableau peut être **vide** : c'est alors le signal explicite
+ * « aucun cabinet » (les comptes sans cabinet actif sont de toute façon refusés
+ * `403 no-membership` avant l'émission) — le poster doit tolérer ce `[]` sans
+ * planter.
+ */
 const tokenResponseSchema = z.object({
   token: z.string().min(1).max(4096),
   trustExpiresAt: z.iso.datetime(),
+  clinicIds: z.array(z.string().min(1)).max(1024),
 })
 
 /** Corps d'erreur central `{ error: "<raison>" }` (ignoré s'il diffère). */
@@ -315,7 +344,7 @@ export async function loginToCentral(
   if (response.status === 200) {
     const parsed = tokenResponseSchema.safeParse(body)
     if (!parsed.success) {
-      log.warn('[sync] réponse du serveur central inattendue (jeton ou expiration absent)')
+      log.warn('[sync] réponse du serveur central inattendue (jeton, expiration ou clinicIds absent)')
       return loginFailure('central-error')
     }
     try {
@@ -326,7 +355,14 @@ export async function loginToCentral(
       return loginFailure('storage-error')
     }
     log.info('[sync] jeton d’appareil acquis et persisté chiffré (valeur jamais journalisée)')
-    return { ok: true, trustExpiresAt: parsed.data.trustExpiresAt }
+    // `clinicIds` : ni secret ni jeton — seule la liste des cabinets du compte,
+    // nécessaire au POST `/api/sync/bootstrap` d'une installation neuve. Le
+    // jeton, lui, ne quitte jamais cette fonction (persisté chiffré ci-dessus).
+    return {
+      ok: true,
+      trustExpiresAt: parsed.data.trustExpiresAt,
+      clinicIds: parsed.data.clinicIds,
+    }
   }
 
   // (6) Refus — raison du corps si elle appartient à l'union fermée, sinon

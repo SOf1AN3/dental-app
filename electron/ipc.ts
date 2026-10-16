@@ -13,7 +13,11 @@ const APP_INFO_CHANNEL: DesktopChannel = 'app:info'
 const SYNC_STATUS_CHANNEL: DesktopChannel = 'sync:status'
 /** Canal « sync:trigger » — déclenche un cycle à la demande. */
 const SYNC_TRIGGER_CHANNEL: DesktopChannel = 'sync:trigger'
-/** Canal « sync:login » — échange email/mot de passe contre un jeton (tâche 7.1). */
+/**
+ * Canal « sync:login » — échange email/mot de passe contre un jeton
+ * d'appareil (tâche 7.1). Le `SyncLoginResult` propagé porte aussi les
+ * `clinicIds` du compte (tâche P1, ajoutés par `electron/sync/auth.ts`).
+ */
 const SYNC_LOGIN_CHANNEL: DesktopChannel = 'sync:login'
 
 /**
@@ -138,6 +142,9 @@ export function registerIpcHandlers(deps: IpcHandlerDeps = {}): void {
       }
     }
     // (2) Délégation à `main.ts` — le mot de passe vit le temps de cet appel.
+    //     Le `SyncLoginResult` est retourné **tel quel** : `clinicIds` (cabinets
+    //     du compte, tâche P1) fait partie du contrat et n'est ni dégradé, ni
+    //     complété, ni journalisé ici (jamais de valeur inventée côté IPC).
     try {
       return await onSyncLogin(parsed.data.email, parsed.data.password)
     } catch (error) {

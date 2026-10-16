@@ -322,7 +322,7 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
   // 2 — env reconstruit avec le jeton fraîchement persisté.
   if (rebuildNextEnv === null) {
     log.warn('[main] env de l’enfant Next indisponible : jeton acquis mais non transmis (aucun redémarrage)')
-    return { ok: true, serverRestarted: false, warning: 'env-unavailable' }
+    return { ok: true, clinicIds: auth.clinicIds, serverRestarted: false, warning: 'env-unavailable' }
   }
   let env: NodeJS.ProcessEnv
   try {
@@ -330,7 +330,7 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
   } catch (error) {
     // `redactSecrets` : le message peut reprendre un chemin ou une clé de config.
     log.warn(redactSecrets(`[main] reconstruction de l’env Next impossible : ${messageOf(error)}`))
-    return { ok: true, serverRestarted: false, warning: 'env-rebuild-failed' }
+    return { ok: true, clinicIds: auth.clinicIds, serverRestarted: false, warning: 'env-rebuild-failed' }
   }
 
   // 3 — redémarrage de l'enfant, COURSU contre `SYNC_LOGIN_RESTART_BUDGET_MS`
@@ -369,7 +369,7 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
         nextServer = restarted.handle
         if (restarted.restarted) {
           log.info('[main] serveur Next redémarré après réponse `restart-timeout` : env de connexion appliqué')
-          triggerFirstSyncCycle()
+          triggerFirstSyncCycle(auth.clinicIds)
           return
         }
         log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle (après timeout)')
@@ -378,7 +378,7 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
         void armLocalServerRescue(env, messageOf(error)).then((outcome) => {
           if (outcome === 'applied') {
             log.info('[main] relance de secours différée réussie : env de connexion appliqué')
-            triggerFirstSyncCycle()
+            triggerFirstSyncCycle(auth.clinicIds)
           } else if (outcome === 'down') {
             log.error('[main] AUCUN serveur local après le secours différé : l’application est sans API')
           } else {
@@ -401,19 +401,19 @@ async function handleSyncLogin(email: string, password: string): Promise<SyncLog
     //     croire à l'utilisateur que tout va bien. On tente donc **une** relance
     //     de secours avant de conclure, puis on n'annonce `ok: true` que si un
     //     serveur Next répond vraiment.
-    return finishAfterFailedRestart(env, raced.error)
+    return finishAfterFailedRestart(env, auth.clinicIds, raced.error)
   }
 
   const restarted = raced.value
   nextServer = restarted.handle
   if (!restarted.restarted) {
     log.warn('[main] env de connexion NON appliqué : serveur Next réutilisé hors de notre contrôle')
-    return { ok: true, serverRestarted: false, warning: 'server-not-restartable' }
+    return { ok: true, clinicIds: auth.clinicIds, serverRestarted: false, warning: 'server-not-restartable' }
   }
   log.info('[main] serveur Next redémarré avec le jeton d’appareil à jour')
 
   // 4 — runner : premier cycle immédiat (jamais bloquant pour l'UI).
-  return triggerFirstSyncCycle()
+  return triggerFirstSyncCycle(auth.clinicIds)
 }
 
 /**
@@ -493,6 +493,7 @@ function armLocalServerRescue(env: NodeJS.ProcessEnv, cause: string): Promise<Re
  */
 async function finishAfterFailedRestart(
   env: NodeJS.ProcessEnv,
+  clinicIds: string[],
   rawError: unknown,
 ): Promise<SyncLoginResult> {
   const cause = messageOf(rawError)
@@ -501,10 +502,10 @@ async function finishAfterFailedRestart(
   switch (outcome) {
     case 'applied':
       log.warn('[main] relance de secours du serveur local réussie : env de connexion appliqué')
-      return triggerFirstSyncCycle()
+      return triggerFirstSyncCycle(clinicIds)
     case 'not-applied':
       log.warn('[main] serveur local joignable mais env de connexion NON appliqué après la relance de secours')
-      return { ok: true, serverRestarted: false, warning: 'restart-failed' }
+      return { ok: true, clinicIds, serverRestarted: false, warning: 'restart-failed' }
     case 'down':
       log.error('[main] AUCUN serveur local après la relance de secours : application sans API')
       return {
@@ -517,14 +518,14 @@ async function finishAfterFailedRestart(
 }
 
 /** Runner : premier cycle immédiat (jamais bloquant pour l'UI). */
-function triggerFirstSyncCycle(): SyncLoginResult {
+function triggerFirstSyncCycle(clinicIds: string[]): SyncLoginResult {
   const runner = syncRunner
   if (runner !== null) {
     void runner.triggerNow().catch((error: unknown) => {
       log.warn(`[main] premier cycle après reconnexion impossible (${error instanceof Error ? error.name : 'unknown'})`)
     })
   }
-  return { ok: true, serverRestarted: true }
+  return { ok: true, clinicIds, serverRestarted: true }
 }
 
 function messageOf(error: unknown): string {

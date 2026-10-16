@@ -32,9 +32,10 @@ import {
  *    validé par Zod ;
  *  - `now` vient **TOUJOURS du serveur** — l'horloge client ne doit jamais
  *    décaler la fenêtre de confiance ;
- *  - `200 { token, trustExpiresAt }` ; sinon `400` (`invalid-request`,
- *    `invalid-trust-days`) / `401` (`invalid-credentials`) / `403`
- *    (`no-membership`, `device-bound-to-another-user`) / `429` (`throttled`).
+ *  - `200 { token, trustExpiresAt, clinicIds: string[] }` ; sinon `400`
+ *    (`invalid-request`, `invalid-trust-days`) / `401` (`invalid-credentials`)
+ *    / `403` (`no-membership`, `device-bound-to-another-user`) / `429`
+ *    (`throttled`).
  *
  * ## Limitation de débit (tâche 5.2d)
  *
@@ -71,6 +72,34 @@ import {
  *  faux rend toujours `401`, jamais un oracle « cet appareil appartient à
  *  quelqu'un ». Un `deviceId` inconnu, ou dont `user_id` est nul, est
  *  librement rattachable.
+ *
+ * ## `clinicIds` (tâche P1) — lever l'obstacle contractuel de l'amorçage
+ *
+ *  Une **installation neuve** ne connaît aucun `clinicId` : or
+ *  `POST /api/sync/bootstrap` (côté poste) exige un corps `{ clinicIds }`
+ *  pour appeler `POST /api/sync/pull` (côté central), et le jeton d'appareil
+ *  n'en porte pas. La réponse de succès porte donc la liste des cabinets
+ *  **auxquels l'utilisateur appartient réellement** :
+ *
+ *  - **Source unique** : `CentralAuthRepo.listUserClinicIds` → table
+ *    `clinic_membership` (`joined_at` non nul, ni le membership ni le cabinet
+ *    supprimés — critères de `src/lib/db/schema/tenant.ts`), **jamais** le
+ *    corps de la requête, **jamais** une valeur inventée ;
+ *  - **Lecture sans requête supplémentaire** : comme la garde
+ *    anti-détournement ci-dessus, la route **enveloppe** le repo remis à
+ *    `issueDeviceToken` pour retenir la liste que celui-ci lit déjà
+ *    ({@link captureClinicIds}). La liste renvoyée est donc **par
+ *    construction** celle qui a franchi la gate `no-membership` : elle ne peut
+ *    ni diverger, ni être re-lue (pas d'écart de coût de réponse selon le mot
+ *    de passe, pas d'oracle d'énumération supplémentaire) ;
+ *  - **`[]`** = aucune ligne de membership pertinente. Un compte réellement
+ *    sans cabinet est de toute façon refusé `403 no-membership` **avant**
+ *    l'émission : le tableau vide n'est servi que si `issue` est injecté
+ *    (tests) — `loginToCentral` (Electron) le tolère sans planter ;
+ *  - **Non sensible** : des identifiants de cabinets ne sont ni un secret ni
+ *    un jeton ; ils ne quittent le serveur qu'au porteur d'identifiants
+ *    valides, et **le jeton lui-même n'est jamais journalisé** (ci-dessous :
+ *    seul il apparaît dans la réponse, renvoyé une seule fois).
  */
 
 export const dynamic = "force-dynamic";
@@ -151,6 +180,36 @@ function guardDeviceBinding(
       await repo.upsertDeviceToken(input);
     },
   };
+}
+
+/**
+ * Enveloppe le repo d'une **capture** des cabinets lus pendant l'émission.
+ *
+ * `issueDeviceToken` appelle `listUserClinicIds` **une fois** (après la
+ * vérification du mot de passe) et c'est précisément cette liste qui doit
+ * franchir la gate `no-membership` : la retenir ici garantit que le `clinicIds`
+ * du `200` est **toujours** celui qui a autorisé le jeton — sans requête ni
+ * calcul supplémentaire, et sans jamais relire la base avec des critères
+ * susceptibles de diverger.
+ *
+ * Retourne `null` tant qu'aucune lecture n'a eu lieu (`issue` injecté par un
+ * test, échec avant l'étape d'appartenance) : la réponse porte alors `[]`,
+ * jamais `undefined`.
+ */
+function captureClinicIds(repo: CentralAuthRepo): {
+  wrapped: CentralAuthRepo;
+  captured: () => string[] | null;
+} {
+  let seen: string[] | null = null;
+  const wrapped: CentralAuthRepo = {
+    ...repo,
+    async listUserClinicIds(userId: string): Promise<string[]> {
+      const ids = await repo.listUserClinicIds(userId);
+      seen = ids;
+      return ids;
+    },
+  };
+  return { wrapped, captured: (): string[] | null => seen };
 }
 
 /** Repo par défaut (Drizzle), construit paresseusement (chemin de production). */
@@ -279,6 +338,10 @@ export function createSyncTokenHandler(
     const findDeviceBinding =
       overrides.findDeviceBinding ?? findDeviceBindingDb;
     const issue = overrides.issue ?? issueDeviceToken;
+    // Capture des cabinets **pendant** l'émission (voir `captureClinicIds`) :
+    // aucune requête supplémentaire, liste strictement identique à celle qui a
+    // franchi la gate `no-membership`.
+    const clinicCapture = captureClinicIds(authRepo);
     const checkThrottle =
       overrides.checkThrottle ??
       ((params: TokenThrottleCheckParams) =>
@@ -349,7 +412,7 @@ export function createSyncTokenHandler(
           trustDays: body.trustDays ?? DEFAULT_TRUST_DAYS,
           now,
         },
-        guardDeviceBinding(authRepo, findDeviceBinding),
+        guardDeviceBinding(clinicCapture.wrapped, findDeviceBinding),
       );
     } catch (error) {
       if (error instanceof DeviceBoundError) {
@@ -426,7 +489,8 @@ export function createSyncTokenHandler(
 
     // Succès : la ligne `successful = true` réinitialise le compteur d'échecs
     // du compte (règle alignée sur `auth.ts`). Le jeton en clair n'apparaît
-    // qu'ici, renvoyé **une seule fois**.
+    // qu'ici, renvoyé **une seule fois** — `clinicIds` (non sensible) ouvre
+    // l'amorçage d'une installation neuve, `[]` si la capture n'a rien lu.
     await safeRecordAttempt(recordAttempt, {
       email: body.email,
       ipAddress,
@@ -437,6 +501,7 @@ export function createSyncTokenHandler(
     return NextResponse.json({
       token: result.token,
       trustExpiresAt: result.trustExpiresAt.toISOString(),
+      clinicIds: clinicCapture.captured() ?? [],
     });
   };
 }
